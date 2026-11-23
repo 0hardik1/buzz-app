@@ -31,6 +31,8 @@ const UNAVAILABLE = '[hidden], [inert], [aria-hidden="true"]';
 const TYPING =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
 const LINE = 64;
+/** A menu or a choice list (an open Select): its keys move between options. */
+export const POPUP_LIST = '[role="menu"], [role="listbox"]';
 export const SIDEBAR = 'aside[aria-label="Sidebar"]';
 /** What j and k can walk to, fields included (see `FIELD_SELECTED`). */
 const ITEM =
@@ -146,7 +148,7 @@ function scroller() {
  */
 function resume(parts = false) {
   const origin = focused();
-  if (origin?.closest(`${MODAL}, [role="menu"], [role="dialog"], ${SIDEBAR}`))
+  if (origin?.closest(`${MODAL}, ${POPUP_LIST}, [role="dialog"], ${SIDEBAR}`))
     return origin;
   const row = origin?.closest<HTMLElement>(ROW) ?? currentCursor();
   if (!row) return origin;
@@ -200,7 +202,7 @@ export function step(down: boolean, settled = false) {
  * own moves.
  */
 function walkable(origin: HTMLElement | undefined) {
-  if (!origin || origin.closest(`${ROW}, [role="menu"]`)) return;
+  if (!origin || origin.closest(`${ROW}, ${POPUP_LIST}`)) return;
   const modal = topModal();
   const pane = modal?.contains(origin) ? dialogPane(modal, origin) : undefined;
   const root =
@@ -322,13 +324,15 @@ function besideNeighbor(row: HTMLElement, down: boolean) {
  */
 function edge(down: boolean) {
   const origin = resume();
-  const menu = origin?.closest<HTMLElement>('[role="menu"]');
+  const menu = origin?.closest<HTMLElement>(POPUP_LIST);
   if (menu) {
     const items = [
-      ...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
+      ...menu.querySelectorAll<HTMLElement>(
+        '[role^="menuitem"], [role="option"]',
+      ),
     ].filter(
       (item) =>
-        item.closest('[role="menu"]') === menu &&
+        item.closest(POPUP_LIST) === menu &&
         item.getAttribute("aria-disabled") !== "true",
     );
     (down ? items.at(-1) : items[0])?.focus();

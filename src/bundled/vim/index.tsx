@@ -32,6 +32,7 @@ import {
   top,
   focused,
   typing,
+  POPUP_LIST,
   SIDEBAR,
   editField,
   selectedField,
@@ -239,7 +240,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         menuMove &&
         !pending.snapshot() &&
         !typing() &&
-        origin?.closest('[role="menu"]') &&
+        origin?.closest(POPUP_LIST) &&
         !origin.closest(`[${WHICH_KEY}]`)
       ) {
         menuMove();

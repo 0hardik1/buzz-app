@@ -583,6 +583,53 @@ test("j, k, gg, G and Ctrl-d walk Settings without opening its choices", async (
 
 // A thread opens beside the conversation in a side panel with its own
 // message box and list, and its tab's own Escape; that handoff needs a browser.
+// An open choice list (a Select's popup) is portalled outside its dialog and
+// takes printable keys for typeahead, so moving in it needs a browser.
+test("Enter opens a choice, j and k move in it, and Escape closes it to keep walking", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await enableVimKeys(page);
+  await openSettings(page);
+  await selectSettingsSection(page, "Notifications");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const choice = dialog.getByRole("combobox").first();
+  const value = await choice.textContent();
+  await choice.focus();
+  await page.keyboard.press("Enter");
+  const list = page.getByRole("listbox");
+  await expect(list).toBeVisible();
+  const option = () =>
+    page.evaluate(() =>
+      document.activeElement?.getAttribute("role") === "option"
+        ? document.activeElement.textContent
+        : null,
+    );
+  await expect.poll(option).not.toBeNull();
+  const first = await option();
+  await page.keyboard.press("j");
+  await expect.poll(option).not.toBe(first);
+  await page.keyboard.press("k");
+  await expect.poll(option).toBe(first);
+  await page.keyboard.press("Shift+G");
+  await expect
+    .poll(option)
+    .toBe(await list.getByRole("option").last().textContent());
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await expect
+    .poll(option)
+    .toBe(await list.getByRole("option").first().textContent());
+  // Escape closes only the list, unchanged; the dialog keeps walking.
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(choice).toBeFocused();
+  await expect(choice).toHaveText(value ?? "");
+  await page.keyboard.press("j");
+  await expect(dialog.getByRole("combobox").nth(1)).toBeFocused();
+});
+
 // Settings is a dialog with panes; fields there take keys or text.
 test("Ctrl-h and Ctrl-l move between Settings' panes, and j and k select its fields without typing", async ({
   page,

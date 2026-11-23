@@ -1052,7 +1052,9 @@ Quitting Buzz also turns it off.
   dialogs: `j`/`k` go to the next or previous row or control in the same
   column, passing over choice menus without opening them, and `h`/`l` reach
   controls on the same line. `j`/`k` select a text field without typing in
-  it; `i` or Enter edits it and Escape selects it again. `Ctrl-h`/`Ctrl-l`
+  it; `i` or Enter edits it and Escape selects it again. Enter opens a choice
+  such as Remind me's When, `j`/`k` move through its list, Enter picks and
+  Escape closes it unchanged. `Ctrl-h`/`Ctrl-l`
   move between panes, in Settings too: its section list, the section and a
   plugin's details. `gg`/`G` go to the first or last item, or
   the oldest loaded or newest message, and `Ctrl-d`/`Ctrl-u` move half a page.

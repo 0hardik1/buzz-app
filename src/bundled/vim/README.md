@@ -96,12 +96,17 @@ In the sidebar, `j` and `k` reach Activity, section headings and
 conversations. Enter opens a conversation or collapses a section, and Escape
 returns to the selected message.
 
-## Menus
+## Menus and choices
 
 Every menu shows a key beside each item; press it to run the item. `j`, `k`,
 `h`, `l` and `g` are never an item's key: `j` and `k` move, `h` and `l` close
 or open a submenu, and `gg` / `G` reach the first and last item. Escape closes
 the menu.
+
+A choice, such as "When" in Remind me, is a stop like any other control. Press
+Enter to open its list, `j`, `k`, `gg` and `G` to move through it, and Enter
+to pick. Escape closes the list without changing the choice, and `j` and `k`
+carry on through the rest of the dialog.
 
 ## Leader keys
 
