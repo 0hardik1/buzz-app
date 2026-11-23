@@ -214,10 +214,10 @@ mod platform {
     }
 
     fn stop_capture(engine: &AVAudioEngine) {
-        let _ = exception::catch(|| unsafe {
+        let _ = exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
             engine.inputNode().removeTapOnBus(0);
             engine.stop();
-        });
+        }));
     }
 
     fn restart_capture(token: u64, restart: u64) {

@@ -36,7 +36,7 @@ type Attempt = {
   stopAccess?: () => void;
   stopAudioSettings?: () => void;
   /** Resolves to this call's hold on the OS input mute, if it got one. */
-  inputMute?: Promise<number | null>;
+  inputMute?: Promise<number | null> | undefined;
   sender: ReturnType<typeof createPcmSender>;
 };
 const idle: HuddleSnapshot = { phase: "idle", muted: false, participants: [] };
