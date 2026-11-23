@@ -92,13 +92,14 @@ test("Linux shards and macOS recording discover every CI functional test/project
     /^ {8}run: .+ -- (\.\/bin\/pnpm test:browser:ci .+)$/m,
   )?.[1];
   assert.ok(command, "functional invocation must exist");
-  const discover = async (args) => {
+  const discover = async (args, nativeMode = "all") => {
     const { stdout } = await promisify(execFile)(
       "pnpm",
       ["--silent", ...args, "--list", "--reporter=json"],
       {
         cwd: fileURLToPath(new URL("../../", import.meta.url)),
         encoding: "utf8",
+        env: { ...process.env, BUZZ_BROWSER_NATIVE_TESTS: nativeMode },
         timeout: 180_000,
         maxBuffer: 16 * 1024 * 1024,
       },
@@ -132,6 +133,12 @@ test("Linux shards and macOS recording discover every CI functional test/project
   ]);
   assert.ok(expected.length > 0);
   const actual = [];
+  const { browser: ordinary, browser_native: native } = parse(workflow).jobs;
+  assert.equal(ordinary.needs, undefined);
+  assert.equal(ordinary.env.BUZZ_BROWSER_FIXTURE_DIR, undefined);
+  assert.equal(ordinary.env.BUZZ_BROWSER_NATIVE_TESTS, "exclude");
+  assert.deepEqual(native.needs, ["browser_fixture"]);
+  assert.equal(native.env.BUZZ_BROWSER_NATIVE_TESTS, "only");
   // Node owns the bounded scheduling and subtest failure reporting.
   await Promise.all(
     browserJobs().map(({ engine, shard, shards }) =>
@@ -143,6 +150,7 @@ test("Linux shards and macOS recording discover every CI functional test/project
           .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards);
         const selected = await discover(
           expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/),
+          ordinary.env.BUZZ_BROWSER_NATIVE_TESTS,
         );
         assert.ok(selected.length > 0, `${engine}/${shard} must select tests`);
         assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
@@ -151,6 +159,24 @@ test("Linux shards and macOS recording discover every CI functional test/project
       }),
     ),
   );
+  const nativeCommand = native.steps
+    .find((step) => step.name === "Functional journeys")
+    .run.match(/ -- (\.\/bin\/pnpm test:browser:ci .+)$/)?.[1];
+  assert.ok(nativeCommand, "native invocation must exist");
+  assert.deepEqual(native.strategy.matrix.engine, ["chromium", "webkit"]);
+  for (const engine of native.strategy.matrix.engine) {
+    const selected = await discover(
+      nativeCommand
+        .replaceAll(/\$\{\{ matrix\.engine \}\}/g, engine)
+        .replace(/^\.\/bin\/pnpm /, "")
+        .split(/\s+/),
+      native.env.BUZZ_BROWSER_NATIVE_TESTS,
+    );
+    assert.ok(selected.length > 0, `${engine} native must select tests`);
+    assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
+    actual.push(...selected);
+    t.diagnostic(`${engine}: ${selected.length} native tests`);
+  }
   const recording = parse(workflow).jobs.media_recorder.steps.find(
     (step) => step.name === "Recording journeys",
   );
@@ -303,7 +329,7 @@ test("required gate executes its real shell and rejects every unsuccessful lane"
   assert.doesNotMatch(required, /^ {8}if:/m);
   assert.match(
     required,
-    /^ {4}needs: \[javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, media_recorder, agent_protection\]$/m,
+    /^ {4}needs: \[javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, browser_native, media_recorder, agent_protection\]$/m,
   );
   assert.doesNotMatch(required, /continue-on-error/);
   const lanes = [
@@ -314,6 +340,7 @@ test("required gate executes its real shell and rejects every unsuccessful lane"
     "PERF_SMOKE",
     "FIXTURE",
     "BROWSER",
+    "BROWSER_NATIVE",
     "MEDIA_RECORDER",
     "AGENT_PROTECTION",
   ];

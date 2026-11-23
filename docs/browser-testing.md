@@ -84,10 +84,16 @@ plain `--repeat-each` doesn't repeat them.
 
 CI runs one serial measurement job, the functional journeys sharded across
 Linux runners per engine, and the `@media-recorder` WebKit cases on macOS.
-Functional journeys use three workers on eight-core PR runners and two on
+Ordinary functional journeys use three workers on eight-core PR runners and two on
 standard runners. Measurements remain serial. To reproduce a denser functional
 run locally, use `BUZZ_BROWSER_WORKERS=3 bin/pnpm test:browser:ci --project chromium --no-deps`
 (or `--project webkit`).
+Ordinary Linux shards start immediately. Native-dependent files run separately
+in each engine after the native fixture is built and verified for the checked-out
+revision. `playwright.ci.config.mjs` classifies these files;
+`BUZZ_BROWSER_NATIVE_TESTS=only` or `exclude` selects either partition (default:
+`all`). Ordinary discovery rejects imports of `native-fixture.mjs`, including
+transitive imports, so new native consumers must join that classification.
 `CI required` fails if any of them fails, is skipped or is cancelled. An
 integration test checks that the shards cover every functional test exactly
 once, so update it with the matrix. For slow-test runs, see
