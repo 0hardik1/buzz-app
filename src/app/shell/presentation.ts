@@ -60,6 +60,45 @@ const bundledIcons = new Map<string, typeof BrowserIcon>([
   ["buzz.workflows/workflows", LightningIcon],
   ["buzz.relay-notes/notes", NoteIcon],
 ]);
+/** The plugins pinned to the sidebar's Plugins card, in the person's order.
+ * Before they ever choose, the built-in plugins' pages are the pins, in
+ * navigation order; undefined while it isn't known which plugins are built in. */
+export function resolvePluginPins(
+  saved: readonly string[] | undefined,
+  pages: readonly RegisteredPage[],
+  builtIn: ((pluginId: string) => boolean) | undefined,
+): readonly string[] | undefined {
+  if (saved) return saved;
+  if (!builtIn) return undefined;
+  return [
+    ...new Set(
+      orderPages(pages)
+        .filter((page) => builtIn(page.pluginId))
+        .map((page) => page.pluginId),
+    ),
+  ];
+}
+
+/** The card's rows: pinned plugins' pages in pin order, then the open page
+ * while it isn't pinned, so the open destination always shows. Without pins,
+ * every page. */
+export function pinnedPages(
+  pages: readonly RegisteredPage[],
+  pins: readonly string[] | undefined,
+  selected: string,
+) {
+  const ordered = orderPages(pages);
+  if (!pins) return ordered;
+  const rank = new Map(pins.map((id, index) => [id, index]));
+  const pinned = ordered
+    .filter((page) => rank.has(page.pluginId))
+    .sort((a, b) => (rank.get(a.pluginId) ?? 0) - (rank.get(b.pluginId) ?? 0));
+  const open = ordered.find(
+    (page) => page.key === selected && !rank.has(page.pluginId),
+  );
+  return open ? [...pinned, open] : pinned;
+}
+
 /** Resolve host navigation policy once, independently of icons and registrations. */
 export function pagePlacement(page: RegisteredPage) {
   if (!page.primary) return undefined;

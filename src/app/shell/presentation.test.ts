@@ -11,6 +11,8 @@ import {
   pagePlacement,
   orderPages,
   pagePresentation,
+  pinnedPages,
+  resolvePluginPins,
 } from "./presentation";
 
 function page(key: string, title: string, icon?: string): RegisteredPage {
@@ -226,4 +228,47 @@ test("unlisted conversation pages keep Messages without adding a navigation row"
     navigationOwner([{ ...messages, primary: true }, taskPage], taskPage.key),
   ).toBe(messages.key);
   expect(navigationOwner([taskPage], taskPage.key)).toBe(taskPage.key);
+});
+
+describe("plugin pins", () => {
+  const reminders = page("buzz.reminders/reminders", "Reminders");
+  const notes = page("fixture.notes/notes", "Notes");
+  const pages = [projects, notes, reminders, inbox];
+  const builtIn = (id: string) => id.startsWith("buzz.");
+
+  test("before any choice, built-in plugins are pinned in navigation order", () => {
+    expect(resolvePluginPins(undefined, pages, builtIn)).toEqual([
+      "buzz.inbox",
+      "buzz.reminders",
+    ]);
+  });
+
+  test("a saved choice wins, even an empty one", () => {
+    expect(resolvePluginPins(["fixture.notes"], pages, builtIn)).toEqual([
+      "fixture.notes",
+    ]);
+    expect(resolvePluginPins([], pages, builtIn)).toEqual([]);
+  });
+
+  test("unknown built-ins leave pins unresolved", () => {
+    expect(resolvePluginPins(undefined, pages, undefined)).toBeUndefined();
+  });
+
+  test("the card lists pinned pages in pin order and skips missing plugins", () => {
+    expect(
+      pinnedPages(pages, ["fixture.notes", "gone.plugin", "buzz.inbox"], ""),
+    ).toEqual([notes, inbox]);
+  });
+
+  test("the open page shows after the pins while it isn't pinned", () => {
+    expect(pinnedPages(pages, ["buzz.inbox"], projects.key)).toEqual([
+      inbox,
+      projects,
+    ]);
+    expect(pinnedPages(pages, ["buzz.inbox"], inbox.key)).toEqual([inbox]);
+  });
+
+  test("without pins, the card lists every page", () => {
+    expect(pinnedPages(pages, undefined, "")).toEqual(orderPages(pages));
+  });
 });
