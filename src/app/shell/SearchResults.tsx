@@ -4,6 +4,7 @@ import {
   useNamesRevision,
 } from "../../features/identity-names/react";
 import { npubEncode } from "nostr-tools/nip19";
+import { publicKeyLabels } from "../../shared/identity/public-key";
 import {
   type ReactNode,
   useEffect,
@@ -184,6 +185,11 @@ const noMembers: readonly string[] = [];
  * neither is a result. */
 const isSearchAction = (key: string) =>
   key === "more-messages" || key === "ask";
+
+/** The viewer is in this conversation now: a saved row or a guest's read-only
+ * one counts; a public channel read after leaving does not. */
+const joined = (channel: ChannelSummary) =>
+  !channel.readOnly || !!channel.cached || channel.viewerRole === "guest";
 
 function useDelayedSearch(pending: boolean) {
   const [slow, setSlow] = useState(false);
@@ -1013,22 +1019,39 @@ export function SearchResults({
               Number(members.includes(right)) - Number(members.includes(left)),
           )
           .slice(0, 12)
-          .map(({ pubkey, profile, label, verified }) => {
+          .map(({ pubkey, profile, label, verified }) => ({
+            pubkey,
+            profile,
+            label,
+            // The name the label is not: a verified person's other verified
+            // name, else a handle that differs from the label.
+            name: verified
+              ? otherVerifiedName(verifiedLabel(verified, preference), verified)
+              : profile.username && profile.username !== label
+                ? `@${profile.username}`
+                : undefined,
+          }))
+          .map(({ pubkey, profile, label, name }, _, rows) => {
             const agent = selectableAgents.get(pubkey);
             const isAgent = !!agent || !!profile.isAgent;
+            // Rows that read alike name different people: a key label tells
+            // them apart, as in the recipient picker.
+            const alike = rows.filter(
+              (row) => row.label === label && row.name === name,
+            );
+            const detail = [
+              name,
+              alike.length > 1 &&
+                publicKeyLabels(alike.map((row) => row.pubkey)).get(
+                  pubkey.toLowerCase(),
+                ),
+            ]
+              .filter(Boolean)
+              .join(" · ");
             return {
               key: `author:${pubkey}`,
               label,
-              detail: [
-                verified &&
-                  otherVerifiedName(
-                    verifiedLabel(verified, preference),
-                    verified,
-                  ),
-                pubkey.slice(0, 12),
-              ]
-                .filter(Boolean)
-                .join(" · "),
+              ...(detail ? { detail } : {}),
               icon: ChatCircleIcon,
               avatar: {
                 src: avatarMedia(
@@ -1641,11 +1664,7 @@ export function SearchResults({
   const suggestions = channels
     .filter(
       (channel) =>
-        (!channel.readOnly ||
-          channel.cached ||
-          channel.viewerRole === "guest") &&
-        !channel.archived &&
-        !sidebarHidden(channel),
+        joined(channel) && !channel.archived && !sidebarHidden(channel),
     )
     .sort(
       (a, b) =>
@@ -1858,11 +1877,20 @@ export function SearchResults({
           channel?.channelType === "dm"
             ? `Direct message: ${whereOf(message.channelId)}`
             : whereOf(message.channelId),
-        author: nameOf(
-          message.workflowOwnerId ?? message.authorId,
-          message.channelId,
-        ),
+        // As the row shows it: a workflow's output isn't its owner's own.
+        author: message.workflowOwnerId
+          ? workflowLabel(nameOf(message.workflowOwnerId, message.channelId))
+          : nameOf(message.authorId, message.channelId),
         mine: message.authorId === session.viewer,
+        // As message rows decide: whoever owns the agent, its profile or
+        // envelope says so; the viewer's own agents are known here too.
+        // Workflow output is automation too, not its owner's own message.
+        agent:
+          !!message.agentEnvelope ||
+          !!message.workflowOwnerId ||
+          !!profiles.get(message.authorId)?.isAgent ||
+          knownAgents.has(message.authorId),
+        member: !!channel && joined(channel),
       };
     },
     held: movedFor === searchKey,

@@ -54,6 +54,7 @@ import {
   conversationFolder,
   conversationKey,
   existingFolder,
+  startingFolder,
 } from "../../features/agents/conversation-folders";
 import type {
   Agent,
@@ -73,7 +74,11 @@ import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile, relayKeyOf } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { project, readCanvas } from "../../features/agent-harness/project";
+import {
+  project,
+  readCanvas,
+  worksElsewhere,
+} from "../../features/agent-harness/project";
 import {
   referencedFolders,
   referencedSkills,
@@ -173,6 +178,7 @@ type Request = {
   event?: EventData;
   /** Publish/activity root; unlike toolRoot, retained in DMs. */
   replyRoot?: string;
+  sourceRoot?: string;
   agent: AgentHandle;
   settings: Config;
   conversation: Conversation;
@@ -187,9 +193,10 @@ type Request = {
   team: string;
   session?: Delivery["session"];
   sessionContext?: string;
+  invocationContext?: string;
   /** The Solo chat's workspace Canvas section, if it has one. */
   project?: string;
-  /** `project` for a turn that works where `elsewhere` says. */
+  /** `project` for a turn that works where `worksElsewhere` says. */
   projectAt?: (elsewhere: boolean) => string | undefined;
   canvas?: Project;
   solo?: boolean;
@@ -498,6 +505,7 @@ function noteOf(request: Request) {
     ) ?? [];
   const notes = [
     request.sessionContext,
+    request.invocationContext,
     request.resumed ? RESUMED_PROMPT : undefined,
     ...request.notes,
     turnNote(
@@ -627,6 +635,22 @@ export class CodexRuntime {
       conversationKey(channelId, root),
     );
   }
+  /** `folder`, for a conversation's thread starting, which records that one
+   * without a folder starts in the workspace. */
+  private startFolder(
+    scope: string,
+    agent: AgentKey,
+    channelId: string,
+    root?: string,
+  ) {
+    if (this.target) return undefined;
+    return startingFolder(
+      this.storage,
+      scope,
+      agent,
+      conversationKey(channelId, root),
+    );
+  }
   /** Where a conversation's thread runs: the folder it was given, which must
    * still exist, with the agent's workspace as `home`; or else that
    * workspace. Both absolute. */
@@ -639,7 +663,12 @@ export class CodexRuntime {
     const assigned =
       settings.scope === "community"
         ? undefined
-        : this.folder(scope, agent, conversation.channelId, conversation.root);
+        : await this.startFolder(
+            scope,
+            agent,
+            conversation.channelId,
+            conversation.root,
+          );
     const workspace = await this.workspace(settings.workspace);
     if (!assigned) return { cwd: workspace };
     return {
@@ -788,7 +817,7 @@ export class CodexRuntime {
   });
   private controlKey(agent: Agent, place: SessionPlace) {
     return scopedKey(
-      this.resolveConfig(agent.config).scope,
+      place.isolated ? "thread" : this.resolveConfig(agent.config).scope,
       place.channelId,
       place.root,
     );
@@ -958,7 +987,10 @@ export class CodexRuntime {
           : undefined;
       const server = this.open(this.handle(agent.key));
       const rpc = await server.opening;
-      const settings = this.resolveConfig(agent.config);
+      const configured = this.resolveConfig(agent.config);
+      const settings = place.isolated
+        ? { ...configured, scope: "thread" as const }
+        : configured;
       const conversation = {
         channelId: place.channelId,
         ...(settings.scope === "channel" || !place.root
@@ -985,7 +1017,7 @@ export class CodexRuntime {
         {},
         undefined,
         home,
-        sessionPlace(conversation),
+        conversation,
       );
       const { bridge } = prepared;
       let { params } = prepared;
@@ -1746,8 +1778,9 @@ export class CodexRuntime {
     // memory versions and search; v14 splits canvas into canvas_get and
     // canvas_set; v15 removes message keywords; v16 splits channel and
     // channels into the channel_* tools; v17 split members into the
-    // member_* tools; v18 adds search and removes read's q.
-    return `buzz.codex.sessions.v18:${scope}:${agent}${sessionKey ? `:session:${sessionKey}` : ""}`;
+    // member_* tools; v18 adds search and removes read's q; v19 replaces
+    // solo_workspace_list with workspace_list and adds channel_move.
+    return `buzz.codex.sessions.v19:${scope}:${agent}${sessionKey ? `:session:${sessionKey}` : ""}`;
   }
   private save(request: Request, entry: Entry, key: string, saved: Saved) {
     // Reinserted so the bounded set keeps the most recently used bindings.
@@ -2001,7 +2034,7 @@ export class CodexRuntime {
                 .filter(Boolean)
                 .join("\n\n")
             : "";
-        const voiceInstructions = (updates?: string) =>
+        const voiceInstructions = (updates?: string | null) =>
           `${contextText(agent, settings, request.team, memory, this.repositories(reads.scope), updates)}\nFor every spoken request, apply the room's current source policy below, replacing policies retained from other conversations.\n${policy()}\nVoice work acts for owner ${agent.owner}. Buzz tools default to room ${channelId} at top level. This is the room's existing conversation. A turn that starts with <realtime_delegation> is a spoken request: the voice model speaks only your final answer, so put the result there in a few plain spoken sentences, not in a send. When you delegate, say only a short acknowledgement, then wait: never state a fact the delegated work has not returned yet.`;
         loaded = await this.loadThread(
           request,
@@ -2012,9 +2045,10 @@ export class CodexRuntime {
           rpc,
           voiceInstructions(),
         );
-        // Realtime start adds these instructions again, so they carry the
-        // same section updates as the injected message.
-        const instructions = voiceInstructions(loaded.updates);
+        // Realtime start has a size limit and adds its instructions as a
+        // later developer message, so they leave the section updates to the
+        // injected message, which the thread keeps.
+        const instructions = voiceInstructions(null);
         // A resumed thread keeps its first developer message, not resume's.
         if (!loaded.fresh)
           await rpc.request("thread/inject_items", {
@@ -2023,7 +2057,12 @@ export class CodexRuntime {
               {
                 type: "message",
                 role: "developer",
-                content: [{ type: "input_text", text: instructions }],
+                content: [
+                  {
+                    type: "input_text",
+                    text: voiceInstructions(loaded.updates),
+                  },
+                ],
               },
             ],
           });
@@ -2223,8 +2262,8 @@ export class CodexRuntime {
     if (!reads) throw new Error("Connect to the agent's community first");
     const channelId = delivery.channelId;
     if (!channelId) throw new Error("The event has no unambiguous channel");
-    const settings = this.resolveConfig(delivery.config);
-    if (settings.scope === "community" && !reserved)
+    const configuredSettings = this.resolveConfig(delivery.config);
+    if (configuredSettings.scope === "community" && !reserved)
       return this.controls.admit(
         `${agent.key}/${scopedKey("community", COMMUNITY_SESSION)}`,
         delivery,
@@ -2250,13 +2289,17 @@ export class CodexRuntime {
     // A community session works in the agent's workspace, as
     // `conversationPlace` has it, whatever folder the chat kept.
     const canvasProjectOf = (
-      elsewhere = settings.scope !== "community" &&
-        // A Solo chat is one conversation, with no thread root.
-        Boolean(this.folder(reads.scope, agent.key, channelId)),
+      elsewhere = worksElsewhere(
+        configuredSettings.scope === "community"
+          ? undefined
+          : // A Solo chat is one conversation, with no thread root.
+            this.folder(reads.scope, agent.key, channelId),
+        agent.promptSections?.(channelId),
+      ),
     ) => canvasRead && project(canvasRead.text, elsewhere);
     const projectOf = (elsewhere?: boolean) =>
       [
-        settings.scope === "community"
+        configuredSettings.scope === "community"
           ? undefined
           : canvasProjectOf(elsewhere)?.section,
         folders.section,
@@ -2269,8 +2312,38 @@ export class CodexRuntime {
     // A stop during the reads deleted this agent's entry; recreating it would
     // reopen the agent.
     delivery.signal.throwIfAborted();
-    const toolRoot = channel?.dm || topLevel ? undefined : rootOf(event);
-    const root = settings.scope === "channel" ? undefined : toolRoot;
+    const route =
+      !channel?.dm && !topLevel
+        ? await delivery.routeConversation?.(
+            {
+              source: {
+                channelId,
+                ...(wake?.root
+                  ? { root: wake.root }
+                  : !wake
+                    ? { root: rootOf(event) }
+                    : {}),
+              },
+              conversation: {
+                channelId,
+                ...(configuredSettings.scope === "community"
+                  ? { community: true }
+                  : configuredSettings.scope === "thread"
+                    ? { root: rootOf(event) }
+                    : {}),
+              },
+            },
+            delivery.signal,
+          )
+        : undefined;
+    const settings =
+      route && configuredSettings.scope !== "thread"
+        ? { ...configuredSettings, scope: "thread" as const }
+        : configuredSettings;
+    const toolRoot =
+      channel?.dm || topLevel ? undefined : (route?.parent ?? rootOf(event));
+    const root =
+      route?.parent ?? (settings.scope === "channel" ? undefined : toolRoot);
     delivery.signal.throwIfAborted();
     const conversationKey = scopedKey(settings.scope, channelId, root);
     await rememberCommunitySource(
@@ -2279,7 +2352,7 @@ export class CodexRuntime {
       settings.scope === "community" ? COMMUNITY_SESSION : channelId,
       channelId,
     );
-    const sourceRoot = wake ? wake.root : rootOf(event);
+    const sourceRoot = route?.parent ?? (wake ? wake.root : rootOf(event));
     const admission = (deferred: boolean) =>
       delivery.prepareSession?.(
         {
@@ -2330,6 +2403,7 @@ export class CodexRuntime {
             : lifetime;
           await runtime.run({
             ...delivery,
+            routeConversation: async () => route,
             ...(admitted
               ? { session: admitted.session, sessionContext: admitted.context }
               : {}),
@@ -2360,7 +2434,9 @@ export class CodexRuntime {
       scope: reads.scope,
       ...(wake ? { current: delivery.current } : {}),
       event,
-      ...(!topLevel ? { replyRoot: rootOf(event) } : {}),
+      ...(!topLevel ? { replyRoot: route?.parent ?? rootOf(event) } : {}),
+      ...(route ? { sourceRoot: route.root } : {}),
+      ...(route?.turnContext ? { invocationContext: route.turnContext } : {}),
       ...(wake ? { wake } : {}),
       ...(delivery.wakeText ? { wakeText: delivery.wakeText } : {}),
       agent,
@@ -2371,13 +2447,15 @@ export class CodexRuntime {
       ...(delivery.synced ? { synced: delivery.synced } : {}),
       activityScope: topLevel
         ? channelId
-        : (threadReference(event)?.rootId ??
+        : (route?.parent ??
+          threadReference(event)?.rootId ??
           (channel?.dm ? channelId : event.id)),
       conversation: {
         channelId,
         name: channel?.name ?? channelId,
         ...(settings.scope === "community" ? { community: true } : {}),
         ...(root ? { root } : {}),
+        ...(route ? { sourceRoot: route.root } : {}),
         ...(topLevel ? { topLevel } : {}),
         ...(topLevel && !solo && !huddle ? { threadReplies: true } : {}),
       },
@@ -2446,7 +2524,9 @@ export class CodexRuntime {
         (request.model && request.model !== targetModel) ||
         (request.effort && request.effort !== targetEffort));
     entry.waiting.add(request);
-    delivery.interruptible?.(() => this.interrupt(entry, key, request));
+    delivery.interruptible?.(() =>
+      this.interrupt(entry, key, request, reserved),
+    );
     const handoff = this.controls.deliver(
       `${agent.key}/${key}`,
       async (deferred) => {
@@ -2454,6 +2534,11 @@ export class CodexRuntime {
         if (deferred) entry.abort.signal.throwIfAborted();
         else delivery.signal.throwIfAborted();
         const admitted = await admission(deferred);
+        if (reserved && request.current?.() === false) {
+          entry.waiting.delete(request);
+          request.answered();
+          return;
+        }
         if (admitted) {
           request.session = admitted.session;
           if (admitted.context !== undefined)
@@ -2835,8 +2920,6 @@ export class CodexRuntime {
         workspace,
         {},
         delivery.synced,
-        undefined,
-        "standalone",
       );
       const { model, effort, summary, bridge } = prepared;
       let { params } = prepared;
@@ -2936,15 +3019,18 @@ export class CodexRuntime {
     entry: Entry,
     key: string,
     request: Request,
+    canStopWaiting = request.settings.scope === "community",
   ): Promise<void> {
     if (entry.waiting.has(request)) {
-      if (request.settings.scope !== "community")
+      if (!canStopWaiting)
         return Promise.reject(
           new Error("Codex has not started on this message yet"),
         );
       // Codex is still deciding on its steer: stop the turn it joins, or drop it.
       if (request.steering)
-        return request.steering.then(() => this.interrupt(entry, key, request));
+        return request.steering.then(() =>
+          this.interrupt(entry, key, request, canStopWaiting),
+        );
       request.current = () => false;
       request.answered(true);
       return Promise.resolve();
@@ -3242,7 +3328,12 @@ export class CodexRuntime {
       tags: [
         ["h", request.conversation.channelId],
         ...(request.replyRoot !== undefined
-          ? [["e", request.replyRoot, "", "reply"]]
+          ? [
+              ...(request.sourceRoot
+                ? [["e", request.sourceRoot, "", "root"]]
+                : []),
+              ["e", request.replyRoot, "", "reply"],
+            ]
           : []),
         ["p", request.agent.owner],
       ],
@@ -3357,6 +3448,7 @@ export class CodexRuntime {
             ...(request.session ? { session: request.session } : {}),
             channel: request.conversation.channelId,
             ...(request.toolRoot ? { root: request.toolRoot } : {}),
+            ...(request.sourceRoot ? { sourceRoot: request.sourceRoot } : {}),
             ...(request.toolRoot && !request.conversation.root
               ? { wholeChannel: true }
               : {}),
@@ -3613,8 +3705,8 @@ export class CodexRuntime {
     synced?: Delivery["synced"],
     /** The agent's workspace, when `workspace` is the conversation's folder. */
     home?: string,
-    /** What the thread is, for its Session Model. */
-    place?: Facts["place"],
+    /** The conversation the thread is for; none for a one-off turn. */
+    conversation?: Readonly<{ channelId: string; root?: string }>,
   ) {
     const normalized = await rpc.request<{
       config: ProviderConfig & {
@@ -3655,8 +3747,18 @@ export class CodexRuntime {
     const credential = await rpc.toolCredential(agent);
     // Read once: what the thread is told and what its saved prompt shows
     // come from the same choices.
-    const choices = agent.promptSections?.();
-    const base = composeBase(baseFacts(settings, home, place), choices);
+    const choices = agent.promptSections?.(
+      conversation?.channelId,
+      conversation?.root,
+    );
+    const base = composeBase(
+      baseFacts(
+        settings,
+        home,
+        conversation ? sessionPlace(conversation) : "standalone",
+      ),
+      choices,
+    );
     const params = {
       model,
       cwd: workspace,
@@ -3765,15 +3867,20 @@ export class CodexRuntime {
 
   /** Whether a thread that started with `sections` can be given `base`.
    * One from before its sections were kept cannot be told which of them
-   * the owner changed, so it starts fresh once. A remote thread is kept by
-   * design, as restarting it would stop the conversation with a reset
-   * error: it keeps the sections it started with until the owner chooses
-   * New. */
+   * changed, so it starts fresh once. A remote thread is kept by design for
+   * the owner's choices, as restarting it would stop the conversation with
+   * a reset error: it keeps the sections it started with until the owner
+   * chooses New. A plugin's text is not the owner's to wait for, so the
+   * remote thread asks for New then. */
   private keepsSections(
     sections: Saved["sections"],
-    base: Pick<ReturnType<typeof composeBase>, "custom">,
+    base: Pick<ReturnType<typeof composeBase>, "custom" | "plugin">,
   ) {
-    return !base.custom || sections?.layout === LAYOUT || !!this.target;
+    return (
+      !base.custom ||
+      sections?.layout === LAYOUT ||
+      (!!this.target && !base.plugin)
+    );
   }
 
   /** Shared thread setup; a voice seat retains it between delegated turns. */
@@ -3806,7 +3913,7 @@ export class CodexRuntime {
       request,
       request.synced,
       home,
-      sessionPlace(request.conversation),
+      request.conversation,
     );
     const { model, effort, summary, bridge, base, choices } = prepared;
     let { params } = prepared;
@@ -3828,10 +3935,9 @@ export class CodexRuntime {
       // tools starts fresh.
       const added = this.added();
       const tools = addedKey(added);
-      const resuming =
-        existing?.workspace === workspace &&
-        (existing.tools ?? "") === tools &&
-        this.keepsSections(existing.sections, base);
+      const same =
+        existing?.workspace === workspace && (existing.tools ?? "") === tools;
+      const resuming = same && this.keepsSections(existing?.sections, base);
       /** The Buzz session a gateway thread runs under. */
       let binding = resuming ? existing.gateway : undefined;
       // The whole table replaces the provider's headers on every start and
@@ -3869,7 +3975,9 @@ export class CodexRuntime {
       if (this.target && existing && !resuming)
         throw Object.assign(
           new Error(
-            "The Codex workspace or tools changed. Start a new session to continue.",
+            same
+              ? "The base instructions of this conversation changed. Start a new session to continue."
+              : "The Codex workspace or tools changed. Start a new session to continue.",
           ),
           { code: "EXECUTION_SESSION_RESET_REQUIRED" },
         );
@@ -3931,8 +4039,6 @@ export class CodexRuntime {
       return {
         threadId,
         workspace,
-        // Where it works, which its Canvas states the rule from.
-        elsewhere: Boolean(home),
         params,
         model,
         effort,
@@ -3946,6 +4052,8 @@ export class CodexRuntime {
         base,
         facts,
         sections,
+        // Where it works, which its Canvas states the rule from.
+        elsewhere: worksElsewhere(home && workspace, choices),
         updates: fresh
           ? ""
           : sectionUpdates(existing?.sections, facts, choices),
@@ -4052,20 +4160,31 @@ export class CodexRuntime {
       }
       seat = lane.voice;
       // A seat keeps its loaded thread between turns, and the owner can
-      // change a section meanwhile: its turns get the sections as they are.
-      const choices = seat && agent.promptSections?.();
+      // change a section or the session scope meanwhile: its turns get the
+      // sections as they are. Its lane fixes its place and folder.
+      const facts = seat
+        ? { ...seat.loaded.facts, scope: settings.scope }
+        : undefined;
+      const choices =
+        seat &&
+        agent.promptSections?.(
+          request.conversation.channelId,
+          request.conversation.root,
+        );
       if (
         seat &&
         adopted === undefined &&
         !this.keepsSections(
           seat.loaded.sections,
-          composeBase(seat.loaded.facts, choices),
+          composeBase(facts ?? seat.loaded.facts, choices),
         )
       ) {
         // Typed work goes on in a fresh thread, which the seat joins next.
+        // Its reply posts to this room, so the Huddle's own "Leave and
+        // rejoin" comes after it.
         seat.end(
           new Error(
-            "The base instructions changed. Join the huddle again to use them.",
+            "The base instructions changed, so voice stopped. Wait for the reply to your typed message before you leave, since a Huddle closes when its only person leaves",
           ),
         );
         seat = undefined;
@@ -4091,10 +4210,11 @@ export class CodexRuntime {
         sections,
         binding,
       } = loaded;
-      const base = seat ? composeBase(loaded.facts, choices) : loaded.base;
-      const updates = seat
-        ? sectionUpdates(sections, loaded.facts, choices)
-        : loaded.updates;
+      const base = seat && facts ? composeBase(facts, choices) : loaded.base;
+      const updates =
+        seat && facts
+          ? sectionUpdates(sections, facts, choices)
+          : loaded.updates;
       // The seat owns the subscription. The typed follower can claim its
       // native turn only once the typed request is about to be sent.
       if (!seat || adopted !== undefined || settings.scope !== "community")

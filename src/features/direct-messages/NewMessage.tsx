@@ -1,3 +1,5 @@
+import { hostComposerProvenance } from "../messages/mention-draft";
+import { sendWithOwnerMentions } from "../relay/owner-mentions";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { agentUnavailable, canMessageAgent } from "../agents/choices";
 import { avatarMedia } from "../../shared/avatar-source";
@@ -373,7 +375,11 @@ export function NewMessage({
     ]);
     focusComposer();
   }, [ready, busy, intent?.to, intent?.at]);
-  async function send(draft: MentionDraft, files?: AttachmentDraft) {
+  async function send(
+    draft: MentionDraft,
+    files?: AttachmentDraft,
+    explicitRecipientIds?: readonly string[],
+  ) {
     const content = composerMarkdown(draft);
     if (
       attempt.current ||
@@ -446,19 +452,24 @@ export function NewMessage({
         );
         controller.signal.throwIfAborted();
         validateAgents();
-        const messageId = session.messages.send(
-          id,
-          content,
-          draft.recipients.map((person) => person.pubkey),
-          uploaded,
-          {
-            key: recoveryKey,
-            value: JSON.stringify({
-              people: recipients.map(recipientView),
-              draft,
-              ...(workspace ? { workspace } : {}),
-            }),
-          },
+        const messageId = sendWithOwnerMentions(
+          session,
+          explicitRecipientIds,
+          () =>
+            session.messages.send(
+              id,
+              content,
+              draft.recipients.map((person) => person.pubkey),
+              uploaded,
+              {
+                key: recoveryKey,
+                value: JSON.stringify({
+                  people: recipients.map(recipientView),
+                  draft,
+                  ...(workspace ? { workspace } : {}),
+                }),
+              },
+            ),
         );
         current = {
           id: messageId,
@@ -617,8 +628,11 @@ export function NewMessage({
           </p>
         )}
         {uploadFailed && (
+          // A failed send also pauses the files queued behind the one that
+          // failed, and each chip names its own way out.
           <p role="status">
-            A file couldn’t upload. Retry or remove it, then send again.
+            A file couldn’t upload. Follow the guidance on each file that shows
+            an error, then send again.
           </p>
         )}
         {!session.directMessages.available && (
@@ -651,6 +665,7 @@ export function NewMessage({
       </div>
       <DraftMentionRoster.Provider value={roster}>
         <MessageComposer
+          evidenceOwner={hostComposerProvenance}
           key={`${ready ? "ready" : "hydrating"}:${draftRevision}`}
           session={session}
           scope={scope}
@@ -674,7 +689,15 @@ export function NewMessage({
               !recipients.length ||
               typed ||
               !session.directMessages.available,
-            submit: (draft, files) => void send(draft, files),
+            submit: (
+              draft,
+              files,
+              _addressed,
+              _picks,
+              _draftPicks,
+              _revision,
+              explicitRecipientIds,
+            ) => void send(draft, files, explicitRecipientIds),
           }}
         />
       </DraftMentionRoster.Provider>
