@@ -5,6 +5,7 @@ import {
   isChannelRoute,
   matchesConversation,
   newMessage,
+  favoritesMessageTarget,
   newMessageTarget,
   nextMessageIntent,
   soloDraft,
@@ -89,6 +90,22 @@ it("addresses a New message draft to one person by key", () => {
     { kind: "new-message", to: agent, at: 0 },
     { kind: "new-message", to: agent, at: 1.5 },
     { kind: "new-message", to: agent, at: "1" },
+  ]) {
+    expect(newMessage(invalid), JSON.stringify(invalid)).toBeUndefined();
+    expect(isChannelRoute(invalid)).toBe(false);
+  }
+});
+
+it("starts a New message draft in Favorites", () => {
+  const target = favoritesMessageTarget(scope);
+  const params = target.kind === "page" ? target.route?.params : undefined;
+  expect(newMessage(params)).toEqual({ starred: true });
+  expect(isChannelRoute(params ?? null)).toBe(true);
+  for (const invalid of [
+    { kind: "new-message", starred: false },
+    { kind: "new-message", starred: "yes" },
+    { kind: "new-message", starred: true, workspace: "w" },
+    { kind: "new-message", starred: true, to: agent, at: 1 },
   ]) {
     expect(newMessage(invalid), JSON.stringify(invalid)).toBeUndefined();
     expect(isChannelRoute(invalid)).toBe(false);

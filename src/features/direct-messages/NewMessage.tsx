@@ -59,6 +59,8 @@ type Pending = {
   id: string;
   channelId: string;
   workspace?: string;
+  /** Added to Favorites once delivered. */
+  starred?: true;
   recipients: string;
   draft: MentionDraft;
   attachments: readonly (readonly string[])[];
@@ -146,6 +148,7 @@ function recovered(operations: readonly OutgoingEvent[], viewer?: string) {
     value.workspace.length <= 256
       ? { workspace: value.workspace }
       : {}),
+    ...(value.starred === true ? { starred: true as const } : {}),
     recipients: keyFor(people),
     draft: mentionDraft(value.draft),
     attachments: item.event.tags.filter(([name]) => name === "imeta"),
@@ -165,6 +168,7 @@ export function NewMessage({
   visit,
   intent,
   workspace,
+  starred,
   solo,
 }: {
   /** A new Solo chat, shown while no person is picked: with the agent picked
@@ -177,6 +181,8 @@ export function NewMessage({
   /** The person this visit was opened from, such as by their profile's Message. */
   intent?: MessageIntent | undefined;
   workspace?: string | undefined;
+  /** Add what this starts to Favorites. */
+  starred?: boolean | undefined;
   /** The visit presenting this composer, a Back stop only once drafted. */
   visit?: PageNavigation | undefined;
   extensions?: ConversationExtensions | undefined;
@@ -519,6 +525,7 @@ export function NewMessage({
                   people: recipients.map(recipientView),
                   draft,
                   ...(workspace ? { workspace } : {}),
+                  ...(starred ? { starred: true } : {}),
                 }),
               },
             ),
@@ -527,6 +534,7 @@ export function NewMessage({
           id: messageId,
           channelId: id,
           ...(workspace ? { workspace } : {}),
+          ...(starred ? { starred: true as const } : {}),
           recipients: key,
           draft,
           attachments,
@@ -544,6 +552,10 @@ export function NewMessage({
           .assign(current.channelId, current.workspace)
           .catch(() => {});
       }
+      if (current.starred)
+        void session.sidebarPreferences
+          .setStar(current.channelId, true)
+          .catch(() => {});
       // Clear disposable views before releasing durable recovery. A failed clear
       // retains the operation for confirmation-only retry, even across unmount.
       clearView(

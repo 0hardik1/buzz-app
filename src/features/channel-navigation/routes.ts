@@ -7,6 +7,7 @@ import type { SoloDraftStart } from "./solo-navigation-contract";
 import { newMessage } from "./new-message-route";
 
 export {
+  favoritesMessageTarget,
   type MessageIntent,
   newMessage,
   newMessageTarget,

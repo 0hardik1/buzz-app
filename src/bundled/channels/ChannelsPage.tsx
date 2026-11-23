@@ -2577,6 +2577,7 @@ function ChannelWorkspace({
             <LiveNewMessage
               intent={messageDraft?.intent}
               workspace={messageDraft?.workspace}
+              starred={messageDraft?.starred}
               host={{ relay, panels, navigation: navigator }}
               session={queries}
               scope={scope}
@@ -2594,11 +2595,16 @@ function ChannelWorkspace({
                   embedded
                   name={name}
                   agent={agent}
+                  projectId={messageDraft?.workspace}
                   visit={navigation}
                   session={queries}
                   scope={scope}
                   extensions={extensions}
                   onStarted={(channelId) => {
+                    if (messageDraft?.starred)
+                      void queries.sidebarPreferences
+                        .setStar(channelId, true)
+                        .catch(() => {});
                     if (!behindSettings()) select(channelId);
                   }}
                   onFailed={(_channelId, message) => notify(message, "error")}

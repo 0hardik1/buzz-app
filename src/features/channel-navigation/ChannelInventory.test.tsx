@@ -1217,13 +1217,12 @@ it.each(["ready", "error"] as const)(
   },
 );
 
-// Team no longer has a header: its conversations list in Messages, which only
-// offers New message. Favorites is the one section that creates channels.
+// Team no longer has a header: its conversations list in Messages. Every
+// section starts conversations through New message.
 it.each(["Favorites"])(
   "uses only the invoking section for placement (%s)",
   async (section) => {
     vi.stubGlobal("crypto", webcrypto);
-    const fromStarred = section === "Favorites";
     const preferences = createSidebarPreferencesStore({
       read: async () => ({
         sections: [{ id: "laptop", name: "Laptop", icon: "💻", order: 0 }],
@@ -1276,42 +1275,24 @@ it.each(["Favorites"])(
         expect(icon.querySelector("svg")).toBeInTheDocument();
         expect(icon).not.toHaveTextContent("★");
       }
+      expect(
+        within(header).queryByRole("button", { name: "Create channel" }),
+      ).not.toBeInTheDocument();
+      // Favorites' + starts New message, which stars what it creates.
       fireEvent.click(
-        within(header).getByRole("button", { name: "Create channel" }),
+        within(header).getByRole("button", { name: "New message" }),
       );
-      const destination = screen.queryByRole("combobox", {
-        name: "Destination workspace",
-      });
-      expect(destination).not.toBeInTheDocument();
-      const title = fromStarred
-        ? "Create a channel in Favorites"
-        : "Create a channel";
-      expect(screen.getByRole("dialog")).toHaveAccessibleName(title);
-      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
-        target: { value: "New laptop channel" },
-      });
-      const submit = within(
-        screen.getByRole("dialog", { name: title }),
-      ).getByRole("button", { name: "Create channel" });
-      await waitFor(() => expect(submit).toBeEnabled());
-      fireEvent.click(submit);
       await waitFor(() =>
-        expect(create).toHaveBeenCalledWith({
-          name: "New laptop channel",
-          visibility: "open",
-          ...(fromStarred
-            ? {
-                setup: {
-                  agents: [],
-                  canvas: "",
-                  templateId: "",
-                  groupId: "",
-                  starred: true,
-                },
-              }
-            : {}),
-        }),
+        expect(h.navigator.open).toHaveBeenCalledWith(
+          expect.objectContaining({
+            route: {
+              version: 1,
+              params: { kind: "new-message", starred: true },
+            },
+          }),
+        ),
       );
+      expect(create).not.toHaveBeenCalled();
     } finally {
       preferences.dispose();
     }

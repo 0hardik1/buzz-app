@@ -1,4 +1,7 @@
-import { workspaceMessageTarget } from "../../features/channel-navigation/new-message-route";
+import {
+  favoritesMessageTarget,
+  workspaceMessageTarget,
+} from "../../features/channel-navigation/new-message-route";
 import { WorkspaceNewMenu } from "./WorkspaceNewMenu";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { visibleSoloRegions } from "./SoloRegions";
@@ -12,7 +15,6 @@ import { useChatConversions } from "../../features/solo/conversion";
 import { canEditLifetime } from "../../features/solo/Lifetime";
 import { TeamSidebarSections, TeamSidebarSection } from "./TeamSidebarSource";
 import type { WorkspaceSidebarComposition } from "./sidebar-environment";
-import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
 import {
   newMessage,
   openEmptyChannels,
@@ -49,7 +51,6 @@ import {
   workspaceSectionOrder,
 } from "../../features/relay/sidebar-preferences";
 import type { RelayData } from "../../features/relay/service";
-import type { Agents } from "../../features/agents/service";
 import type { RelaySession } from "../../features/relay/session";
 import { useChannelRoster } from "../../features/relay/react";
 import type { Navigation } from "../../features/navigation/controller";
@@ -134,10 +135,6 @@ import {
   ContributionBoundary,
   contributionKey,
 } from "../../features/conversation/ContributionBoundary";
-import {
-  CreateChannelDialog,
-  type CreateChannelInput,
-} from "./CreateChannelDialog";
 import { writeView } from "../../shared/view-state";
 import { useChannelReadAction } from "./useChannelReadAction";
 import {
@@ -194,7 +191,6 @@ const emptySidebarSections: SidebarSections = {
 export function ChannelInventory({
   relay,
   navigator,
-  agents,
   target,
   queries,
   cached,
@@ -214,7 +210,6 @@ export function ChannelInventory({
 }: {
   relay: RelayData;
   navigator: Navigation;
-  agents?: Agents | undefined;
   target: OpenTarget;
   queries: RelaySession;
   cached: boolean;
@@ -628,8 +623,6 @@ export function ChannelInventory({
     },
     [navigator],
   );
-  const [createChannelOpen, setCreateChannelOpen] = useState(false);
-  const createChannelTrigger = useRef<HTMLButtonElement>(null);
   const removedRowFocus = useRef<
     { channelId: string; target: HTMLElement } | undefined
   >(undefined);
@@ -662,8 +655,6 @@ export function ChannelInventory({
     return () => createOrigin.removeEventListener("abort", retire);
   }, [createOrigin]);
 
-  const [initialGroup, setInitialGroup] = useState("");
-  const [initialStarred, setInitialStarred] = useState(false);
   const [workspaceSettings, setWorkspaceSettings] = useState<{
     id: string;
     name: string;
@@ -873,13 +864,6 @@ export function ChannelInventory({
     },
     [viewer, relay, queries, activityAgent, sidebar.list, navigator, scope],
   );
-  const createChannel = async (input: CreateChannelInput) => {
-    const id = await queries.channelCreation.create(input);
-    if (mounted.current)
-      revealCreatedChannel(relay, queries, navigator, input, id, (key) =>
-        sidebar.toggle(key, true),
-      );
-  };
   const rowUnread = useSidebarRowUnread(
     queries.unread,
     JSON.stringify(
@@ -1934,20 +1918,6 @@ export function ChannelInventory({
                             '[data-sidebar-section="solo"] button',
                           )
                         }
-                        createChannel={
-                          section.key === "starred" ||
-                          section.key === "channels"
-                            ? {
-                                available: queries.channelCreation.available,
-                                open: (trigger) => {
-                                  createChannelTrigger.current = trigger;
-                                  setInitialStarred(section.key === "starred");
-                                  setInitialGroup("");
-                                  setCreateChannelOpen(true);
-                                },
-                              }
-                            : undefined
-                        }
                         createSection={
                           section.key === "channels"
                             ? {
@@ -1963,31 +1933,41 @@ export function ChannelInventory({
                             : undefined
                         }
                         newMessage={
-                          section.key === "solo"
+                          section.key === "starred"
                             ? () => {
-                                if (
-                                  viewer &&
-                                  relay.snapshot().session === queries
-                                )
-                                  void navigator.open({
-                                    version: 1,
-                                    kind: "page",
-                                    pluginId: "buzz.channels",
-                                    pageId: "channels",
-                                    scope: {
-                                      viewer,
-                                      communityOrigin: scope.slice(
-                                        0,
-                                        -(viewer.length + 1),
-                                      ),
-                                    },
-                                    route: {
-                                      version: 1,
-                                      params: "new-message",
-                                    },
-                                  });
+                                if (relay.snapshot().session !== queries)
+                                  return;
+                                const partition = splitPartition(scope);
+                                if (partition)
+                                  void navigator.open(
+                                    favoritesMessageTarget(partition),
+                                  );
                               }
-                            : undefined
+                            : section.key === "solo"
+                              ? () => {
+                                  if (
+                                    viewer &&
+                                    relay.snapshot().session === queries
+                                  )
+                                    void navigator.open({
+                                      version: 1,
+                                      kind: "page",
+                                      pluginId: "buzz.channels",
+                                      pageId: "channels",
+                                      scope: {
+                                        viewer,
+                                        communityOrigin: scope.slice(
+                                          0,
+                                          -(viewer.length + 1),
+                                        ),
+                                      },
+                                      route: {
+                                        version: 1,
+                                        params: "new-message",
+                                      },
+                                    });
+                                }
+                              : undefined
                         }
                         sort={
                           preferences.sortWritable
@@ -2508,18 +2488,6 @@ export function ChannelInventory({
             }}
           />
         )}
-        <CreateChannelDialog
-          open={createChannelOpen}
-          onOpenChange={setCreateChannelOpen}
-          onCreate={createChannel}
-          finalFocus={createChannelTrigger}
-          session={queries}
-          agents={agents}
-          destinations={preferences.data?.sections ?? []}
-          initialGroup={initialGroup}
-          initialStarred={initialStarred}
-          groupsReady={preferences.writable}
-        />
       </>
     ),
   });
