@@ -833,10 +833,11 @@ it("withholds a finite link a relay returns for a Never request", async () => {
   await screen.findByDisplayValue("https://primary.example/invite/1");
   await chooseNever(user);
   await user.click(await screen.findByRole("button", { name: "Create link" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "This relay can’t make permanent links yet. Choose an expiry instead.",
+  );
   expect(
-    await screen.findByPlaceholderText(
-      "This relay can’t make permanent links yet. Choose an expiry instead.",
-    ),
+    screen.getByRole("textbox", { name: "Community invite link" }),
   ).toHaveValue("");
   expect(screen.queryByDisplayValue(/invite\/2$/)).toBeNull();
   expect(screen.getByRole("button", { name: "Copy link" })).toBeDisabled();

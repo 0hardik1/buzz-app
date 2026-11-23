@@ -849,7 +849,7 @@ function MembershipContent({
                 value={url ?? ""}
                 placeholder={
                   current?.unsupported
-                    ? "This relay can’t make permanent links yet. Choose an expiry instead."
+                    ? "No link created"
                     : current?.failed
                       ? "Couldn’t create invite link"
                       : idle
@@ -858,6 +858,12 @@ function MembershipContent({
                 }
               />
             </InputGroup>
+            {current?.unsupported && (
+              <p role="status" className="m-0 text-body-sm">
+                This relay can’t make permanent links yet. Choose an expiry
+                instead.
+              </p>
+            )}
             <SettingsGroup>
               <div className="flex items-center justify-between gap-4 py-3">
                 <span className="text-body-sm">Expires after</span>
