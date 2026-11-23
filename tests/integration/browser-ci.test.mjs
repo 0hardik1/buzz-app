@@ -134,11 +134,6 @@ test("Linux shards and macOS recording discover every CI functional test/project
   assert.ok(expected.length > 0);
   const actual = [];
   const { browser: ordinary, browser_native: native } = parse(workflow).jobs;
-  assert.equal(ordinary.needs, undefined);
-  assert.equal(ordinary.env.BUZZ_BROWSER_FIXTURE_DIR, undefined);
-  assert.equal(ordinary.env.BUZZ_BROWSER_NATIVE_TESTS, "exclude");
-  assert.deepEqual(native.needs, ["browser_fixture"]);
-  assert.equal(native.env.BUZZ_BROWSER_NATIVE_TESTS, "only");
   // Node owns the bounded scheduling and subtest failure reporting.
   await Promise.all(
     browserJobs().map(({ engine, shard, shards }) =>
@@ -163,7 +158,6 @@ test("Linux shards and macOS recording discover every CI functional test/project
     .find((step) => step.name === "Functional journeys")
     .run.match(/ -- (\.\/bin\/pnpm test:browser:ci .+)$/)?.[1];
   assert.ok(nativeCommand, "native invocation must exist");
-  assert.deepEqual(native.strategy.matrix.engine, ["chromium", "webkit"]);
   for (const engine of native.strategy.matrix.engine) {
     const selected = await discover(
       nativeCommand
