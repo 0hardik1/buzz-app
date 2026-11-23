@@ -705,7 +705,9 @@ export async function readNoProxy(spawn: Spawn): Promise<Inherited> {
 }
 
 /** Runs `run` against a `goose-acp` started for it in the home folder, and
- * stops it after. It serves no Buzz tools; `signal` stops its startup. */
+ * stops it after. It serves no Buzz tools; `signal` stops its startup. It
+ * gets the device's environment variables, naming no agent, so a provider key
+ * kept only there counts as set up. */
 export async function briefly<T>(
   host: GooseHost | undefined,
   run: (goose: GooseProcess, cwd: string) => Promise<T>,
@@ -718,6 +720,7 @@ export async function briefly<T>(
   const goose = await GooseProcess.start(host.spawn, {
     cwd,
     env,
+    secrets: ["agent-env"],
     ...(signal && { signal }),
   });
   try {

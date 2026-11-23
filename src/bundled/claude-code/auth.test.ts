@@ -154,6 +154,10 @@ it("starts a turn's claude with no saved key when its agent's own variables set 
   await authorized("claude", { ...options, envAgent: other });
   await authorized("claude", options);
   expect(started).toHaveLength(3);
+  // A launch that doesn't ask for the lists never gets that key.
+  await expect(authorized("claude", { env: ENV })).rejects.toThrow(
+    "Claude needs an Anthropic API key.",
+  );
 });
 
 it("passes a full host's refusal on, rather than taking it for no setup", async () => {

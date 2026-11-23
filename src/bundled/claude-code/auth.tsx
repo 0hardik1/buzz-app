@@ -14,7 +14,7 @@ import { type ComponentType, type ReactNode, useEffect, useState } from "react";
 import { ClaudeSettings, type ClaudeConnection } from "./ClaudeSettings";
 import { ApiKeyForm } from "../../features/settings/ApiKeyForm";
 import inlineStyles from "../../shared/InlineReference.module.css";
-import { ownEnvNames } from "../agents/agent-env";
+import { deviceEnvNames, ownEnvNames } from "../agents/agent-env";
 import { ENV, type Spawn } from "./claude";
 import { PROCESS_LIMIT } from "./sessions";
 import type { ClaudeSetup } from "./setup";
@@ -358,7 +358,7 @@ const agentSetsKey = async (options: Parameters<Spawn>[1]) =>
   !!options?.secrets?.includes("agent-env") &&
   (
     await Promise.all([
-      ownEnvNames(),
+      deviceEnvNames(),
       ...(options.envAgent ? [ownEnvNames(options.envAgent)] : []),
     ])
   ).some((names) => names?.includes("ANTHROPIC_API_KEY"));

@@ -3,8 +3,8 @@
 //! kept in the OS credential store under Buzz's own item, never synced, and no
 //! command returns a value. They are added to the processes of Buzz's
 //! harnesses that ask for them and run a local, unprotected agent (a bundled
-//! plugin's process declared `agentEnv`, `for_spawn`): the device list, then the named agent's own, so its variable
-//! wins, after the login shell's and before the harness's own, so a harness's
+//! plugin's process declared `agentEnv`, `for_spawn`): the device list, then
+//! the named agent's own, so its variable wins, after the login shell's and before the harness's own, so a harness's
 //! variable wins. A saved list reaches processes started after the save;
 //! running ones keep the list they started with until the agent restarts.
 //!
@@ -181,6 +181,8 @@ const PATHS: &[&str] = &[
     // Pi's conversation database.
     "XDG_DATA_HOME",
     "LOCALAPPDATA",
+    // Goose's config and sessions on Windows.
+    "APPDATA",
 ];
 
 /// The `secrets` name an agent launch asks for the list by.
@@ -199,7 +201,8 @@ pub(crate) struct Row {
 #[derive(Serialize, Debug, PartialEq)]
 pub(crate) struct Status {
     names: Vec<String>,
-    /// Saved since Buzz started, so running agents may have the old list.
+    /// Saved since the main page loaded, so running agents may have the old
+    /// list.
     saved: bool,
 }
 
@@ -256,9 +259,14 @@ impl AgentEnv {
         })
     }
     /// Replaces the list with `rows`. Nothing changes when a row is invalid
-    /// or the store can't be written.
+    /// or the store can't be written. The saved list is read only when a row
+    /// keeps its value, so a full save replaces a damaged one.
     pub(crate) async fn set(&self, rows: Vec<Row>) -> Result<(), String> {
-        let current = self.load().await?;
+        let current = if rows.iter().any(|row| row.value.is_none()) {
+            self.load().await?
+        } else {
+            List::new()
+        };
         let mut next = List::new();
         let mut seen = std::collections::HashSet::new();
         for row in rows {
@@ -414,7 +422,7 @@ pub(crate) fn eligible(agents: &[buzz_agent_controller::AppAgent], pubkey: &str)
 
 type Open = dyn Fn(&str) -> Box<dyn KeyStore> + Send + Sync;
 
-/// Every agent's own list, each read once.
+/// The device list and every agent's own, each read once.
 pub(crate) struct AgentEnvs {
     open: Box<Open>,
     lists: std::sync::Mutex<std::collections::HashMap<String, Arc<AgentEnv>>>,
@@ -434,11 +442,12 @@ impl AgentEnvs {
             turn: Mutex::new(()),
         }
     }
-    fn list(&self, pubkey: &str) -> Arc<AgentEnv> {
+    /// The list under `key`: `DEVICE` or an agent's pubkey.
+    fn list(&self, key: &str) -> Arc<AgentEnv> {
         let mut lists = self.lists.lock().unwrap_or_else(|e| e.into_inner());
         lists
-            .entry(pubkey.to_owned())
-            .or_insert_with(|| Arc::new(AgentEnv::with((self.open)(pubkey))))
+            .entry(key.to_owned())
+            .or_insert_with(|| Arc::new(AgentEnv::with((self.open)(key))))
             .clone()
     }
     /// The device's variables for a process, then `agent`'s, as
@@ -523,16 +532,17 @@ pub(crate) fn forget_registry(
     Ok(())
 }
 
-/// Each agent's own item in the OS credential store.
+/// The OS credential store item for `key`: the device list's, or an agent's
+/// under its pubkey.
 #[cfg_attr(test, allow(dead_code))]
-pub(crate) fn os_store(pubkey: &str) -> Box<dyn KeyStore> {
+pub(crate) fn os_store(key: &str) -> Box<dyn KeyStore> {
     Box::new(OsStore {
-        service: if pubkey == DEVICE {
+        service: if key == DEVICE {
             DEVICE_SERVICE
         } else {
             AGENT_SERVICE
         },
-        account: pubkey.to_owned(),
+        account: key.to_owned(),
     })
 }
 
@@ -553,58 +563,33 @@ async fn eligible_here(
     .map_err(|_| "Agents are unavailable".to_string())?
 }
 
-/// The list a spawn gets: only a process that asks for it with `SECRET`,
+/// The lists a spawn gets: only a process that asks for them with `SECRET`,
 /// unprotected, that a bundled plugin's validated manifest declares
-/// `agentEnv` (`bundled`: its grants came from Buzz's own catalog), and that
-/// names an agent that may have its own list here. Decided before any list is
-/// read.
+/// `agentEnv` (grants at `revision` "bundled" come from Buzz's own catalog,
+/// `host_grants`). Without `env_agent` it gets the device list alone; with
+/// one, that agent must be able to have its own list here. Decided before
+/// any list is read.
 pub(crate) async fn for_spawn(
     envs: &AgentEnvs,
     agents: &crate::app_agents::AppAgentHost,
     secrets: &[String],
     env_agent: Option<&str>,
     declared: &buzzodz_plugins::HostProcess,
-    bundled: bool,
+    revision: &str,
     protected: bool,
 ) -> Result<Vec<(OsString, OsString)>, String> {
     if !secrets.iter().any(|s| s == SECRET) {
         return Ok(Vec::new());
     }
-    if protected || !bundled || !declared.agent_env {
+    if protected || revision != "bundled" || !declared.agent_env {
         return Err("That secret is not available to this process".into());
     }
-    // No agent named: the device list alone.
     if let Some(agent) = env_agent {
         if !eligible_here(agents, agent).await? {
             return Err("That agent can't have environment variables of its own".into());
         }
     }
     Ok(envs.for_process(env_agent).await)
-}
-
-/// The list `plugin_host_process_spawn` gives `declared`, the process found
-/// in the grants of the plugin at `revision`: `for_spawn`'s.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn for_launch(
-    envs: &AgentEnvs,
-    agents: &crate::app_agents::AppAgentHost,
-    declared: &buzzodz_plugins::HostProcess,
-    revision: &str,
-    secrets: &[String],
-    env_agent: Option<&str>,
-    protected: bool,
-) -> Result<Vec<(OsString, OsString)>, String> {
-    // Only `bundled` grants come from Buzz's own catalog (`host_grants`).
-    for_spawn(
-        envs,
-        agents,
-        secrets,
-        env_agent,
-        declared,
-        revision == "bundled",
-        protected,
-    )
-    .await
 }
 
 #[tauri::command]

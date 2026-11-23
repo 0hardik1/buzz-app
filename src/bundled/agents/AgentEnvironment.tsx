@@ -17,9 +17,13 @@ import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { useAgentSaveState } from "../../features/agents/AgentSaveButton";
 import { SettingsSectionLink } from "../../features/navigation/SettingsSectionLink";
-import { ownEnvNames } from "./agent-env";
+import {
+  awaitingRestart,
+  deviceEnvNames,
+  deviceEnvSaved,
+  hasName,
+} from "./agent-env";
 import styles from "./AgentEnvironment.module.css";
-import { awaitingRestart } from "./agent-env";
 
 type Status = { names: string[]; saved?: boolean };
 /** The one row open for editing: a saved name to replace, or a new one. */
@@ -30,23 +34,38 @@ type Draft = { replacing?: string; name: string; value: string };
 const ROW =
   "grid grid-cols-[minmax(0,1fr)_6.5rem_1.75rem] items-center gap-2 px-3 py-2";
 
+type Props =
+  | {
+      agent: string;
+      /** Stops the agent's processes, so its next turn starts with the list. */
+      restartAgent: () => Promise<void>;
+      /** Opens a Settings section, for the link to the device-wide list. */
+      openSettings?: ((section: string) => void) | undefined;
+    }
+  | { agent?: undefined; restartAgent?: undefined; openSettings?: undefined };
+
+const AGENT_WORDS = {
+  restart: "Restart agent",
+  saved: "Changes saved. Restart the agent to apply them.",
+  confirm: "Restart this agent?",
+  consequence:
+    "Its processes stop, and its next message starts them with the saved environment variables. Other agents keep running.",
+};
+const DEVICE_WORDS = {
+  restart: "Restart agents",
+  saved: "Changes saved. Restart agents to apply them.",
+  confirm: "Restart agents?",
+  consequence:
+    "Buzz reloads, which ends calls and turns in progress. Each agent's next message starts it with the saved environment variables.",
+};
+
 /** Variables one local agent starts with, or without `agent` every local
  * agent on this device, held natively in the OS credential store. Values are
  * never read back. */
-export function AgentEnvironment({
-  agent,
-  restartAgent,
-  openSettings,
-}: {
-  agent?: string;
-  /** Stops the agent's processes, so its next turn starts with the list. */
-  restartAgent?: () => Promise<void>;
-  /** Opens a Settings section, for the link to the device-wide list. */
-  openSettings?: ((section: string) => void) | undefined;
-}) {
+export function AgentEnvironment({ agent, restartAgent, openSettings }: Props) {
   // Every local agent restarts with the page, which ends its processes.
   const run = restartAgent ?? (async () => window.location.reload());
-  const restartLabel = agent ? "Restart agent" : "Restart agents";
+  const words = agent ? AGENT_WORDS : DEVICE_WORDS;
   // Names also on the device list, which this agent's values override.
   const [device, setDevice] = useState<readonly string[]>([]);
   const [names, setNames] = useState<string[] | undefined>();
@@ -81,8 +100,14 @@ export function AgentEnvironment({
   useEffect(() => {
     if (isTauri()) fetch();
   }, [fetch]);
+  // Settings opens over the agent's page, so a device save there is read again.
   useEffect(() => {
-    if (agent) void ownEnvNames().then((names) => setDevice(names ?? []));
+    if (!agent) return;
+    const read = () =>
+      void deviceEnvNames().then((names) => setDevice(names ?? []));
+    read();
+    deviceEnvSaved.addEventListener("saved", read);
+    return () => deviceEnvSaved.removeEventListener("saved", read);
   }, [agent]);
   // An unreadable list is never shown as an empty one.
   if (!names)
@@ -111,6 +136,7 @@ export function AgentEnvironment({
       await invoke("agent_env_set", { agent, rows });
       // Stored now, even if the reload below fails.
       if (agent) awaitingRestart.add(agent);
+      else deviceEnvSaved.dispatchEvent(new Event("saved"));
       setSaved(true);
       setNames((await invoke<Status>("agent_env_status", { agent })).names);
       setDraft(undefined);
@@ -259,7 +285,7 @@ export function AgentEnvironment({
                 <span className="truncate font-mono text-body-sm" title={name}>
                   {name}
                 </span>
-                {device.includes(name) && (
+                {hasName(device, name) && (
                   <span className="truncate text-caption text-subtle">
                     Overrides the device-wide value
                   </span>
@@ -311,9 +337,7 @@ export function AgentEnvironment({
           <SettingsGroup>
             <div className="flex items-center justify-between gap-3 px-3 py-2">
               <p role="status" className="m-0 text-body-sm">
-                {agent
-                  ? "Changes saved. Restart the agent to apply them."
-                  : "Changes saved. Restart agents to apply them."}
+                {words.saved}
               </p>
               <Button
                 ref={restart}
@@ -324,7 +348,7 @@ export function AgentEnvironment({
                 focusableWhenDisabled
                 onClick={() => setConfirm(true)}
               >
-                {restartLabel}
+                {words.restart}
               </Button>
             </div>
           </SettingsGroup>
@@ -332,12 +356,8 @@ export function AgentEnvironment({
       )}
       {confirm && (
         <AlertDialog
-          title={agent ? "Restart this agent?" : "Restart agents?"}
-          description={
-            agent
-              ? "Its processes stop, and its next message starts them with the saved environment variables. Other agents keep running."
-              : "Buzz reloads, which ends calls and turns in progress. Each agent's next message starts it with the saved environment variables."
-          }
+          title={words.confirm}
+          description={words.consequence}
           finalFocus={restart}
           onClose={() => setConfirm(false)}
           actions={

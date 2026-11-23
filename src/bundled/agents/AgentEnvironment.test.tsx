@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentSaveState } from "../../features/agents/AgentSaveButton";
@@ -517,4 +523,36 @@ it("a restarted agent's banner stays gone though native still says saved", async
   render(<AgentEnvironment agent={AGENT} restartAgent={restartAgent} />);
   await screen.findByText("SAVED_KEY");
   expect(screen.queryByRole("button", { name: "Restart agent" })).toBeNull();
+});
+
+it("an agent's override note follows a device save made over its page", async () => {
+  let device: string[] = [];
+  native.invoke.mockImplementation(async (command, args) => {
+    const { agent, rows } = args as {
+      agent?: string;
+      rows?: { name: string }[];
+    };
+    if (command === "agent_env_status")
+      return { names: agent ? ["OWN"] : device };
+    if (command === "agent_env_set" && !agent)
+      device = (rows ?? []).map((row) => row.name);
+    return undefined;
+  });
+  const user = userEvent.setup();
+  const page = render(
+    <AgentEnvironment agent={AGENT} restartAgent={restartAgent} />,
+  );
+  await within(page.container).findByText("OWN");
+  expect(screen.queryByText("Overrides the device-wide value")).toBeNull();
+  const settings = render(<AgentEnvironment />);
+  const inSettings = within(settings.container);
+  await user.click(
+    await inSettings.findByRole("button", { name: "Add variable" }),
+  );
+  await user.type(inSettings.getByLabelText("Variable name"), "OWN");
+  await user.type(inSettings.getByLabelText("Value of OWN"), "device");
+  await user.click(inSettings.getByRole("button", { name: "Save" }));
+  expect(
+    await within(page.container).findByText("Overrides the device-wide value"),
+  ).toBeInTheDocument();
 });

@@ -130,6 +130,7 @@ async fn every_blocked_name_is_rejected_in_any_case() {
             "XDG_DATA_HOME",
             "XDG_CONFIG_HOME",
             "LOCALAPPDATA",
+            "APPDATA",
         ])
     {
         let mixed: String = name
@@ -359,7 +360,8 @@ async fn a_spawn_gets_only_an_eligible_named_agents_list() {
     let (_dir, host) = host_with(&[agent_row(ADA), deleting]);
     let asks = vec![SECRET.to_string()];
     let goose = bundled("buzz.goose", "goose");
-    let spawn = |agent, protected| for_spawn(&envs, &host, &asks, agent, &goose, true, protected);
+    let spawn =
+        |agent, protected| for_spawn(&envs, &host, &asks, agent, &goose, "bundled", protected);
     assert_eq!(spawn(Some(ADA), false).await.unwrap().len(), 1);
     // No agent named: the device list alone, empty here.
     assert!(spawn(None, false).await.unwrap().is_empty());
@@ -370,19 +372,15 @@ async fn a_spawn_gets_only_an_eligible_named_agents_list() {
     assert!(spawn(Some(BO), false).await.is_err());
     let absent = "c".repeat(64);
     assert!(spawn(Some(&absent), false).await.is_err());
-    // Protected launches and undeclared processes are refused.
+    // Protected launches are refused.
     assert!(spawn(Some(ADA), true).await.is_err());
-    let helper = bundled("buzz.goose", "read-protected");
-    assert!(
-        for_spawn(&envs, &host, &asks, Some(ADA), &helper, true, false)
-            .await
-            .is_err()
-    );
     // A process that doesn't ask gets nothing.
-    assert!(for_spawn(&envs, &host, &[], Some(ADA), &goose, true, false)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        for_spawn(&envs, &host, &[], Some(ADA), &goose, "bundled", false)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -413,6 +411,10 @@ async fn every_agent_gets_the_device_list_and_its_own_wins() {
             ("FOO".to_string(), "ada".to_string()),
         ]
     );
+    // As a command gets it, Ada's value wins.
+    let command = command_env(&envs.for_process(Some(ADA)).await);
+    assert!(command.contains(&("FOO".to_string(), "ada".to_string())));
+    assert!(!command.contains(&("FOO".to_string(), "device".to_string())));
     assert_eq!(agent_given(&envs, BO).await.len(), 2);
     assert_eq!(envs.for_process(None).await.len(), 2);
     assert_eq!(
@@ -503,13 +505,13 @@ async fn launched(
 ) -> Option<Vec<(String, String)>> {
     let declared =
         crate::host_process::declared_process(manager, plugin, revision, process).unwrap();
-    let list = for_launch(
+    let list = for_spawn(
         envs,
         host,
-        &declared,
-        revision,
         &[SECRET.into()],
         Some(ADA),
+        &declared,
+        revision,
         false,
     )
     .await
@@ -557,27 +559,6 @@ async fn launch_of(
     let (_root, manager, claimant) = manager_with_claimant();
     let revision = revision.unwrap_or(&claimant);
     launched(&manager, &envs, &host, plugin, revision, process).await
-}
-
-#[tokio::test]
-async fn a_bundled_harness_agent_process_gets_the_lists() {
-    assert_eq!(
-        launch_of("buzz.goose", Some("bundled"), "goose").await,
-        Some(vec![("FOO".to_string(), "ada".to_string())])
-    );
-}
-
-#[tokio::test]
-async fn a_bundled_process_without_the_declaration_gets_nothing() {
-    let (envs, _dir, host) = fixture().await;
-    let mut undeclared = bundled("buzz.goose", "goose");
-    undeclared.agent_env = false;
-    let asks = [SECRET.to_string()];
-    assert!(
-        for_spawn(&envs, &host, &asks, Some(ADA), &undeclared, true, false)
-            .await
-            .is_err()
-    );
 }
 
 #[tokio::test]
@@ -640,13 +621,13 @@ async fn a_bundled_harness_child_sees_its_list() {
     let (_root, manager, _) = manager_with_claimant();
     let declared =
         crate::host_process::declared_process(&manager, "buzz.goose", "bundled", "goose").unwrap();
-    let list = for_launch(
+    let list = for_spawn(
         &envs,
         &host,
-        &declared,
-        "bundled",
         &[SECRET.into()],
         Some(ADA),
+        &declared,
+        "bundled",
         false,
     )
     .await
@@ -656,4 +637,24 @@ async fn a_bundled_harness_child_sees_its_list() {
     spawn_env(&mut command, &list);
     let output = command.output().await.unwrap();
     assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "fixture");
+}
+
+#[tokio::test]
+async fn a_save_that_keeps_no_value_replaces_a_damaged_device_list() {
+    let damaged = || {
+        let store = Arc::new(FakeStore::default());
+        *store.text.lock().unwrap() = Some("not json".into());
+        store
+    };
+    let (full, stores) = envs();
+    stores.lock().unwrap().insert(DEVICE.into(), damaged());
+    // Keeping a value needs the damaged list, so it fails.
+    assert!(full.set_device(vec![keep("FOO")]).await.is_err());
+    full.set_device(vec![set("FOO", "1")]).await.unwrap();
+    assert_eq!(full.status(None).await.unwrap().names, ["FOO"]);
+
+    let (empty, stores) = envs();
+    stores.lock().unwrap().insert(DEVICE.into(), damaged());
+    empty.set_device(Vec::new()).await.unwrap();
+    assert!(empty.status(None).await.unwrap().names.is_empty());
 }

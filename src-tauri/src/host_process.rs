@@ -524,13 +524,13 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
     let secrets = secrets.unwrap_or_default();
     // Only a process that asks for the list touches the agent stores.
     let agent_env = if secrets.iter().any(|s| s == crate::agent_env::SECRET) {
-        crate::agent_env::for_launch(
+        crate::agent_env::for_spawn(
             &app.state(),
             &app.state(),
-            &declared,
-            &revision,
             &secrets,
             env_agent.as_deref(),
+            &declared,
+            &revision,
             protected,
         )
         .await?
@@ -575,7 +575,7 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
         {
             return Err("That secret is not available to this process".into());
         }
-        // The agent's own key outranks the shared one.
+        // A key in the device's or the agent's list outranks the shared one.
         if agent_key(&agent_env).is_some() {
             continue;
         }
@@ -637,7 +637,7 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
 /// paths, plus the `login_shell` variables it forwards and then the agent's
 /// `agent_env`, less any Buzz identity these hold, plus the plugin's
 /// `environment` (`None` removes a variable), which wins over `agent_env`
-/// except for an Anthropic API key the agent's list sets.
+/// except for an Anthropic API key either list sets.
 /// `BUZZ_VERSION` is always this app's version, so a command can tell it runs
 /// under Buzz.
 pub(crate) fn set_environment(
@@ -998,7 +998,6 @@ pub(crate) fn verified_artifact(mut artifact: ProcessArtifact) -> Result<PathBuf
     verify_artifact(&artifact)
 }
 
-/// A manifest may place an artifact under the user's home, written `~/…`.
 /// Process `process_id` as the grants of plugin `id` at `revision` declare it.
 pub(crate) fn declared_process(
     manager: &buzzodz_plugins::Manager,
@@ -1014,6 +1013,7 @@ pub(crate) fn declared_process(
         .ok_or_else(|| "Process is not declared".into())
 }
 
+/// A manifest may place an artifact under the user's home, written `~/…`.
 fn at_home(mut declared: HostProcess) -> Result<HostProcess, String> {
     if let Some(artifact) = &mut declared.artifact {
         artifact.path = expand_home(&artifact.path)?.to_string_lossy().into_owned();
