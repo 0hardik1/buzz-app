@@ -210,8 +210,8 @@ pub(crate) fn envs() -> (AgentEnvs, Stores) {
 async fn agent_given(envs: &AgentEnvs, pubkey: &str) -> Vec<(String, String)> {
     envs.for_process(Some(pubkey))
         .await
-        .into_iter()
-        .map(|(n, v)| (n.into_string().unwrap(), v.into_string().unwrap()))
+        .vars()
+        .map(|(n, v)| (n.to_str().unwrap().into(), v.to_str().unwrap().into()))
         .collect()
 }
 
@@ -362,12 +362,12 @@ async fn a_spawn_gets_only_an_eligible_named_agents_list() {
     let goose = bundled("buzz.goose", "goose");
     let spawn =
         |agent, protected| for_spawn(&envs, &host, &asks, agent, &goose, "bundled", protected);
-    assert_eq!(spawn(Some(ADA), false).await.unwrap().len(), 1);
+    assert_eq!(spawn(Some(ADA), false).await.unwrap().vars().count(), 1);
     // No agent named: the device list alone, empty here.
-    assert!(spawn(None, false).await.unwrap().is_empty());
+    assert_eq!(spawn(None, false).await.unwrap().vars().count(), 0);
     envs.set_device(vec![set("BAR", "device")]).await.unwrap();
-    assert_eq!(spawn(None, false).await.unwrap().len(), 1);
-    assert_eq!(spawn(Some(ADA), false).await.unwrap().len(), 2);
+    assert_eq!(spawn(None, false).await.unwrap().vars().count(), 1);
+    assert_eq!(spawn(Some(ADA), false).await.unwrap().vars().count(), 2);
     // An agent being removed, or not here, is refused.
     assert!(spawn(Some(BO), false).await.is_err());
     let absent = "c".repeat(64);
@@ -379,7 +379,9 @@ async fn a_spawn_gets_only_an_eligible_named_agents_list() {
         for_spawn(&envs, &host, &[], Some(ADA), &goose, "bundled", false)
             .await
             .unwrap()
-            .is_empty()
+            .vars()
+            .next()
+            .is_none()
     );
 }
 
@@ -416,7 +418,7 @@ async fn every_agent_gets_the_device_list_and_its_own_wins() {
     assert!(command.contains(&("FOO".to_string(), "ada".to_string())));
     assert!(!command.contains(&("FOO".to_string(), "device".to_string())));
     assert_eq!(agent_given(&envs, BO).await.len(), 2);
-    assert_eq!(envs.for_process(None).await.len(), 2);
+    assert_eq!(envs.for_process(None).await.vars().count(), 2);
     assert_eq!(
         envs.status(None).await.unwrap().names,
         vec!["BAR".to_string(), "FOO".to_string()]
@@ -520,20 +522,20 @@ async fn launched(
 }
 
 /// The spawn's own environment setup, with nothing but `list` added.
-fn spawn_env(command: &mut tokio::process::Command, list: &[(OsString, OsString)]) {
+fn spawn_env(command: &mut tokio::process::Command, list: &Lists) {
     let path = std::env::var_os("PATH").unwrap_or_default();
     crate::host_process::set_environment(command, &[], list, &path, &Default::default(), "0")
         .unwrap();
 }
 
-fn command_env(list: &[(OsString, OsString)]) -> Vec<(String, String)> {
+fn command_env(list: &Lists) -> Vec<(String, String)> {
     let mut command = tokio::process::Command::new("/usr/bin/true");
     spawn_env(&mut command, list);
     command
         .as_std()
         .get_envs()
         .filter_map(|(n, v)| Some((n.to_str()?.to_owned(), v?.to_str()?.to_owned())))
-        .filter(|(n, _)| list.iter().any(|(name, _)| name == n.as_str()))
+        .filter(|(n, _)| list.vars().any(|(name, _)| name == n.as_str()))
         .collect()
 }
 

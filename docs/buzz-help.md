@@ -163,6 +163,7 @@ if that desktop app is up and running.
   agent's own list wins over it for a variable with the same name. **Restart
   agents** asks first, then reloads Buzz, which ends calls and turns in
   progress, so every local agent's next message starts it with the saved list.
+  A device-list `ANTHROPIC_API_KEY` doesn't replace your own Claude setup.
 - Each harness reads its own variable names: Codex uses its own sign-in, not
   `OPENAI_API_KEY`, and a credential under a different name can still outrank
   the one an agent's list sets.

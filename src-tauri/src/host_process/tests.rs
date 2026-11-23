@@ -1198,7 +1198,10 @@ fn every_process_is_told_the_buzz_version_a_plugin_cannot_change() {
         set_environment(
             &mut command,
             &login_shell,
-            &agent_env,
+            &crate::agent_env::Lists {
+                own: agent_env.to_vec(),
+                ..Default::default()
+            },
             OsStr::new("/bin"),
             &environment,
             "0.7.12",
@@ -1219,39 +1222,85 @@ fn every_process_is_told_the_buzz_version_a_plugin_cannot_change() {
     }
 }
 
-#[test]
-fn an_agents_saved_anthropic_key_survives_its_harness_removing_inherited_ones() {
-    let get = |command: &Command, name: &str| {
+/// The Anthropic key a Claude launch's command gets, its harness removing any
+/// inherited one as `claude.ts` does. `own_setup`: the person's own Claude
+/// setup works, so the launch isn't granted `claude_key::SECRET`.
+fn claude_launch_key(
+    own_setup: bool,
+    own: Option<&str>,
+    device: Option<&str>,
+    shared: Option<&str>,
+) -> Option<String> {
+    let key = |value: &str| ("ANTHROPIC_API_KEY".into(), value.into());
+    let lists = crate::agent_env::Lists {
+        device: [
+            Some(("DEVICE_SETTING".into(), "kept".into())),
+            device.map(key),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        own: own.map(key).into_iter().collect(),
+    };
+    let removed = HashMap::from([("ANTHROPIC_API_KEY".to_owned(), None)]);
+    let inherited = [key("sk-ant-inherited")];
+    let mut command = Command::new("/usr/bin/true");
+    set_environment(
+        &mut command,
+        &inherited,
+        &lists,
+        OsStr::new("/bin"),
+        &removed,
+        "0",
+    )
+    .unwrap();
+    if !own_setup {
+        set_claude_key(&mut command, &lists, shared);
+    }
+    let get = |name: &str| {
         command
             .as_std()
             .get_envs()
             .find(|(key, _)| *key == name)
             .and_then(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
     };
-    let removed = HashMap::from([("ANTHROPIC_API_KEY".to_owned(), None)]);
-    let saved = [("ANTHROPIC_API_KEY".into(), "sk-ant-agent".into())];
-    // The device list's, then the agent's own.
-    let both = [
-        ("ANTHROPIC_API_KEY".into(), "sk-ant-device".into()),
-        ("ANTHROPIC_API_KEY".into(), "sk-ant-agent".into()),
-    ];
-    for (agent_env, expected) in [
-        (&saved[..], Some("sk-ant-agent")),
-        (&both[..], Some("sk-ant-agent")),
-        (&[][..], None),
-    ] {
-        let mut command = Command::new("/usr/bin/true");
-        set_environment(
-            &mut command,
-            &[],
-            agent_env,
-            OsStr::new("/bin"),
-            &removed,
-            "0.7.12",
-        )
-        .unwrap();
-        assert_eq!(get(&command, "ANTHROPIC_API_KEY").as_deref(), expected);
+    assert_eq!(get("DEVICE_SETTING").as_deref(), Some("kept"));
+    get("ANTHROPIC_API_KEY")
+}
+
+#[test]
+fn a_device_anthropic_key_never_replaces_the_persons_own_claude_setup() {
+    let (own, device, shared) = (
+        Some("sk-ant-own"),
+        Some("sk-ant-device"),
+        Some("sk-ant-shared"),
+    );
+    // Own setup: only the agent's own key overrides it.
+    for shared in [shared, None] {
+        assert_eq!(claude_launch_key(true, None, device, shared), None);
+        assert_eq!(claude_launch_key(true, own, device, shared).as_deref(), own);
+        assert_eq!(claude_launch_key(true, own, None, shared).as_deref(), own);
     }
+    // A launch that needs a key: the agent's own, the device's, then shared.
+    assert_eq!(
+        claude_launch_key(false, None, device, shared).as_deref(),
+        device
+    );
+    assert_eq!(
+        claude_launch_key(false, None, device, None).as_deref(),
+        device
+    );
+    assert_eq!(
+        claude_launch_key(false, own, device, shared).as_deref(),
+        own
+    );
+    assert_eq!(
+        claude_launch_key(false, None, None, shared).as_deref(),
+        shared
+    );
+    // An inherited key stays removed.
+    assert_eq!(claude_launch_key(true, None, None, None), None);
+    assert_eq!(claude_launch_key(false, None, None, None), None);
 }
 
 #[cfg(unix)]

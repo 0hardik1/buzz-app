@@ -189,6 +189,35 @@ const PATHS: &[&str] = &[
 pub(crate) const SECRET: &str = "agent-env";
 
 type List = BTreeMap<String, String>;
+type Var = (OsString, OsString);
+
+/// The lists a process starts with, kept apart: the agent's own Anthropic key
+/// outranks its harness, the device list's doesn't (`host_process`).
+#[derive(Default)]
+pub(crate) struct Lists {
+    pub(crate) device: Vec<Var>,
+    pub(crate) own: Vec<Var>,
+}
+
+impl Lists {
+    /// The device's variables, then the agent's, so its own win.
+    pub(crate) fn vars(&self) -> impl Iterator<Item = &Var> {
+        self.device.iter().chain(&self.own)
+    }
+    /// The Anthropic key the agent's own list sets.
+    pub(crate) fn own_key(&self) -> Option<&Var> {
+        anthropic_key(&self.own)
+    }
+    /// The Anthropic key a launch that needs one uses: the agent's own, then
+    /// the device's.
+    pub(crate) fn key(&self) -> Option<&Var> {
+        self.own_key().or_else(|| anthropic_key(&self.device))
+    }
+}
+
+fn anthropic_key(vars: &[Var]) -> Option<&Var> {
+    vars.iter().find(|(name, _)| name == crate::claude_key::ENV)
+}
 
 /// A row of a save: `value` replaces the saved value, or `None` keeps it.
 /// A saved name left out is deleted.
@@ -240,7 +269,7 @@ impl AgentEnv {
     /// The variables an authorized process (`for_spawn`) starts with: none
     /// when the store can't be read, which is logged without values so the
     /// agent still starts.
-    pub(crate) async fn for_process(&self) -> Vec<(OsString, OsString)> {
+    pub(crate) async fn for_process(&self) -> Vec<Var> {
         match self.load().await {
             Ok(list) => list
                 .iter()
@@ -452,12 +481,13 @@ impl AgentEnvs {
     }
     /// The device's variables for a process, then `agent`'s, as
     /// `AgentEnv::for_process`.
-    pub(crate) async fn for_process(&self, agent: Option<&str>) -> Vec<(OsString, OsString)> {
-        let mut vars = self.list(DEVICE).for_process().await;
-        if let Some(pubkey) = agent.filter(|pubkey| agent_key(pubkey).is_ok()) {
-            vars.extend(self.list(pubkey).for_process().await);
-        }
-        vars
+    pub(crate) async fn for_process(&self, agent: Option<&str>) -> Lists {
+        let device = self.list(DEVICE).for_process().await;
+        let own = match agent.filter(|pubkey| agent_key(pubkey).is_ok()) {
+            Some(pubkey) => self.list(pubkey).for_process().await,
+            None => Vec::new(),
+        };
+        Lists { device, own }
     }
     /// `agent`'s list, or without one the device's.
     pub(crate) async fn status(&self, agent: Option<&str>) -> Result<Status, String> {
@@ -577,9 +607,9 @@ pub(crate) async fn for_spawn(
     declared: &buzzodz_plugins::HostProcess,
     revision: &str,
     protected: bool,
-) -> Result<Vec<(OsString, OsString)>, String> {
+) -> Result<Lists, String> {
     if !secrets.iter().any(|s| s == SECRET) {
-        return Ok(Vec::new());
+        return Ok(Lists::default());
     }
     if protected || revision != "bundled" || !declared.agent_env {
         return Err("That secret is not available to this process".into());

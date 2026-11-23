@@ -535,7 +535,7 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
         )
         .await?
     } else {
-        Vec::new()
+        Default::default()
     };
     set_environment(
         &mut command,
@@ -575,13 +575,15 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
         {
             return Err("That secret is not available to this process".into());
         }
-        // A key in the device's or the agent's list outranks the shared one.
-        if agent_key(&agent_env).is_some() {
-            continue;
-        }
-        if let Some(key) = app.state::<crate::claude_key::ClaudeKey>().key().await? {
-            command.env(crate::claude_key::ENV, &*key);
-        }
+        let shared = match agent_env.key() {
+            Some(_) => None,
+            None => app.state::<crate::claude_key::ClaudeKey>().key().await?,
+        };
+        set_claude_key(
+            &mut command,
+            &agent_env,
+            shared.as_deref().map(|key| &**key),
+        );
     }
     if let Some(mcp) = mcp {
         command.env(
@@ -637,13 +639,13 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
 /// paths, plus the `login_shell` variables it forwards and then the agent's
 /// `agent_env`, less any Buzz identity these hold, plus the plugin's
 /// `environment` (`None` removes a variable), which wins over `agent_env`
-/// except for an Anthropic API key either list sets.
+/// except for an Anthropic API key the agent's own list sets.
 /// `BUZZ_VERSION` is always this app's version, so a command can tell it runs
 /// under Buzz.
 pub(crate) fn set_environment(
     command: &mut Command,
     login_shell: &[(std::ffi::OsString, std::ffi::OsString)],
-    agent_env: &[(std::ffi::OsString, std::ffi::OsString)],
+    agent_env: &crate::agent_env::Lists,
     path: &OsStr,
     environment: &HashMap<String, Option<String>>,
     version: &str,
@@ -662,13 +664,13 @@ pub(crate) fn set_environment(
         }
     }
     command.envs(login_shell.iter().cloned());
-    command.envs(agent_env.iter().cloned());
+    command.envs(agent_env.vars().cloned());
     // Never pass on an identity the app was started with, even one the user
     // asked their login shell or the agent list to forward.
     for name in std::env::vars_os()
         .map(|(name, _)| name)
         .chain(login_shell.iter().map(|(name, _)| name.clone()))
-        .chain(agent_env.iter().map(|(name, _)| name.clone()))
+        .chain(agent_env.vars().map(|(name, _)| name.clone()))
     {
         let text = name.to_string_lossy();
         if text.starts_with("BUZZ_") || text.starts_with("NOSTR_") {
@@ -689,23 +691,27 @@ pub(crate) fn set_environment(
         };
     }
     // An Anthropic key saved for the agent is one the person chose for it,
-    // unlike an inherited one, which a harness may remove.
-    if let Some((name, value)) = agent_key(agent_env) {
+    // unlike an inherited one or the device list's, which a harness may
+    // remove: Claude does when it uses the person's own setup.
+    if let Some((name, value)) = agent_env.own_key() {
         command.env(name, value);
     }
     command.env("BUZZ_VERSION", version);
     Ok(())
 }
 
-/// The Anthropic API key in an agent's lists, if they set one: the agent's
-/// own, which follows the device's, wins.
-fn agent_key(
-    agent_env: &[(std::ffi::OsString, std::ffi::OsString)],
-) -> Option<&(std::ffi::OsString, std::ffi::OsString)> {
-    agent_env
-        .iter()
-        .rev()
-        .find(|(name, _)| name == crate::claude_key::ENV)
+/// Sets the Anthropic key for a launch granted `claude_key::SECRET`: the
+/// agent's own list's, then the device list's, then `shared`.
+pub(crate) fn set_claude_key(
+    command: &mut Command,
+    agent_env: &crate::agent_env::Lists,
+    shared: Option<&str>,
+) {
+    if let Some((name, value)) = agent_env.key() {
+        command.env(name, value);
+    } else if let Some(key) = shared {
+        command.env(crate::claude_key::ENV, key);
+    }
 }
 
 /// The mounted or extracted AppImage this app runs from: `APPDIR` only when

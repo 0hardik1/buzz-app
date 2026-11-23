@@ -154,6 +154,10 @@ it("starts a turn's claude with no saved key when its agent's own variables set 
   await authorized("claude", { ...options, envAgent: other });
   await authorized("claude", options);
   expect(started).toHaveLength(3);
+  // Without own setup, each asks native for a key: its own list's, the
+  // device's, then the shared one.
+  for (const { options } of started)
+    expect(options?.secrets).toEqual(["agent-env", "anthropic-api-key"]);
   // A launch that doesn't ask for the lists never gets that key.
   await expect(authorized("claude", { env: ENV })).rejects.toThrow(
     "Claude needs an Anthropic API key.",
@@ -462,4 +466,19 @@ it("points a refused own setup at the Claude CLI rather than a key", async () =>
   expect(auth.explainTurn("Error: overloaded", settings)).toBe(
     "Error: overloaded",
   );
+});
+
+it("keeps the person's own setup with a device-list key: no key is asked for", async () => {
+  const { spawn, started } = host({ loggedIn: true });
+  store(false);
+  state.agentEnv.set("", ["ANTHROPIC_API_KEY"]);
+  const authorized = new ClaudeAuth(spawn).authorize(spawn, true);
+  const agent = "a".repeat(64);
+  const options = { env: ENV, secrets: ["agent-env" as const] };
+  await authorized("claude", { ...options, envAgent: agent });
+  await authorized("claude", options);
+  expect(started.map(({ options }) => options)).toEqual([
+    { ...options, envAgent: agent },
+    options,
+  ]);
 });
