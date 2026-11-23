@@ -1304,6 +1304,7 @@ export function createTabs(
             { agent: { key: agent.key, name: agent.name }, ...conversation },
             signal,
             (pubkey) => runtime.name(agent.key, pubkey),
+            working,
           );
           return (
             transcript && {
