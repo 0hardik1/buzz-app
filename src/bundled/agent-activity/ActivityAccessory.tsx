@@ -366,6 +366,13 @@ function MessageWork(
         }))}
         picture={avatarMedia(primary.picture, session.media)}
         layout={props.messageLayout}
+        profile={{
+          pubkey: primary.agent,
+          session,
+          channelId,
+          canOpen,
+          open: props.open,
+        }}
       >
         {shown.map((entry) => (
           <TypingReplacement
