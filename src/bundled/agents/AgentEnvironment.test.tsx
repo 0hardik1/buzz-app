@@ -445,3 +445,76 @@ it("keeps the restart offer across leaving and coming back until a restart succe
   await screen.findByText("SAVED_KEY");
   expect(screen.queryByRole("button", { name: "Restart agent" })).toBeNull();
 });
+
+it("edits the device list when no agent is named", async () => {
+  const user = userEvent.setup();
+  render(<AgentEnvironment />);
+  await replaceSaved(user);
+  await user.type(screen.getByLabelText("Value of SAVED_KEY"), "new");
+  await user.click(button("Save"));
+  expect(calls("agent_env_status")[0]?.[1]).toEqual({ agent: undefined });
+  expect(calls("agent_env_set")[0]?.[1]).toEqual({
+    agent: undefined,
+    rows: [{ name: "SAVED_KEY", value: "new" }],
+  });
+  expect(
+    screen.getByText("Variables every local agent on this device starts with."),
+  ).toBeInTheDocument();
+});
+
+it("restarting every agent asks first, then reloads Buzz", async () => {
+  const user = userEvent.setup();
+  const reload = vi.fn();
+  vi.stubGlobal("location", { ...window.location, reload });
+  native.invoke.mockImplementation(async (command) =>
+    command === "agent_env_status" ? { names, saved: true } : undefined,
+  );
+  try {
+    render(<AgentEnvironment />);
+    expect(
+      await screen.findByText("Changes saved. Restart agents to apply them."),
+    ).toBeInTheDocument();
+    await user.click(button("Restart agents"));
+    expect(screen.getByText(/ends calls and turns in progress/)).toBeVisible();
+    expect(reload).not.toHaveBeenCalled();
+    await user.click(button("Restart"));
+    expect(reload).toHaveBeenCalledOnce();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("marks an agent's variables that override the device list", async () => {
+  names = ["SAVED_KEY", "OWN"];
+  native.invoke.mockImplementation(async (command, args) =>
+    command === "agent_env_status"
+      ? { names: (args as { agent?: string }).agent ? names : ["SAVED_KEY"] }
+      : undefined,
+  );
+  const openSettings = vi.fn();
+  const user = userEvent.setup();
+  render(
+    <AgentEnvironment
+      agent={AGENT}
+      restartAgent={restartAgent}
+      openSettings={openSettings}
+    />,
+  );
+  expect(
+    await screen.findByText("Overrides the device-wide value"),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Overrides the device-wide value")).toHaveLength(
+    1,
+  );
+  await user.click(button("device-wide variables"));
+  expect(openSettings).toHaveBeenCalledWith("agents");
+});
+
+it("a restarted agent's banner stays gone though native still says saved", async () => {
+  native.invoke.mockImplementation(async (command) =>
+    command === "agent_env_status" ? { names, saved: true } : undefined,
+  );
+  render(<AgentEnvironment agent={AGENT} restartAgent={restartAgent} />);
+  await screen.findByText("SAVED_KEY");
+  expect(screen.queryByRole("button", { name: "Restart agent" })).toBeNull();
+});
