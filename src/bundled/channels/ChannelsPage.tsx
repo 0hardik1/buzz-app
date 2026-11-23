@@ -2516,6 +2516,7 @@ function ChannelWorkspace({
       data-instant-split={continuingVisit ? undefined : ""}
       ref={split.ref}
       style={split.style}
+      data-panel-cards=""
       className={`${styles.board} ${panelStyles.splitMotion}`}
     >
       {current && membersOpen && (
@@ -2897,44 +2898,48 @@ function ChannelWorkspace({
                 className={styles.retainedPanel}
                 hidden={!!companion && !showingChannelPanel}
               >
-                <PanelWorkspace
-                  key={currentId}
-                  actions={
-                    <IconButton
-                      hint="familiar"
-                      data-tab-pane-toggle=""
-                      data-highlight-expanded="false"
-                      variant="subtle"
-                      size="toolbar"
-                      aria-label="Toggle tab pane"
-                      title="Close tab pane"
-                      aria-expanded={true}
-                      onClick={secondary.closePane}
-                      icon={<SidebarRightIcon size="1rem" aria-hidden="true" />}
-                    />
-                  }
-                  tabMenu={tabMenu}
-                  drag={secondary.drag.side}
-                  value={selectedTab}
-                  focusOnMount={
-                    !membersOpen && (continuingVisit || !!routedThread)
-                  }
-                  select={selectPanelTab}
-                  items={[
-                    ...(settings
-                      ? [
-                          {
-                            id: "settings",
-                            label: "Channel settings",
-                            icon: <GearIcon size="1rem" />,
-                            close: closeSettings,
-                            content: settingsContent,
-                          },
-                        ]
-                      : []),
-                    ...secondary.items,
-                  ]}
-                />
+                <Panel as="div">
+                  <PanelWorkspace
+                    key={currentId}
+                    actions={
+                      <IconButton
+                        hint="familiar"
+                        data-tab-pane-toggle=""
+                        data-highlight-expanded="false"
+                        variant="subtle"
+                        size="toolbar"
+                        aria-label="Toggle tab pane"
+                        title="Close tab pane"
+                        aria-expanded={true}
+                        onClick={secondary.closePane}
+                        icon={
+                          <SidebarRightIcon size="1rem" aria-hidden="true" />
+                        }
+                      />
+                    }
+                    tabMenu={tabMenu}
+                    drag={secondary.drag.side}
+                    value={selectedTab}
+                    focusOnMount={
+                      !membersOpen && (continuingVisit || !!routedThread)
+                    }
+                    select={selectPanelTab}
+                    items={[
+                      ...(settings
+                        ? [
+                            {
+                              id: "settings",
+                              label: "Channel settings",
+                              icon: <GearIcon size="1rem" />,
+                              close: closeSettings,
+                              content: settingsContent,
+                            },
+                          ]
+                        : []),
+                      ...secondary.items,
+                    ]}
+                  />
+                </Panel>
               </div>
             )}
             {hasChannelPanel && drawer.side && (

@@ -1076,11 +1076,24 @@
   }
 
   /* A flat panel has no edge; its fill separates it from the tint. Sidebar
-     cards on the tint are always flat. */
+     cards, and the cards of a layout that floats its regions apart, are
+     always flat. */
   .panel[data-flat],
+  :where([data-panel-cards]) .panel,
   :where([data-sidebar-cards] [data-sidebar-card]) {
     border-color: transparent;
     box-shadow: none;
+  }
+
+  /* A layout marked `data-panel-cards` draws each of its regions as its own
+     Panel, so a panel around it steps back to bare layout: no fill, edge,
+     shadow or clip, and the window's tint and backdrop show between the
+     cards. Hidden layouts, such as a retained page, don't count. */
+  .panel:has([data-panel-cards]:not([hidden], [hidden] *)) {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
   }
 
   /* A joined surface keeps one outer edge; nested panels retain opaque

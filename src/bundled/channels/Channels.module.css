@@ -20,7 +20,10 @@
   position: relative;
   overflow: clip;
 }
+/* Open, the dock floats as its own card beside the conversation's, the same
+   small gap apart as the sidebar. */
 .board:has(> [data-panel-dock]:not([hidden], [data-closing])) {
+  column-gap: var(--space-1);
   grid-template-columns: minmax(20rem, 1fr) minmax(
       0,
       max(
@@ -462,17 +465,18 @@ details:not([open]) > summary .sectionChevron {
     var(--secondary-panel-width, var(--split-default, calc(100cqw / 2.1)))
   );
   position: relative;
-  border-inline-start: 1px solid var(--border-standard);
   grid-column: 2;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-auto-rows: minmax(0, 1fr);
+  /* Stacked panels are separate cards too. */
+  row-gap: var(--space-1);
 }
-.panelStack
-  > :not([inert], [hidden], [data-panel-resize])
-  ~ :not([inert], [hidden], [data-panel-resize]) {
-  border-block-start: 1px solid var(--border-standard);
+/* The grip sits in the middle of the gap between the cards. */
+.board .panelStack > [data-panel-resize] {
+  inset-inline-start: calc(-1 * var(--space-1) / 2 - 1px);
+  translate: 0;
 }
 .retainedPanel[hidden] {
   display: none;
@@ -573,6 +577,7 @@ details:not([open]) > summary .sectionChevron {
     inset: 0 0 0 auto;
     width: min(26.25rem, 100%);
     z-index: 2;
+    border-radius: var(--radius-container);
     box-shadow: var(--elevation-dock);
   }
 }
@@ -596,6 +601,7 @@ details:not([open]) > summary .sectionChevron {
     inset: 0 0 0 auto;
     width: min(26.25rem, 100%);
     z-index: 2;
+    border-radius: var(--radius-container);
     box-shadow: var(--elevation-dock);
   }
 }
@@ -609,7 +615,6 @@ details:not([open]) > summary .sectionChevron {
   .panelStack {
     grid-column: 1 / -1;
     width: 100%;
-    border-inline-start: 0;
   }
   .roster {
     font-size: var(--text-caption);
