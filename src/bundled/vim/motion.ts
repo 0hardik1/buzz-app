@@ -32,8 +32,19 @@ const TYPING =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
 const LINE = 64;
 export const SIDEBAR = 'aside[aria-label="Sidebar"]';
-/** What j and k can walk to; `walkable` drops fields, so j never types. */
-const ITEM = "a[href], button, summary, input, [tabindex]";
+/** What j and k can walk to, fields included (see `FIELD_SELECTED`). */
+const ITEM =
+  'a[href], button, summary, input, textarea, select, [contenteditable="true"], [tabindex]';
+/**
+ * The host's mark for a field that holds keyboard focus without being edited:
+ * where j and k land on one, until i or Enter edits it.
+ */
+export const FIELD_SELECTED = "data-field-selected";
+/** Fields that take text, so a selected one swallows other keys. */
+export const TEXT_FIELD =
+  'input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+/** A dialog's panes: its navs and detail asides, and the rest of it. */
+const DIALOG_PANE = "nav, aside";
 /** Arrows here open a popup or change a value, so j and k step past it. */
 const NO_ARROWS =
   '[aria-haspopup]:not([role^="menuitem"]), [role="combobox"], [role="radio"], [role="slider"], [role="spinbutton"], input[type="radio"], input[type="range"]';
@@ -45,7 +56,25 @@ export const focused = () => {
     ? element
     : undefined;
 };
-export const typing = () => !!focused()?.matches(TYPING);
+/** Typing in a field; a selected field (`FIELD_SELECTED`) is not. */
+export const typing = () => {
+  const element = focused();
+  return !!element?.matches(TYPING) && !element.hasAttribute(FIELD_SELECTED);
+};
+/** The selected field holding focus, which keys move from rather than type in. */
+export const selectedField = () => {
+  const element = focused();
+  return element?.hasAttribute(FIELD_SELECTED) ? element : undefined;
+};
+/** i or Enter on a selected field: edit it. */
+export const editField = () => selectedField()?.removeAttribute(FIELD_SELECTED);
+/** Escape in a field: keep focus on it without editing. */
+export function selectField(field: HTMLElement) {
+  field.setAttribute(FIELD_SELECTED, "");
+  field.addEventListener("blur", () => field.removeAttribute(FIELD_SELECTED), {
+    once: true,
+  });
+}
 /** The open modal on top; one that is closing no longer holds the keys. */
 const topModal = () =>
   [...document.querySelectorAll<HTMLElement>(MODAL)]
@@ -166,28 +195,37 @@ export function step(down: boolean, settled = false) {
 
 /**
  * What j and k walk from `origin`, in document order: the items of the
- * nav in a dialog that holds it, else the dialog's other items, else a
- * popover's, the sidebar's, or a pane's. Undefined in messages and menus,
- * which have their own moves.
+ * dialog pane holding it (see `dialogPane`), else a popover's, the
+ * sidebar's, or a pane's. Undefined in messages and menus, which have their
+ * own moves.
  */
 function walkable(origin: HTMLElement | undefined) {
   if (!origin || origin.closest(`${ROW}, [role="menu"]`)) return;
   const modal = topModal();
-  const inModal = !!modal?.contains(origin);
-  const nav = inModal ? origin.closest("nav") : undefined;
-  const root = inModal
-    ? (nav ?? modal)
-    : (origin.closest<HTMLElement>(`[role="dialog"], ${SIDEBAR}`) ??
-      currentPane());
-  if (!root) return;
+  const pane = modal?.contains(origin) ? dialogPane(modal, origin) : undefined;
+  const root =
+    pane ??
+    origin.closest<HTMLElement>(`[role="dialog"], ${SIDEBAR}`) ??
+    currentPane();
+  return root && itemsIn(root, modal && pane ? modal : undefined);
+}
+
+/** The items in `root`; in a dialog, only those of `root`'s own pane. */
+function itemsIn(root: HTMLElement, modal?: HTMLElement) {
   return [...root.querySelectorAll<HTMLElement>(ITEM)].filter(
     (item) =>
       item.tabIndex >= 0 &&
-      !item.matches(`${TYPING}, :disabled, [aria-disabled="true"]`) &&
+      !item.matches(':disabled, [aria-disabled="true"]') &&
       !item.closest(`${ROW}, ${UNAVAILABLE}`) &&
       item.getClientRects().length > 0 &&
-      (!inModal || item.closest("nav") === nav),
+      (!modal || dialogPane(modal, item) === root),
   );
+}
+
+/** The dialog pane holding `element`: its nav or detail aside, else the dialog. */
+function dialogPane(modal: HTMLElement, element: Element) {
+  const pane = element.closest<HTMLElement>(DIALOG_PANE);
+  return pane && modal.contains(pane) && pane !== modal ? pane : modal;
 }
 
 const box = (element: Element) => element.getBoundingClientRect();
@@ -199,7 +237,9 @@ function lineFrom(origin: HTMLElement, down: boolean) {
   const own = box(origin);
   // Not an item itself, such as a focused section: start from its edge.
   const edge = down ? own.top : own.bottom;
-  const from = items.includes(origin) ? own : { top: edge, bottom: edge };
+  const from = items.includes(origin)
+    ? own
+    : { top: edge, bottom: edge, left: own.left };
   return items[lineItem(items.map(box), from, down)];
 }
 
@@ -220,6 +260,9 @@ function focusItem(
 ) {
   item.scrollIntoView?.({ block });
   focusKeyboardTarget(item);
+  // A field is selected, not edited, so the next key still moves.
+  if (item.matches(TYPING) && document.activeElement === item)
+    selectField(item);
 }
 
 /** Of `items`, the first about `distance` px past `from`, or the last. */
@@ -458,8 +501,48 @@ function enter(pane: HTMLElement) {
   );
 }
 
+/** Where focus last was in each dialog pane, to return there. */
+const lastInPane = new WeakMap<HTMLElement, HTMLElement>();
+
+/** A dialog's panes that have items, left to right. */
+function dialogPanes(modal: HTMLElement) {
+  return [modal, ...modal.querySelectorAll<HTMLElement>(DIALOG_PANE)]
+    .filter((pane) => dialogPane(modal, pane) === pane)
+    .map((pane) => ({ pane, items: itemsIn(pane, modal) }))
+    .filter(({ items }) => items.length)
+    .map((entry) => ({
+      ...entry,
+      left: Math.min(...entry.items.map((item) => box(item).left)),
+    }))
+    .sort((a, b) => a.left - b.left);
+}
+
+/** `<C-h>` / `<C-l>` in a dialog: its pane to the left or right. */
+function focusDialogPane(modal: HTMLElement, right: boolean) {
+  const origin = focused();
+  const current =
+    origin && modal.contains(origin) ? dialogPane(modal, origin) : undefined;
+  if (current && origin) lastInPane.set(current, origin);
+  const all = dialogPanes(modal);
+  const index = all.findIndex(({ pane }) => pane === current);
+  const next =
+    all[index < 0 ? (right ? 0 : all.length - 1) : index + (right ? 1 : -1)];
+  if (!next) return;
+  const last = lastInPane.get(next.pane);
+  focusItem(
+    (last && next.items.includes(last) ? last : undefined) ??
+      next.items.find((item) => item.matches('[aria-current="page"]')) ??
+      // Content that scrolls before a dialog's fixed chrome, such as Close.
+      next.items.find((item) => inView(item) && !!scrollable(item)) ??
+      next.items.find((item) => inView(item)) ??
+      (next.items[0] as HTMLElement),
+  );
+}
+
 /** `<C-h>` / `<C-l>`: the pane to the left or right. */
 export function focusPane(right: boolean) {
+  const modal = topModal();
+  if (modal) return focusDialogPane(modal, right);
   const all = panes();
   const current = currentPane();
   const index = current ? all.indexOf(current) : right ? -1 : all.length;

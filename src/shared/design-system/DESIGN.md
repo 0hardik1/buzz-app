@@ -872,6 +872,11 @@ Unlike the text-field exception this is not modality-gated, because the shell
 also marks where typing will land. Do not copy the container pattern to a
 control that has a component ring recipe.
 
+A field marked `data-field-selected` holds keyboard focus without being
+edited, as a keyboard plugin's normal mode leaves it. It takes the read-only
+keyboard ring instead of the perimeter stroke and hides its caret until
+editing starts. Nothing in Buzz sets it except such a plugin.
+
 `SearchField` is an unresolved gap, not a policy: `styles/search-field.css`
 cancels the ring on both the field and its clear button to match a global
 override that no longer exists, and its 1px perimeter border does not react to

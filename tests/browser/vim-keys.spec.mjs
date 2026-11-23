@@ -583,6 +583,70 @@ test("j, k, gg, G and Ctrl-d walk Settings without opening its choices", async (
 
 // A thread opens beside the conversation in a side panel with its own
 // message box and list, and its tab's own Escape; that handoff needs a browser.
+// Settings is a dialog with panes; fields there take keys or text.
+test("Ctrl-h and Ctrl-l move between Settings' panes, and j and k select its fields without typing", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await enableVimKeys(page);
+  await openSettings(page);
+  await selectSettingsSection(page, "Profile");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  const profile = sections.getByRole("button", {
+    name: "Profile",
+    exact: true,
+  });
+  const inSections = () =>
+    sections.evaluate((nav) => nav.contains(document.activeElement));
+  await profile.focus();
+  await page.keyboard.press(apple ? "Control+l" : "Alt+l");
+  await expect.poll(inSections).toBe(false);
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => element.contains(document.activeElement)),
+    )
+    .toBe(true);
+
+  // j stops on a field, selected but not edited: typing does nothing.
+  const name = dialog.getByRole("textbox", { name: "Display name" });
+  const before = await name.inputValue();
+  for (let presses = 0; presses < 4; presses++) {
+    if (await name.evaluate((field) => field === document.activeElement)) break;
+    await page.keyboard.press("j");
+  }
+  await expect(name).toBeFocused();
+  await expect(name).toHaveAttribute("data-field-selected", "");
+  await page.keyboard.press("x");
+  await expect(name).toHaveValue(before);
+  // i edits it; Escape selects it again, and Settings stays open.
+  await page.keyboard.press("i");
+  await expect(name).not.toHaveAttribute("data-field-selected");
+  await page.keyboard.press("End");
+  await page.keyboard.type("x");
+  await expect(name).toHaveValue(`${before}x`);
+  await page.keyboard.press("Escape");
+  await expect(name).toBeFocused();
+  await expect(name).toHaveAttribute("data-field-selected", "");
+  await page.keyboard.press("j");
+  await expect(name).not.toBeFocused();
+  await expect(name).toHaveValue(`${before}x`);
+  await page.evaluate(() => {
+    document.activeElement.dataset.below = "";
+  });
+
+  // The section list and back, to where focus was.
+  await page.keyboard.press(apple ? "Control+h" : "Alt+h");
+  await expect(profile).toBeFocused();
+  await page.keyboard.press(apple ? "Control+l" : "Alt+l");
+  await expect
+    .poll(() =>
+      page.evaluate(() => !!document.activeElement?.hasAttribute("data-below")),
+    )
+    .toBe(true);
+});
+
 test.describe("with a thread", () => {
   test.use({ readState: true, threadUnread: true, productionBroker: true });
   const panel = (page) => page.locator("[data-panel-workspace]");

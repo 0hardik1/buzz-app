@@ -1049,9 +1049,12 @@ Quitting Buzz also turns it off.
   remembers its message and returns to it, starting with the newest. `j`/`k`
   or a click move it, and the view follows it; scrolling with a mouse or
   trackpad leaves it where it is. The same keys move the focus in the sidebar, menus, Settings and other
-  dialogs: `j`/`k` go to the next or previous row or control, skipping text
-  fields and passing over choice menus without opening them, and `h`/`l`
-  reach controls on the same line. `gg`/`G` go to the first or last item, or
+  dialogs: `j`/`k` go to the next or previous row or control in the same
+  column, passing over choice menus without opening them, and `h`/`l` reach
+  controls on the same line. `j`/`k` select a text field without typing in
+  it; `i` or Enter edits it and Escape selects it again. `Ctrl-h`/`Ctrl-l`
+  move between panes, in Settings too: its section list, the section and a
+  plugin's details. `gg`/`G` go to the first or last item, or
   the oldest loaded or newest message, and `Ctrl-d`/`Ctrl-u` move half a page.
   Enter enters the selected message's thread at its newest message, and
   Escape in the thread's message box returns to it. `go` opens the selected
@@ -1064,8 +1067,8 @@ Quitting Buzz also turns it off.
   conversations, `H`/`L` go back and forward, `i` starts typing and Escape
   returns to the selected message; Escape on the message marks the
   conversation read. Apart from that Escape, its keys never fire while you type in a field
-  or terminal. `Ctrl-h`/`Ctrl-l` move between panes (`Alt` on Windows and
-  Linux). The plugin's README in Settings → Plugins is its manual.
+  or terminal. The pane keys use `Alt` instead of `Ctrl` on Windows and
+  Linux. The plugin's README in Settings → Plugins is its manual.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →
   Interface**. Narrow is the default; Wide gives messages and the composer
   50% more room when the pane is wide enough. The choice is saved on this device.

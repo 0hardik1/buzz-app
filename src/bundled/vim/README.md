@@ -29,19 +29,29 @@ view follows it.
 | `h` / `l` | Left / right: in lists and tabs, or to the next control on the same line |
 | `gg` / `G` | The first / last item; the oldest loaded / newest message |
 | `Ctrl-d` / `Ctrl-u` | Half a page down / up, centred |
-| `Ctrl-h` / `Ctrl-l` | Pane to the left / right |
+| `Ctrl-h` / `Ctrl-l` | Pane to the left / right, also in Settings and other dialogs |
 | `Ctrl-j` / `Ctrl-k` | Message box / messages |
 | `H` / `L` | Back / forward |
 
+Panes are the windows you move between, and `hjkl` moves within one. In the
+main window they are the sidebar, the conversation and the side panel. In
+Settings they are the section list, the section and a plugin's details, and
+any dialog with a list or details beside its content works the same way.
+`Ctrl-h` and `Ctrl-l` return to where you were in a pane. You never need Tab.
+
 Where a list, menu or tab bar has arrow keys of its own, `j` and `k` are those
 arrows. Elsewhere, such as the sidebar and Settings, `j` and `k` go to the
-first control on the next line, so they skip a heading's buttons; `h` and `l`
-reach them. `j` and `k` pass over text fields, so they never start typing:
-use Tab or a click to reach a field. They also pass over choice menus and
-radio buttons without opening or changing them; `h` and `l` change a radio
-button, as the arrow keys do. When the next control is more than a line out
-of view, `j` and `k` scroll a line instead, so text between controls stays
-readable.
+next line in the same column, as in Vim, so they go down a column of cards or
+past a heading's buttons; `h` and `l` move along the line. They pass over
+choice menus and radio buttons without opening or changing them; `h` and `l`
+change a radio button, as the arrow keys do. When the next control is more
+than a line out of view, `j` and `k` scroll a line instead, so text between
+controls stays readable.
+
+`j` and `k` stop on text fields too. A field they stop on is selected, with a
+focus ring and no caret: keys still move, and nothing types. Press `i` or
+Enter to edit it, and Escape to select it again; a second Escape does what
+Escape does there, such as closing Settings.
 
 ## Messages
 

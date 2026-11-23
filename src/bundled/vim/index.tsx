@@ -33,6 +33,10 @@ import {
   focused,
   typing,
   SIDEBAR,
+  editField,
+  selectedField,
+  selectField,
+  TEXT_FIELD,
   stepPart,
   threadSummary,
 } from "./motion";
@@ -151,6 +155,53 @@ export const apply: PluginModule["apply"] = (ctx) => {
     // g is kept for gg and G, which reach a menu's first and last item.
     const release = enableMenuLetters("hjklg");
     const stopCursor = trackCursor();
+    // A selected field takes Vim's keys instead of typing them. The shortcut
+    // service skips fields, so their moves run here; i or Enter edits it.
+    const fieldKeys = (event: KeyboardEvent) => {
+      const field = selectedField();
+      if (
+        !field ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        pending.snapshot()
+      )
+        return;
+      const text = field.matches(TEXT_FIELD);
+      const only = (ctrl: boolean, alt: boolean) =>
+        event.ctrlKey === ctrl && event.altKey === alt && !event.metaKey;
+      const plain = only(false, false);
+      const run = plain
+        ? {
+            j: () => step(true),
+            k: () => step(false),
+            h: () => sideways(false),
+            l: () => sideways(true),
+            g: () => pending.start("g"),
+            G: bottom,
+            ...(text && {
+              i: editField,
+              Enter: editField,
+              " ": () => pending.start(LEADER),
+            }),
+          }[event.key]
+        : // The pane and half-page keys, as registered below.
+          (only(apple, !apple) &&
+            {
+              h: () => focusPane(false),
+              l: () => focusPane(true),
+              j: focusComposer,
+              k: focusMessages,
+            }[event.key]) ||
+          (only(true, false) &&
+            { d: () => halfPage(true), u: () => halfPage(false) }[event.key]) ||
+          undefined;
+      // Nothing else types into a selected text field.
+      if (!run && !(text && plain && event.key.length === 1)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      run?.();
+    };
+    addEventListener("keydown", fieldKeys, true);
     // Tab and Escape on a message beat its parts' own handlers, such as a
     // preview card's Tab into the card and the list's Escape to the composer.
     const messageKeys = (event: KeyboardEvent) => {
@@ -192,6 +243,25 @@ export const apply: PluginModule["apply"] = (ctx) => {
         !origin.closest(`[${WHICH_KEY}]`)
       ) {
         menuMove();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      // Escape in a field of a dialog, popover or the sidebar selects it
+      // rather than leaving, as Vim's Escape ends insert mode, unless the
+      // field's own list or completions has Escape.
+      if (
+        event.key === "Escape" &&
+        !event.shiftKey &&
+        !event.isComposing &&
+        origin &&
+        typing() &&
+        origin.closest(`[aria-modal="true"], [role="dialog"], ${SIDEBAR}`) &&
+        !origin.closest(
+          '[data-composer-surface], [role="combobox"], [aria-expanded="true"], .xterm',
+        )
+      ) {
+        selectField(origin);
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -275,6 +345,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         release();
         stopCursor();
         removeEventListener("keydown", messageKeys, true);
+        removeEventListener("keydown", fieldKeys, true);
         document.removeEventListener("keydown", fieldEscape);
         root.unmount();
         host.remove();
@@ -334,11 +405,20 @@ export const apply: PluginModule["apply"] = (ctx) => {
     () => halfPage(false),
     moving,
   );
-  key("pane-left", "Focus the pane to the left", control("h"), () =>
-    focusPane(false),
+  // In a dialog, its panes: Settings' section list, section and details.
+  key(
+    "pane-left",
+    "Focus the pane to the left",
+    control("h"),
+    () => focusPane(false),
+    { allowInModal: true },
   );
-  key("pane-right", "Focus the pane to the right", control("l"), () =>
-    focusPane(true),
+  key(
+    "pane-right",
+    "Focus the pane to the right",
+    control("l"),
+    () => focusPane(true),
+    { allowInModal: true },
   );
   key("pane-composer", "Focus the message box", control("j"), focusComposer);
   key("pane-messages", "Focus the messages", control("k"), focusMessages);
