@@ -293,7 +293,7 @@ export function createHuddles(
       id,
       connection,
       abort,
-      playoutEvents,
+      ...(playoutEvents && { playoutEvents }),
       sender: createPcmSender(
         (samples) => bridge.send(id, samples),
         abort.signal,
