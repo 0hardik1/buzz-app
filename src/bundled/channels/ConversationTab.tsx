@@ -230,7 +230,7 @@ export function ConversationTab({
               // Shown follows the tab, not whether showing it visits the chat.
               shown={active}
               replyPlacement={answer.replyPlacement}
-              sendOption={answer.sendOption}
+              replyChoice={answer.replyChoice}
               onSend={(id) => {
                 answer.sent();
                 setSent(id);

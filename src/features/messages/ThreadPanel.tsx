@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The thread region supports keyboard scrolling and Escape.
-import { ReplyPlacementOption, useReplyPlacement } from "./reply-placement";
+import { useReplyPlacement } from "./reply-placement";
 import { hostComposerProvenance } from "./mention-draft";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
@@ -2223,9 +2223,9 @@ function ThreadMessages({
       ? snapshot.root
       : undefined;
   const sourceRootId = subthreadId ? composerRoot?.threadRootId : undefined;
-  // "Reply in subthread": off in a thread you started, so agents answer in
-  // it; on in someone else's, so they answer under you. Replying to a reply
-  // already starts a subthread, and inside one there is no deeper level.
+  // Agents answer in a thread you started, and under you in someone else's.
+  // Replying to a reply already starts a subthread, and inside one there is
+  // no deeper level.
   const ownThread =
     !!composerRoot &&
     (composerRoot.workflowOwnerId ?? composerRoot.authorId) === session.viewer;
@@ -2543,16 +2543,8 @@ function ThreadMessages({
             replyParent ?? (sourceRootId ? composerRoot.id : undefined)
           }
           replyPlacement={replyParent ? "subthread" : answer.placement}
-          sendOption={
-            <ReplyPlacementOption
-              level={answer.level}
-              checked={!!replyParent || answer.checked}
-              onCheckedChange={(checked) => {
-                answer.choose(checked);
-                if (!checked && replyParent) focusReply();
-              }}
-            />
-          }
+          // Replying to a message already says where agents answer.
+          replyChoice={replyParent ? undefined : answer}
           disabled={
             disabled ||
             (requireReadyRoot &&

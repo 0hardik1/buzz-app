@@ -155,8 +155,8 @@ The source conversation uses ordinary thread rendering and navigation.
 ## Reply placement
 
 A kind 9 message can say where the agents it mentions should answer, with one
-tag: `["buzz:reply", <placement>]`. The composer's "Reply in thread" and
-"Reply in subthread" checkbox sets it. Any client or agent runner may read it;
+tag: `["buzz:reply", <placement>]`. The composer sets it from the notice it
+shows above the draft once the draft tags an agent. Any client or agent runner may read it;
 it grants nothing and changes no permission.
 
 | Placement | Sent on | The agent answers |
@@ -174,12 +174,13 @@ A message without the tag, such as one from an older client, falls back to
 the conversation: a Solo chat answers at top level and anything else in
 threads. Wakes keep their own placement.
 
-The composer's defaults: the top-level composer is checked when other people
-are in the conversation or may join and post, and unchecked with only you and
-your agents. A thread's composer is unchecked in a thread you started and
-checked in someone else's. In a subthread the checkbox shows but is disabled.
-Sending after changing it keeps that choice for that level of that
-conversation, on this device.
+The composer's defaults: at the top level, agents answer in a thread when
+other people are in the conversation or may join and post, and at the top
+level with only you and your agents. In a thread, they answer in it if you
+started it and in a subthread under you if someone else did. The notice
+offers the other place. It is hidden while replying to a message and in a
+subthread, where the placement is already decided. Sending after changing it
+keeps that choice for that level of that conversation, on this device.
 
 ## Local lifecycle evidence
 

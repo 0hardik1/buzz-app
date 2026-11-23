@@ -2506,7 +2506,7 @@ function ChannelWorkspace({
                 : undefined
             }
             replyPlacement={reply.replyPlacement}
-            sendOption={reply.sendOption}
+            replyChoice={reply.replyChoice}
             onSend={(id) => {
               reply.sent();
               onComposerSend(id);
