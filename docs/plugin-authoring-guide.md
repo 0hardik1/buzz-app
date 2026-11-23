@@ -79,6 +79,34 @@ Each line is the main call. Read the types for every field.
 
 Agent tool names match `/^[a-z][a-z0-9_]{0,63}$/` and are unique across plugins; prefix them with your plugin. Changing a tool's name, description or schema restarts some agent sessions. `addInstructions` text is sent on every turn, so keep it short.
 
+In a Solo region, check `ui.headerMenuActions === true` before passing
+`headerMenuActions` to `ui.Workspace` or `ui.ChannelGroup`. Each **Actions**
+entry has a unique `id`, a `label`, and an `onSelect` callback.
+`onSelect` can return a promise. The host reports callback failures in the
+heading. With `placement: "team-row"`, the channel group uses the native
+Team menu and ignores these entries.
+
+For `ctx.agents.ui.Transcript`, give each turn a unique `turnId` that stays the same across reads. Return a new turn when it changes. Leave previously returned turns and their items untouched.
+
+## Migration writes
+
+Check `ctx.relay.snapshot().session.supportsMigrationWrites === true` before
+starting an import that needs migration labels. Older hosts omit this property.
+The property confirms that the host signs the label. Relay support for throttling
+depends on the connected community.
+
+Pass `migration: "example-import"` in `session.channelCreation.create(input)`
+and in `session.memberAdditions.add(channelId, pubkey, options)`. The host signs
+`["migration", source]` on channel creation (kind 9007) and membership additions
+(kind 9000). The source must be a nonempty string. The tag classifies workload.
+The normal access checks still apply.
+
+The host batches membership additions by source. A migration batch that fails
+delivery stops and reports the error. If a successful batch only adds some of
+its members, the host keeps the source on individual additions for the rest.
+Both calls report relay migration throttling with an error that starts with
+`rate-limited:`. Pause the import before issuing another write when you see it.
+
 ## Host access (`manifest.host`)
 
 Declare in `manifest.json` the commands, processes, network origins and files your plugin uses, then add `"host"` to `inject`. The host's own APIs only do what's declared, so this is how they get wired up. It isn't a security boundary: plugin code runs in the app and can reach past it.
@@ -97,7 +125,7 @@ Declare in `manifest.json` the commands, processes, network origins and files yo
 }
 ```
 
-- `await ctx.host.runCommand("status", input?)` runs a declared command with no shell and a 5 s deadline. It returns stdout, or `null` on failure.
+- `await ctx.host.runCommand("status", input?)` runs a declared command with no shell and a 5 s deadline. It returns stdout, or `null` on failure. The command's environment has `BUZZ_PLUGIN_ID`, the calling plugin's manifest id. It names a well-behaved plugin, not proof: an unsandboxed plugin can call the host command with another plugin's id.
 - `await ctx.host.request({ url, method?, headers?, body? })` calls a declared HTTPS origin and returns `{ status, headers, body }`. Plain `fetch` to other origins is blocked, so use this.
 - `await ctx.host.writeClipboardText?.(text)` copies plain text the way Buzz does. It needs no grant; check it exists.
 - `ctx.host.spawn?.(id, { args?, onStdout? })` starts a declared process (desktop only).
@@ -111,6 +139,7 @@ Other grants (`mcp`, `managedFiles`, `publicImages`, `publicPages`, `agentHooks`
 - Use the `ui` controls for buttons, fields, switches and dialogs. Use `className="ui-card"` for a card, `var(--space-panel-inset)` and `var(--space-2)` for spacing, and inline styles for layout. Plain `h1`–`h3`, `p` and `button` get host styling.
 - Use host color tokens (`var(--...)`) so light and dark themes both work. Rely only on the `core` roles in `src/shared/design-system/tokens/registry.ts`; other custom properties, classes and `data-*` attributes are internal.
 - Avoid fixed widths; pages can be narrow.
+- For `ctx.agents.ui.Transcript`, set `endedAt` on a finished turn, or supply `outcome` if its end time is unknown. Use `at: 0` for an unknown item timestamp. Omit `completedAt` when a tool's start time is unknown.
 
 ## Common mistakes
 
