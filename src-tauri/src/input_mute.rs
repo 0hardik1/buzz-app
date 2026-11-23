@@ -45,8 +45,8 @@ mod platform {
         runtime::{Bool, ProtocolObject},
     };
     use objc2_avf_audio::{
-        AVAudioApplication, AVAudioEngine, AVAudioEngineConfigurationChangeNotification,
-        AVAudioPCMBuffer, AVAudioTime,
+        AVAudioApplication, AVAudioApplicationRecordPermission, AVAudioEngine,
+        AVAudioEngineConfigurationChangeNotification, AVAudioPCMBuffer, AVAudioTime,
     };
     use objc2_foundation::{
         NSError, NSNotification, NSNotificationCenter, NSObjectProtocol, NSString,
@@ -145,7 +145,9 @@ mod platform {
 
     pub(super) fn stop(token: Option<u64>) {
         let Ok(app) = application() else { return };
-        let Ok(mut holder) = HOLDER.lock() else { return };
+        let Ok(mut holder) = HOLDER.lock() else {
+            return;
+        };
         if holder
             .as_ref()
             .is_some_and(|held| token.is_none_or(|token| held.token == token))
@@ -189,6 +191,13 @@ mod platform {
     /// A silent input of the app's own. Headsets send mute gestures only to an
     /// app capturing audio, and WebKit captures in another process.
     fn capture() -> Result<Retained<AVAudioEngine>, String> {
+        // Never prompt from here: WebKit asked when the call joined, and an
+        // undecided prompt would block the input node until answered.
+        if unsafe { application()?.recordPermission() }
+            != AVAudioApplicationRecordPermission::Granted
+        {
+            return Err("no microphone access".into());
+        }
         let attempt = exception::catch(|| unsafe {
             let engine = AVAudioEngine::new();
             let input = engine.inputNode();
@@ -226,7 +235,9 @@ mod platform {
             if RESTARTS.load(Ordering::SeqCst) != restart {
                 return;
             }
-            let Ok(mut holder) = HOLDER.lock() else { return };
+            let Ok(mut holder) = HOLDER.lock() else {
+                return;
+            };
             let Some(held) = holder.as_mut().filter(|held| held.token == token) else {
                 return;
             };
@@ -244,7 +255,7 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        /// Needs macOS 14 and the microphone; run with `--ignored`.
+        /// Needs macOS 14; run with `--ignored`.
         #[test]
         #[ignore]
         fn the_button_and_the_system_mute_report_through_one_handler() {
@@ -256,7 +267,11 @@ mod platform {
             .unwrap();
             // Wait for one value; the OS may repeat a state it already had.
             let expect = |muted: bool| {
-                while changes.recv_timeout(std::time::Duration::from_secs(2)).unwrap() != muted {}
+                while changes
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap()
+                    != muted
+                {}
             };
             super::set(true).unwrap();
             expect(true);

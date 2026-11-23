@@ -64,8 +64,8 @@ mod claude_key;
 #[cfg(unix)]
 mod cli_link;
 mod clipboard;
-mod jev;
 mod input_mute;
+mod jev;
 mod keep_awake;
 #[cfg(target_os = "macos")]
 mod legacy_cli_shortcut;
