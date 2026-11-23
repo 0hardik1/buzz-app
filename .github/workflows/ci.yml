@@ -1,286 +1,17 @@
 name: CI
+run-name: CI proof — same-runner browser variance
 on:
   workflow_dispatch: {}
 permissions:
   contents: read
 concurrency:
-  group: ci-proof-${{ github.run_id }}
+  group: ci-variance-${{ github.run_id }}
   cancel-in-progress: false
 env:
   CI: "true"
-  CARGO_TERM_COLOR: always
 jobs:
-  javascript_checks:
-    if: "true"
-    name: JavaScript checks
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - uses: ./.github/actions/setup
-      - name: Lint and types
-        run: ./bin/pnpm check
-      - name: Frontend build
-        run: ./bin/pnpm exec vite build
-  javascript:
-    if: "true"
-    name: JavaScript (${{ matrix.shard }}/8)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - 1
-          - 2
-          - 3
-          - 4
-          - 5
-          - 6
-          - 7
-          - 8
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - uses: ./.github/actions/setup
-      - name: Vitest shard
-        env:
-          BUZZ_TEST_WORKERS: "2"
-        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/ci/vitest.json evidence=test-results/ci/vitest-timing.json title="Vitest shard ${{ matrix.shard }}/8" -- ./bin/pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=json --outputFile=test-results/ci/vitest.json
-      - name: Vitest timing evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: vitest-timing-${{ matrix.shard }}
-          path: test-results/ci
-          retention-days: 7
-  agent_protection:
-    if: "true"
-    name: Protected agents (macOS)
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - uses: ./.github/actions/setup
-      - name: Install pinned Pi test dependencies
-        run: |
-          source bin/activate-hermit
-          cd src/bundled/pi/deps
-          npm ci --ignore-scripts --no-audit --no-fund
-      - name: Real Pi tools, recovery and host
-        env:
-          PI_DEPS: ${{ github.workspace }}/src/bundled/pi/deps
-        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/protection/vitest.json evidence=test-results/protection/timing.json title="Protected Pi" -- ./bin/pnpm exec vitest run src/bundled/pi/protection.live.test.ts src/bundled/pi/host.live.test.ts --reporter=default --reporter=json --outputFile=test-results/protection/vitest.json
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        with:
-          key: agent-protection
-          save-if: "false"
-      - name: Install exact protected Claude fixture
-        run: ./bin/node scripts/install-protected-claude-test.mjs
-      - name: Native Claude protection boundary
-        env:
-          BUZZ_TEST_WORKERS: "2"
-          CLAUDE_PROTECTION_BIN: ${{ github.workspace }}/target/protected-claude-test/claude
-        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/protection/native-vitest.json evidence=test-results/protection/native-timing.json title="Native security hooks" -- ./bin/pnpm exec vitest run src/bundled/claude-code/protection.live.test.ts --reporter=default --reporter=json --outputFile=test-results/protection/native-vitest.json
-      - name: Native approval-state and window-state tests
-        run: |
-          mkdir -p test-results/protection
-          set -o pipefail
-          ./bin/cargo test --manifest-path src-tauri/Cargo.toml --locked --lib -- host_process host_command window_state::tests 2>&1 | tee test-results/protection/native.log
-      - name: Protection test evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: agent-protection
-          path: test-results/protection
-          retention-days: 7
-  native:
-    if: "true"
-    name: Rust and tool integration
-    runs-on:
-      group: buzz-runners
-      labels: buzz-ubuntu-x64-16core
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - uses: ./.github/actions/setup
-      - name: Tauri system libraries
-        run: |
-          # Azure package downloads can stall until the whole job expires:
-          # https://github.com/actions/runner-images/issues/14594
-          # Keep the image's official HTTPS archive and security fallbacks.
-          sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|d' /etc/apt/apt-mirrors.txt
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y dbus-daemon libwebkit2gtk-4.1-dev build-essential libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
-      - name: Install isolated pinned Rust toolchain
-        run: |
-          export RUSTUP_HOME="$RUNNER_TEMP/buzz-rustup"
-          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
-          ./bin/rustup toolchain install
-          ./bin/rustup default "$(./bin/rustup show active-toolchain | cut -d ' ' -f1)"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        with:
-          key: native
-          save-if: "false"
-      - name: Dependency policy
-        run: ./bin/cargo-deny --locked check
-      - name: Rust formatting
-        run: ./bin/cargo fmt --all --check
-      - name: Rust lint
-        run: ./bin/cargo clippy --workspace --locked --all-targets -- -D warnings
-      - name: Bundled buzz CLI
-        run: ./bin/node scripts/test-buzz-cli.mjs
-      - name: All Rust tests and doctests
-        run: ./bin/cargo test --workspace --locked
-      - name: FI Builderlab build and grant tests
-        env:
-          BUZZ_BUILD_FEDERATED_IDENTITY_CONFIG: '{"version":1,"id":"ci-fi","identityOrigin":"https://identity.example.test","communityHosts":["relay.example.test"],"adapterBase":"https://identity.example.test/api/goose/nip-fa","apiBasePath":"/api/goose/"}'
-          BUZZ_BUILDERLAB_URL: ""
-        run: |
-          ./bin/cargo test -p buzzodz-plugins --lib --locked
-          ./bin/cargo test -p Buzz --lib --locked host_request
-          ./bin/pnpm exec vite build
-      - name: FI opt-out build and grant tests
-        env:
-          BUZZ_BUILD_FEDERATED_IDENTITY_CONFIG: ""
-        run: |
-          ./bin/cargo test -p buzzodz-plugins --lib --locked
-          ./bin/cargo test -p Buzz --lib --locked host_request
-      - name: Scheduled agent command identity
-        run: ./bin/node scripts/test-agent-command.mjs
-      - name: All Node integration tests
-        run: ./bin/node --test tests/integration/*.test.mjs
-  measurements:
-    if: "true"
-    name: Browser measurements
-    runs-on: ubuntu-24.04
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
-      options: --init --ipc=host
-    defaults:
-      run:
-        shell: bash
-    env:
-      HOME: /root
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - name: Trust this container workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: ./.github/actions/setup
-        with:
-          browsers: "true"
-      - name: Serial Chromium and WebKit measurements
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser measurements" -- ./bin/pnpm test:browser:ci --project '*-measurements' --workers=1 --reporter=list,json
-      - name: Chromium classic-scrollbar layout
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser-classic-scrollbars/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser-classic-scrollbars/ci-report.json evidence=test-results/browser-classic-scrollbars/ci-timing.json title="Browser classic scrollbars" -- ./bin/pnpm test:browser:ci --project chromium-classic-scrollbars --no-deps --reporter=list,json
-      - name: Broker scale check
-        env:
-          BUZZ_BROKER_SCALE: "true"
-        run: |
-          ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/broker-scale/vitest.json evidence=test-results/broker-scale/timing.json title="Broker scale" -- ./bin/pnpm exec vitest run browser-host/relay-broker-live.test.mjs -t "100,000" --reporter=default --reporter=json --outputFile=test-results/broker-scale/vitest.json
-          ./bin/node -e 'if (require("./test-results/broker-scale/vitest.json").numPassedTests !== 1) { console.error("The 100,000-channel scale check did not run"); process.exit(1); }'
-      - name: Measurement evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: browser-measurements
-          path: |
-            test-results/browser
-            test-results/browser-classic-scrollbars
-            test-results/broker-scale
-          retention-days: 7
-  perf_smoke:
-    if: "true"
-    name: Perf suite smoke check
-    runs-on: ubuntu-24.04
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
-      options: --init --ipc=host
-    defaults:
-      run:
-        shell: bash
-    env:
-      HOME: /root
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - name: Trust this container workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: ./.github/actions/setup
-        with:
-          browsers: "true"
-          browser-engine: chromium
-      - name: Perf suite smoke check
-        run: ./bin/pnpm perf --scenario all --repeat 1 --cpu 4
-      - name: Perf evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: perf-smoke
-          path: test-results/perf
-          retention-days: 7
-  browser_fixture:
-    if: "true"
-    name: Native browser fixture
-    runs-on:
-      group: buzz-runners
-      labels: buzz-ubuntu-x64-8core
-    timeout-minutes: 15
-    outputs:
-      artifact-id: ${{ steps.fixture-upload.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - uses: ./.github/actions/setup
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        with:
-          key: browser-fixture
-          save-if: "false"
-      - name: Build native browser fixture
-        timeout-minutes: 8
-        run: ./bin/cargo build --locked -p buzzodz-plugins --example fixture-bridge --bin buzzodz --target-dir target/browser-fixture
-      - name: Package same-revision native fixture
-        run: |
-          mkdir -p target/browser-artifact
-          cp target/browser-fixture/debug/examples/fixture-bridge target/browser-fixture/debug/buzzodz target/browser-artifact/
-          git rev-parse HEAD > target/browser-artifact/revision
-          cd target/browser-artifact
-          sha256sum fixture-bridge buzzodz > SHA256SUMS
-          tar -cf ../browser-fixture.tar fixture-bridge buzzodz revision SHA256SUMS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: fixture-upload
-        with:
-          name: browser-fixture-${{ github.sha }}-${{ github.run_attempt }}
-          path: target/browser-fixture.tar
-          if-no-files-found: error
-          retention-days: 7
   browser:
-    if: "true"
-    name: Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    name: "Same runner: baseline, density, split, split, density, baseline"
     runs-on:
       group: buzz-runners
       labels: buzz-ubuntu-x64-8core
@@ -292,234 +23,229 @@ jobs:
         shell: bash
     env:
       HOME: /root
-      BUZZ_BROWSER_NATIVE_TESTS: exclude
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        engine:
-          - chromium
-          - webkit
-        shard:
-          - 1
-          - 2
-          - 3
-          - 4
-          - 5
-          - 6
-          - 7
-          - 8
-          - 9
-          - 10
-          - 11
-          - 12
-          - 13
-          - 14
-          - 15
-          - 16
-          - 17
-          - 18
-        exclude:
-          - engine: chromium
-            shard: 12
-          - engine: chromium
-            shard: 13
-          - engine: chromium
-            shard: 14
-          - engine: chromium
-            shard: 15
-          - engine: chromium
-            shard: 16
-          - engine: chromium
-            shard: 17
-          - engine: chromium
-            shard: 18
-        include:
-          - engine: chromium
-            shards: 11
-          - engine: webkit
-            shards: 18
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - name: Trust this container workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: $/.github/actions/setup
-        with:
-          browsers: "true"
-          browser-engine: ${{ matrix.engine }}
-      - name: Sample browser runner resources
-        run: |-
-          mkdir -p test-results/runner-resources
-          ./bin/node --input-type=module -e 'import fs from '\''node:fs'\'';
-          const target = process.argv[1];
-          const sample = () => {
-           const cpu = fs.readFileSync('\''/proc/stat'\'','\''utf8'\'').split('\''\n'\'').filter(x => /^cpu(?: |[0-9])/.test(x));
-           const memory = fs.readFileSync('\''/proc/meminfo'\'','\''utf8'\'').split('\''\n'\'').filter(x => /^(MemTotal|MemAvailable|SwapTotal|SwapFree):/.test(x));
-           fs.appendFileSync(target, JSON.stringify({time:new Date().toISOString(),cpu,memory})+'\''\n'\'');
-          };
-          sample(); setInterval(sample,1000);' test-results/runner-resources/samples.jsonl &
-          echo $! > "$RUNNER_TEMP/browser-resource-pid"
-      - name: Functional journeys
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
-      - name: Browser evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: browser-journeys-${{ matrix.engine }}-${{ matrix.shard }}
-          path: test-results/browser
-          retention-days: 7
-      - name: Stop resource sampling
-        if: always()
-        run: if test -f "$RUNNER_TEMP/browser-resource-pid"; then kill "$(cat "$RUNNER_TEMP/browser-resource-pid")" || true; fi
-      - name: Runner resource evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: runner-resources-browser-${{ matrix.engine }}-${{ matrix.shard }}
-          path: test-results/runner-resources
-          retention-days: 7
-  browser_native:
-    if: "true"
-    name: Native browser journeys (${{ matrix.engine }})
-    needs:
-      - browser_fixture
-    runs-on:
-      group: buzz-runners
-      labels: buzz-ubuntu-x64-8core
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
-      options: --init --ipc=host
-    defaults:
-      run:
-        shell: bash
-    env:
-      HOME: /root
-      BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
-      BUZZ_BROWSER_NATIVE_TESTS: only
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        engine:
-          - chromium
-          - webkit
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
+          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
         with:
           browsers: "true"
-          browser-engine: ${{ matrix.engine }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          artifact-ids: ${{ needs.browser_fixture.outputs.artifact-id }}
-          merge-multiple: true
-          path: target/ci-browser-fixture
-      - name: Verify native browser fixture
-        run: |
-          cd target/ci-browser-fixture
-          tar -xf browser-fixture.tar
-          test "$(cat revision)" = "$(git rev-parse HEAD)"
-          sha256sum --check SHA256SUMS
-          test -x fixture-bridge
-          test -x buzzodz
-      - name: Sample browser runner resources
+          browser-engine: webkit
+      - name: Fetch immutable candidate revisions
+        run: git fetch --no-tags --depth=1 origin c589ccf1bb39a82eea50700969fb0a0e91468b58 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
+      - name: Prepare fixed workload and diagnostics
         run: |-
-          mkdir -p test-results/runner-resources
-          ./bin/node --input-type=module -e 'import fs from '\''node:fs'\'';
-          const target = process.argv[1];
-          const sample = () => {
-           const cpu = fs.readFileSync('\''/proc/stat'\'','\''utf8'\'').split('\''\n'\'').filter(x => /^cpu(?: |[0-9])/.test(x));
-           const memory = fs.readFileSync('\''/proc/meminfo'\'','\''utf8'\'').split('\''\n'\'').filter(x => /^(MemTotal|MemAvailable|SwapTotal|SwapFree):/.test(x));
-           fs.appendFileSync(target, JSON.stringify({time:new Date().toISOString(),cpu,memory})+'\''\n'\'');
+          cat > "$RUNNER_TEMP/variance-driver.mjs" <<'VARIANCE_DRIVER'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { spawn, execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { performance } from 'node:perf_hooks';
+
+          const root = process.cwd();
+          const output = path.join(process.env.RUNNER_TEMP, 'variance-evidence');
+          fs.mkdirSync(output, { recursive: true });
+          const read = (name) => { try { return fs.readFileSync(name, 'utf8'); } catch { return null; } };
+          const command = (bin, args) => execFileSync(bin, args, { encoding: 'utf8' });
+          const snapshot = () => ({
+            time: new Date().toISOString(),
+            cpu: read('/proc/stat'), memory: read('/proc/meminfo'),
+            cpuInfo: read('/proc/cpuinfo'),
+            pressure: Object.fromEntries(['cpu', 'memory', 'io'].map(k => [k, read(`/proc/pressure/${k}`)])),
+            cgroup: Object.fromEntries(['cpu.stat', 'cpu.max', 'cpu.weight', 'cpuset.cpus.effective', 'memory.events', 'memory.current', 'io.stat'].map(k => [k, read(`/sys/fs/cgroup/${k}`)])),
+          });
+          const variants = {
+            baseline: { sha: '5b5f804f299f2d7166549b9989bbb50b7f5dacf3', workers: 2 },
+            density: { sha: 'c589ccf1bb39a82eea50700969fb0a0e91468b58', workers: 3 },
+            split: { sha: '5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7', workers: 2 },
           };
-          sample(); setInterval(sample,1000);' test-results/runner-resources/samples.jsonl &
-          echo $! > "$RUNNER_TEMP/browser-resource-pid"
-      - name: Functional journeys
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Native browser journeys (${{ matrix.engine }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --reporter=list,json
-      - name: Browser evidence
+          const order = ['baseline', 'density', 'split', 'split', 'density', 'baseline'];
+          fs.writeFileSync(path.join(output, 'design.json'), JSON.stringify({variants, order, selection: '111 original WebKit shard-4 cases; fixed identities; no sharding', limits: 'Single machine and workload; no whole-CI or population estimate'}, null, 2));
+          fs.writeFileSync(path.join(output, 'machine.json'), JSON.stringify({lscpu: command('lscpu', ['--json']), kernel: command('uname', ['-a']), initial: snapshot()}, null, 2));
+          const testList = path.join(process.env.RUNNER_TEMP, 'variance-test-list.txt');
+          const expected = fs.readFileSync(testList, 'utf8').trim().split('\n').sort();
+          function identities(report) {
+            const result = [];
+            function visit(suites, parents = []) {
+              for (const suite of suites) {
+                const titles = [...parents, suite.title];
+                for (const spec of suite.specs ?? []) result.push(['[webkit]', spec.file, ...titles.slice(1), spec.title].join(' › '));
+                visit(suite.suites ?? [], titles);
+              }
+            }
+            visit(report.suites);
+            return result.sort();
+          }
+          async function run(bin, args, env, log) {
+            const fd = fs.openSync(log, 'w');
+            try {
+              const child = spawn(bin, args, { cwd: root, env, stdio: ['ignore', fd, fd] });
+              return await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({code, signal})); });
+            } finally { fs.closeSync(fd); }
+          }
+          for (const [index, name] of order.entries()) {
+            const variant = variants[name];
+            command('git', ['checkout', '--detach', variant.sha]);
+            if (command('git', ['rev-parse', 'HEAD']).trim() !== variant.sha) throw Error('Source mismatch');
+            if (command('git', ['status', '--porcelain', '--untracked-files=no']).trim()) throw Error('Tracked worktree is dirty');
+            const dir = path.join(output, `${index + 1}-${name}`);
+            fs.mkdirSync(dir);
+            const env = {...process.env, BUZZ_BROWSER_WORKERS: String(variant.workers), BUZZ_BROWSER_NATIVE_TESTS: name === 'split' ? 'exclude' : 'all', PLAYWRIGHT_JSON_OUTPUT_FILE: path.join(dir, 'discovery.json')};
+            const args = ['exec', 'playwright', 'test', '--config', 'tests/browser/playwright.ci.config.mjs', '--project', 'webkit', '--no-deps', `--test-list=${testList}`, `--workers=${variant.workers}`, '--reporter=list,json'];
+            const discovery = await run('./bin/pnpm', [...args, '--list'], env, path.join(dir, 'discovery.log'));
+            if (discovery.code !== 0 || JSON.stringify(identities(JSON.parse(fs.readFileSync(env.PLAYWRIGHT_JSON_OUTPUT_FILE, 'utf8')))) !== JSON.stringify(expected)) throw Error(`Selection mismatch: ${name}`);
+            // Fixed CPU work before tests, never concurrently with the measured workload.
+            const buffer = Buffer.alloc(1024 * 1024, 37);
+            const calibration = [];
+            for (let trial = 0; trial < 4; trial++) {
+              const begin = performance.now();
+              for (let i = 0; i < 1024; i++) createHash('sha256').update(buffer).digest();
+              calibration.push(performance.now() - begin);
+            }
+            fs.writeFileSync(path.join(dir, 'before.json'), JSON.stringify({snapshot: snapshot(), sha: variant.sha, workers: variant.workers, sha256GiBMilliseconds: calibration}, null, 2));
+            const samplePath = path.join(dir, 'resources.jsonl');
+            const sample = () => fs.appendFileSync(samplePath, JSON.stringify(snapshot()) + '\n');
+            sample();
+            const sampler = setInterval(sample, 2000);
+            const begin = performance.now();
+            console.log(`Starting ${index + 1}/6 ${name} ${variant.sha} workers=${variant.workers}`);
+            let result;
+            try {
+              result = await run('./bin/pnpm', args, {...env, PLAYWRIGHT_JSON_OUTPUT_FILE: path.join(dir, 'report.json')}, path.join(dir, 'tests.log'));
+            } finally { clearInterval(sampler); sample(); }
+            const elapsedMs = performance.now() - begin;
+            fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({name, ...variant, ...result, elapsedMs, after: snapshot()}, null, 2));
+            const report = JSON.parse(fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+            if (JSON.stringify(identities(report)) !== JSON.stringify(expected)) throw Error('Execution coverage mismatch');
+            console.log(JSON.stringify({index: index + 1, name, ...result, elapsedMs, stats: report.stats}));
+            if (result.code !== 0) throw Error(`Stopping after failed pass ${name}; evidence preserved, no retries`);
+          }
+
+          VARIANCE_DRIVER
+          cat > "$RUNNER_TEMP/variance-test-list.txt" <<'VARIANCE_TESTS'
+          [webkit] › navigation-group-icons.spec.mjs › group icons resolve custom media without overlapping labels, and the move dialog fits narrow widths
+          [webkit] › navigation-group-icons.spec.mjs › section labels fade on overflow and recover when widened
+          [webkit] › navigation-group-order.spec.mjs › dragging a group header moves the whole group, keeps its state, and persists
+          [webkit] › navigation-group-order.spec.mjs › group move recovery keeps keyboard focus on the group header
+          [webkit] › navigation-group-order.spec.mjs › saved groups accept gap drops in both directions
+          [webkit] › navigation-group-order.spec.mjs › group landing edge follows list order when text size changes during a drag
+          [webkit] › navigation-group-rename.spec.mjs › editing a saved group's name persists and keeps its channels
+          [webkit] › navigation-group-rename.spec.mjs › section emoji edits are centered, keyboard-safe, independently removable and persistent
+          [webkit] › navigation-join.spec.mjs › successful community setup navigates from Primary Messages and restores both visits
+          [webkit] › navigation-join.spec.mjs › successful community setup navigates from Personal space Messages and restores both visits
+          [webkit] › navigation-join.spec.mjs › Join a community is a visit: Go back closes it, Go forward reopens it with the typed address, Close retires it
+          [webkit] › navigation-leak.spec.mjs › Settings → Close releases the unmounted Settings DOM
+          [webkit] › navigation-mute-read.spec.mjs › channel menu mute/read persist without selecting the row; failed mute remains retryable
+          [webkit] › navigation-mute-read.spec.mjs › muted bell stays visible while pressing an unselected channel
+          [webkit] › navigation-repairs.spec.mjs › Back restores Personal space without inheriting the active community
+          [webkit] › navigation-repairs.spec.mjs › keyboard Retry keeps focus when the retry fails in place
+          [webkit] › navigation-repairs.spec.mjs › keyboard Retry hands off focus while reconnecting a failed Messages tab opening
+          [webkit] › navigation-repairs.spec.mjs › a refused account is explained once, as access
+          [webkit] › navigation-repairs.spec.mjs › Skip to content focuses main without adding a visit or dropping Back
+          [webkit] › navigation-repairs.spec.mjs › An edited navigation hash opens its destination and survives reload and Back
+          [webkit] › navigation-repairs.spec.mjs › malformed navigation addresses fail explicitly on cold and warm entry
+          [webkit] › navigation-repairs.spec.mjs › page status :has() rules keep :has() on their subject
+          [webkit] › navigation-row-menu.spec.mjs › channel context menus retain keyboard focus without write capabilities
+          [webkit] › navigation-row-menu.spec.mjs › menu placement lifetime › does not resurrect a menu after a preference refresh moves its row away and back
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects untouched viewport (cached startup: false)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects scrolled viewport (cached startup: false)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects returned to top viewport (cached startup: false)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects scroll event pending viewport (cached startup: false)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects untouched viewport (cached startup: true)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects scrolled viewport (cached startup: true)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects returned to top viewport (cached startup: true)
+          [webkit] › navigation-scroll-intent.spec.mjs › delayed sidebar restoration respects scroll event pending viewport (cached startup: true)
+          [webkit] › navigation-selection.spec.mjs › navigation menus do not highlight labels while message text and editors remain selectable
+          [webkit] › navigation-selection.spec.mjs › context menus appear immediately and retain their source highlight through dismissal
+          [webkit] › navigation-sidebar.spec.mjs › segmented selections slide but window resizing follows the selected tab immediately
+          [webkit] › navigation-sidebar.spec.mjs › channel sidebar resizes from the full gutter and persists
+          [webkit] › navigation-sidebar.spec.mjs › Channels opens the shared creation dialog
+          [webkit] › navigation-sidebar.spec.mjs › hovering a sidebar row inks only that row, not its siblings
+          [webkit] › navigation-sidebar.spec.mjs › channel navigation preserves sidebar DOM and group state
+          [webkit] › navigation-sidebar.spec.mjs › navigation reveals the current sidebar entry without moving a visible one
+          [webkit] › navigation-sidebar.spec.mjs › a reveal while the narrow drawer is closed runs when the drawer opens
+          [webkit] › navigation-sidebar.spec.mjs › sidebar state survives Messages → Workflows → Messages
+          [webkit] › navigation-sidebar.spec.mjs › sidebar state survives Messages → Settings → Messages
+          [webkit] › navigation-sidebar.spec.mjs › sidebar state survives Messages → Back/Forward → Messages
+          [webkit] › navigation-sidebar.spec.mjs › community picker stays available across pages and restores focus after joining
+          [webkit] › navigation-sidebar.spec.mjs › sidebar view state does not leak across communities
+          [webkit] › navigation-sidebar.spec.mjs › invalid saved sidebar fields fall back
+          [webkit] › navigation-sidebar.spec.mjs › rail loads relay-owned image icons for inactive communities
+          [webkit] › navigation-sidebar.spec.mjs › Messages reselects the latest sidebar channel and keyboard page search focuses main
+          [webkit] › navigation-sidebar.spec.mjs › workspace heading resize › workspace controls stay inside the sidebar during resize and text scaling
+          [webkit] › navigation-sorting.spec.mjs › keeps a stationary selected row visible while its neighbors exchange places
+          [webkit] › navigation-sorting.spec.mjs › retargets an unfinished slide without jumping or losing focus
+          [webkit] › navigation-sorting.spec.mjs › section sort applies immediately, rolls back on failure, and persists retry independently
+          [webkit] › navigation-sorting.spec.mjs › retires Recent failures on A–Z and recovers selected ordering on retry
+          [webkit] › navigation-sorting.spec.mjs › live sidebar motion: no-preference › slides a live reorder without replacing the focused row
+          [webkit] › navigation-sorting.spec.mjs › live sidebar motion: reduce › slides a live reorder without replacing the focused row
+          [webkit] › navigation-sorting.spec.mjs › live reduced-motion preference › updates an already-mounted list when reduced motion changes
+          [webkit] › navigation-sorting.spec.mjs › nearby motion after layout changes › starts a nearby reorder at the live positions after reopening Team
+          [webkit] › navigation-sorting.spec.mjs › nearby motion after layout changes › starts a nearby reorder at the live positions after interface text size
+          [webkit] › navigation-sorting.spec.mjs › membership changes after layout changes › keeps retained rows still and fades additions/removals after reopening Team
+          [webkit] › navigation-sorting.spec.mjs › membership changes after layout changes › keeps retained rows still and fades additions/removals after interface text size
+          [webkit] › navigation-sorting.spec.mjs › distant channel motion › fades a distant jump at its endpoints without a long slide
+          [webkit] › navigation-sorting.spec.mjs › cold sidebar presentation › reveals saved placement and Recent together without blocking the conversation
+          [webkit] › navigation-sorting.spec.mjs › sorting with lifecycle visibility › archive and DM hide preserve Recent ordering through reload
+          [webkit] › navigation.spec.mjs › Settings Back is reversible; explicit Close retires every section visit
+          [webkit] › navigation.spec.mjs › a collapsible sidebar yields to narrow drawer styles during resize
+          [webkit] › navigation.spec.mjs › a retired contributed Settings destination promptly reports the plugin turned off on Back
+          [webkit] › navigation.spec.mjs › channel visits, toolbar, browser traversal and Settings sections share one history
+          [webkit] › new-menu-layout.spec.mjs › the floating New button remains clickable with enlarged text
+          [webkit] › notification-settings.spec.mjs › Notifications keeps settings separated and button labels contained at supported interface sizes
+          [webkit] › own-video.spec.mjs › a stacked own video keeps its size without a byline
+          [webkit] › personal-space-layout.spec.mjs › Personal space's Choose a community fits its pane and wheel-scrolls into view with enlarged text
+          [webkit] › plugin-defaults.spec.mjs › cold app startup pins fresh defaults and activates opt-in Bestie setup
+          [webkit] › plugin-defaults.spec.mjs › an untouched client profile keeps its previous plugin defaults across reopen
+          [webkit] › plugin-defaults.spec.mjs › an existing profile can opt in to Bestie and keep its choice across reload
+          [webkit] › plugin-defaults.spec.mjs › an existing profile keeps Reminders and Workflows until deliberately disabled
+          [webkit] › plugin-defaults.spec.mjs › Membership action removes and restores the working Invite destination
+          [webkit] › plugin-import.spec.mjs › scrolling a long update review keeps its heading readable
+          [webkit] › plugin-import.spec.mjs › browser omits native import acquisition controls
+          [webkit] › plugin-import.spec.mjs › Settings controls scale together and keep enlarged labels reachable
+          [webkit] › plugin-import.spec.mjs › manual Git release-ref guidance stays readable across scale and themes
+          [webkit] › plugin-import.spec.mjs › folder/Git preview selects the exact subfolder and preserves enabled state through updates
+          [webkit] › plugin-import.spec.mjs › resizing over the catalog keeps focus in visible plugin details
+          [webkit] › plugin-import.spec.mjs › leaving Settings discards a late preview without installing
+          [webkit] › plugin-import.spec.mjs › checked-in local examples activate and work independently
+          [webkit] › plugin-import.spec.mjs › Retry recovers installed activation without installing or enabling again
+          [webkit] › plugin-import.spec.mjs › Add keeps a rejected install reachable and retries the same preview
+          [webkit] › plugin-import.spec.mjs › saved folder acquisition retries stay focused inside the update modal
+          [webkit] › plugin-import.spec.mjs › saved git acquisition retries stay focused inside the update modal
+          [webkit] › plugin-import.spec.mjs › plugin deep link opens the consent flow in Light mode
+          [webkit] › plugin-import.spec.mjs › plugin deep link opens the consent flow in Dark mode
+          [webkit] › plugin-import.spec.mjs › a linked preview can close during acquisition and a later link still opens
+          [webkit] › plugin-import.spec.mjs › a recommended plugin URL installs the pinned artifact without Git
+          [webkit] › plugin-import.spec.mjs › a recommended plugin URL whose download doesn't match its SHA-256 never installs
+          [webkit] › plugin-import.spec.mjs › an artifact link reviews and installs the pinned URL
+          [webkit] › plugin-import.spec.mjs › a Git-installed plugin reviews its URL self-update and survives requester replacement
+          [webkit] › plugin-import.spec.mjs › a failed update check stays on its Settings row, and Check again clears it while it checks
+          [webkit] › plugin-import.spec.mjs › one notification-button click opens a review after a concurrent update check
+          [webkit] › plugin-import.spec.mjs › a policy's automatic install is noted once and labelled in Settings
+          [webkit] › plugin-import.spec.mjs › document formatting floats over scrollable content
+          [webkit] › plugin-import.spec.mjs › installed documents reuse host Markdown, workspace tabs and persisted split
+          [webkit] › plugin-import.spec.mjs › document lists reopen with empty items ready for typing
+          [webkit] › plugin-import.spec.mjs › formatted documents create, reopen, and paste headings
+          [webkit] › plugin-import.spec.mjs › joining text into a single-line heading preserves the following lines
+          [webkit] › plugin-import.spec.mjs › joined list items retain paragraphs after nested blocks on reopen
+          [webkit] › plugin-import.spec.mjs › a trailing hard break preserves heading levels on reopen
+          [webkit] › plugin-import.spec.mjs › document table selection keeps clipboard and deletion scoped
+          [webkit] › plugin-import.spec.mjs › document table text keeps toolbar, Backspace and history scoped
+          [webkit] › plugin-import.spec.mjs › toolbar wrapping keeps table Markdown source through reopen
+          [webkit] › plugin-import.spec.mjs › nested document table paste stays source through save and reopen
+          [webkit] › plugin-import.spec.mjs › document table paste observes the combined cell budget
+
+          VARIANCE_TESTS
+      - name: Compare six fresh executions on one runner
+        run: ./bin/node "$RUNNER_TEMP/variance-driver.mjs"
+      - name: Comparison evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: browser-native-${{ matrix.engine }}
-          path: test-results/browser
+          name: same-runner-browser-variance
+          path: ${{ runner.temp }}/variance-evidence
           retention-days: 7
-      - name: Stop resource sampling
-        if: always()
-        run: if test -f "$RUNNER_TEMP/browser-resource-pid"; then kill "$(cat "$RUNNER_TEMP/browser-resource-pid")" || true; fi
-      - name: Runner resource evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: runner-resources-browser_native-${{ matrix.engine }}
-          path: test-results/runner-resources
-          retention-days: 7
-  media_recorder:
-    if: "true"
-    name: WebKit recording (macOS)
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
-      - uses: ./.github/actions/setup
-      - name: Install pinned WebKit
-        run: ./bin/pnpm exec playwright install webkit
-      - name: Recording journeys
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="WebKit recording (macOS)" -- ./bin/pnpm test:browser --project webkit --grep @media-recorder --no-deps --reporter=list,json
-      - name: Recording evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: browser-media-recorder-webkit
-          path: test-results/browser
-          retention-days: 7
-  required:
-    name: CI required
-    if: always()
-    needs:
-      - javascript_checks
-      - javascript
-      - native
-      - measurements
-      - perf_smoke
-      - browser_fixture
-      - browser
-      - browser_native
-      - media_recorder
-      - agent_protection
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    steps:
-      - name: Require every lane and every shard
-        env:
-          JAVASCRIPT_CHECKS: ${{ needs.javascript_checks.result }}
-          JAVASCRIPT: ${{ needs.javascript.result }}
-          NATIVE: ${{ needs.native.result }}
-          MEASUREMENTS: ${{ needs.measurements.result }}
-          PERF_SMOKE: ${{ needs.perf_smoke.result }}
-          FIXTURE: ${{ needs.browser_fixture.result }}
-          BROWSER: ${{ needs.browser.result }}
-          BROWSER_NATIVE: ${{ needs.browser_native.result }}
-          MEDIA_RECORDER: ${{ needs.media_recorder.result }}
-          AGENT_PROTECTION: ${{ needs.agent_protection.result }}
-        run: |
-          for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$BROWSER_NATIVE" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
-            test "$result" = success || exit 1
-          done
-run-name: CI proof — browser-start
