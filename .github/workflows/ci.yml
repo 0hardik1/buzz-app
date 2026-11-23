@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - uses: ./.github/actions/setup
       - name: Lint and types
         run: ./bin/pnpm check
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - uses: ./.github/actions/setup
       - name: Vitest shard
         env:
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - uses: ./.github/actions/setup
       - name: Install pinned Pi test dependencies
         run: |
@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - uses: ./.github/actions/setup
       - name: Tauri system libraries
         run: |
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -225,7 +225,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -254,7 +254,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - uses: ./.github/actions/setup
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
@@ -345,7 +345,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -379,6 +379,7 @@ jobs:
           echo $! > "$RUNNER_TEMP/browser-resource-pid"
       - name: Functional journeys
         env:
+          BUZZ_BROWSER_WORKERS: "3"
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
         run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
       - name: Browser evidence
@@ -407,7 +408,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5b5f804f299f2d7166549b9989bbb50b7f5dacf3
+          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
       - uses: ./.github/actions/setup
       - name: Install pinned WebKit
         run: ./bin/pnpm exec playwright install webkit
@@ -453,4 +454,4 @@ jobs:
           for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
             test "$result" = success || exit 1
           done
-run-name: CI proof — control
+run-name: CI proof — density
