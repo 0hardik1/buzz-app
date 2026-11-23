@@ -70,12 +70,17 @@ export const selectedField = () => {
 };
 /** i or Enter on a selected field: edit it. */
 export const editField = () => selectedField()?.removeAttribute(FIELD_SELECTED);
-/** Escape in a field: keep focus on it without editing. */
+/** Escape in a field: keep focus on it without editing. Leaving it or
+ * clicking in it to type edits it again. */
 export function selectField(field: HTMLElement) {
   field.setAttribute(FIELD_SELECTED, "");
-  field.addEventListener("blur", () => field.removeAttribute(FIELD_SELECTED), {
-    once: true,
-  });
+  const edit = () => {
+    field.removeAttribute(FIELD_SELECTED);
+    field.removeEventListener("blur", edit);
+    field.removeEventListener("pointerdown", edit);
+  };
+  field.addEventListener("blur", edit);
+  field.addEventListener("pointerdown", edit);
 }
 /** The open modal on top; one that is closing no longer holds the keys. */
 const topModal = () =>

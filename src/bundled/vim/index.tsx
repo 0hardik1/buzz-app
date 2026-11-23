@@ -347,6 +347,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         stopCursor();
         removeEventListener("keydown", messageKeys, true);
         removeEventListener("keydown", fieldKeys, true);
+        editField();
         document.removeEventListener("keydown", fieldEscape);
         root.unmount();
         host.remove();

@@ -676,9 +676,16 @@ test("Ctrl-h and Ctrl-l move between Settings' panes, and j and k select its fie
   await page.keyboard.press("Escape");
   await expect(name).toBeFocused();
   await expect(name).toHaveAttribute("data-field-selected", "");
+  // Clicking in a selected field edits it, though focus never left.
+  await name.click();
+  await expect(name).not.toHaveAttribute("data-field-selected");
+  await page.keyboard.type("y");
+  await expect(name).toHaveValue(`${before}xy`);
+  await page.keyboard.press("Escape");
+  await expect(name).toHaveAttribute("data-field-selected", "");
   await page.keyboard.press("j");
   await expect(name).not.toBeFocused();
-  await expect(name).toHaveValue(`${before}x`);
+  await expect(name).toHaveValue(`${before}xy`);
   await page.evaluate(() => {
     document.activeElement.dataset.below = "";
   });
