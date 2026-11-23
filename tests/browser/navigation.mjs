@@ -9,6 +9,12 @@ export async function clickSidebarHeadingAction(action) {
 
 /** Opens a channel menu's Notifications submenu: All new posts, Just mentions, Mute. */
 export async function notificationLevels(page, menu) {
+  // Sidebar preferences add Move to… above Notifications when they load. A menu
+  // opened right after a reload can gain it while the submenu is open, which
+  // pulls focus back to the parent menu, so wait for the settled item list.
+  await expect(
+    menu.getByRole("menuitem", { name: "Move to…", exact: true }),
+  ).toBeVisible();
   // Keyboard, not hover: a pointer already resting on the trigger cannot reopen it.
   await menu
     .getByRole("menuitem", { name: "Notifications", exact: true })
