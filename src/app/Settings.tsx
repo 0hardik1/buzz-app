@@ -72,7 +72,13 @@ import {
   type PluginInstallRequests,
 } from "../plugins/installer";
 import { PluginReadme } from "./PluginReadme";
-import performanceDiagnosticsManifest from "../bundled/performance-diagnostics/manifest.json";
+import {
+  accessMessage,
+  isRequiredPlugin,
+  listedPlugin,
+  pluginToggleDisabled,
+  restrictedPlugin,
+} from "./plugin-rules";
 import { bundledReadmes } from "../bundled/readmes";
 import { bundledIcons } from "../bundled/icons";
 import type { Identity } from "../features/identity/service";
@@ -140,10 +146,6 @@ function isCorePlugin(plugin: PluginInfo) {
   );
 }
 
-function isRequiredPlugin(plugin: PluginInfo) {
-  return plugin.manifest.id === "buzz.channels";
-}
-
 function isEssentialPlugin(plugin: PluginInfo) {
   return (
     plugin.source === "bundled" &&
@@ -189,11 +191,7 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
   const core: PluginInfo[] = [];
   for (const plugin of plugins) {
     // Diagnostics are offered through agent requests in this panel.
-    if (
-      plugin.source === "bundled" &&
-      plugin.manifest.id === performanceDiagnosticsManifest.id
-    )
-      continue;
+    if (!listedPlugin(plugin)) continue;
     if (isCorePlugin(plugin)) {
       core.push(plugin);
       continue;
@@ -280,38 +278,11 @@ const noDecisionProviders = () => noProviders;
 /** The plugin whose details a Manage plugins visit shows, for Back/Forward. */
 const PLUGIN_DETAILS = "settings.pluginDetails";
 
-function restrictedPlugin(plugin: PluginInfo) {
-  return (
-    plugin.source === "bundled" &&
-    (plugin.manifest.id === "buzz.moderation" ||
-      plugin.manifest.id === "buzz.relay-staff")
-  );
-}
-
 function pluginActionLabel(plugin: PluginInfo, access: AdminAccessState) {
   if (plugin.enabled) return "Disable";
   if (restrictedPlugin(plugin) && access !== "allowed")
     return access === "checking" ? "Enable" : "Unavailable";
   return "Enable";
-}
-
-function accessMessage(plugin: PluginInfo, state: AdminAccessState) {
-  switch (state) {
-    case "allowed":
-      return null;
-    case "checking":
-      return "Checking access…";
-    case "no-community":
-      return "Select a community to check access.";
-    case "error":
-      return "Could not check access. Open details to try again.";
-    case "unavailable":
-      return "Access is unavailable in this build or on this relay.";
-    case "denied":
-      return plugin.manifest.id === "buzz.moderation"
-        ? "Select a community where you’re an owner or admin."
-        : "Select a community on a relay where you have staff access.";
-  }
 }
 
 /** Narrow containers cover the catalog with details (Settings.module.css). */
@@ -325,17 +296,6 @@ function startHidden(element: Element) {
   for (let port = scrollport(element); port; port = scrollport(port))
     if (top < port.getBoundingClientRect().top) return true;
   return false;
-}
-
-function pluginToggleDisabled(
-  plugin: PluginInfo,
-  access: AdminAccessState,
-  busy: boolean,
-) {
-  return (
-    busy ||
-    (!plugin.enabled && restrictedPlugin(plugin) && access !== "allowed")
-  );
 }
 
 function PluginDetails({
