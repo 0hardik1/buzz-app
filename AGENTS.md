@@ -48,8 +48,9 @@ Never use `git stash`; worktrees share one stash list.
   small tools with real schemas to one tool with an action argument, and put
   guidance that spans tools in the server instructions, not tool descriptions.
 - **Information flow.** Before planning a change to who can add an agent to a
-  channel, an agent's channel role, DMs that include an agent, or what an agent
-  publishes, read block/buzz's [`VISION_INFORMATION_FLOW.md`](https://github.com/block/buzz/blob/main/VISION_INFORMATION_FLOW.md) and follow it.
+  channel, an agent's channel role, DMs that include an agent, what an agent
+  publishes, channel visibility or admission rules, or tools that let an agent
+  act with its owner's authority, read block/buzz's [`VISION_INFORMATION_FLOW.md`](https://github.com/block/buzz/blob/main/VISION_INFORMATION_FLOW.md) and follow it.
 
 ## Tests
 
