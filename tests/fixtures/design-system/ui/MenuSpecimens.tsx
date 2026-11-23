@@ -50,15 +50,6 @@ import {
 } from "../../../../src/shared/design-system/ui/Popover";
 import avatarUrl from "../assets/avatar.png";
 
-const largeCollection = [
-  { label: "Activity", Icon: BellIcon },
-  { label: "Agents", Icon: RobotIcon },
-  { label: "Archive", Icon: ArchiveIcon },
-  { label: "Channels", Icon: HashIcon },
-  { label: "Reminders", Icon: CheckIcon },
-  { label: "Settings", Icon: GearIcon },
-];
-
 function Example({
   title,
   description,
@@ -872,37 +863,6 @@ export function PopoverSpecimen() {
                 />
               }
             />
-          </PopoverPopup>
-        </PopoverRoot>
-      </Example>
-      <Example
-        title="Large collection"
-        description="The large size holds a browsable collection, such as a grid of choices. It narrows to the available width, and the grid drops columns as it does."
-        code={`<PopoverRoot>
-  <PopoverTrigger render={<Button>All plugins</Button>} />
-  <PopoverPopup size="large">
-    <PopoverTitle>All plugins</PopoverTitle>
-    <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(min(13.5rem,100%),1fr))] gap-1">
-      {plugins.map(({ label, icon }) => (
-        <NavigationItem key={label} label={label} icon={icon} />
-      ))}
-    </div>
-  </PopoverPopup>
-</PopoverRoot>`}
-      >
-        <PopoverRoot>
-          <PopoverTrigger render={<Button>All plugins</Button>} />
-          <PopoverPopup size="large">
-            <PopoverTitle>All plugins</PopoverTitle>
-            <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(min(13.5rem,100%),1fr))] gap-1">
-              {largeCollection.map(({ label, Icon }) => (
-                <NavigationItem
-                  key={label}
-                  label={label}
-                  icon={<Icon size={16} />}
-                />
-              ))}
-            </div>
           </PopoverPopup>
         </PopoverRoot>
       </Example>
