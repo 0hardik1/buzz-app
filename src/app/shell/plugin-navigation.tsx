@@ -110,9 +110,12 @@ export function usePluginNavigation({
         const state = restrictedPlugin(plugin)
           ? (access.get(id) ?? "unavailable")
           : "allowed";
-        const reason = restrictedPlugin(plugin)
-          ? accessMessage(plugin, state)
-          : null;
+        // Settings retries from a plugin's details; this list has none.
+        const reason = !restrictedPlugin(plugin)
+          ? null
+          : state === "error"
+            ? "Couldn’t check access. Try again in Settings → Plugins."
+            : accessMessage(plugin, state);
         return {
           key: id,
           label: presentation?.label ?? plugin.manifest.name,
