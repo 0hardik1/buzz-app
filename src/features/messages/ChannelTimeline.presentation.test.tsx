@@ -182,6 +182,7 @@ afterEach(() => {
   for (const owner of owners.splice(0)) owner.dispose();
   readingProps.length = 0;
   localStorage.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTop;
@@ -249,6 +250,7 @@ function mount({
     owner.session.foldRows("c", events);
   let current = hostWindow(rows ?? rowsOf(hostEvents), windowExtra);
   const loadOlder = vi.fn();
+  const newerLoads: string[] = [];
   const retained = { taken: 0, disposed: 0 };
   const session =
     again?.session ??
@@ -269,6 +271,9 @@ function mount({
       channels: {
         ...owner.session.channels,
         loadOlder,
+        loadNewer(id: string) {
+          newerLoads.push(id);
+        },
         window: () => current,
       },
     } as RelaySession);
@@ -306,6 +311,7 @@ function mount({
     session,
     receive: callbacks.receive,
     loadOlder,
+    newerLoads,
     retained,
     latest,
     rowsOf,
@@ -446,9 +452,20 @@ it("never pages the host's history while it presents: not by gesture, not by the
 });
 
 it("fills a short screen from older history only when nothing presents", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(300);
   const h = mount({ window: { hasMore: true } });
+  h.present({ ids: [p0.id, p1.id] });
   for (let pass = 0; pass < 4; pass++) frame();
+  act(() => {
+    vi.advanceTimersByTime(50);
+  });
+  expect(h.loadOlder).not.toHaveBeenCalled();
+  h.withdraw();
+  for (let pass = 0; pass < 4; pass++) frame();
+  act(() => {
+    vi.advanceTimersByTime(50);
+  });
   expect(h.loadOlder).toHaveBeenCalled();
 });
 
@@ -580,6 +597,27 @@ it("draws no unread line, Jump or arrival count under a presentation, and counts
   frame();
   expect(screen.getByText("Jump to latest")).toBeVisible();
   expect(screen.queryByText(/new message/)).toBeNull();
+});
+
+it("hides Jump to latest and skips newer-page loads for a detached window while it presents", () => {
+  const h = mount({ window: { hasNewer: true } });
+  frame();
+  expect(scroller()).toHaveAttribute("data-jump-visible", "true");
+  expect(screen.getByText("Jump to latest").closest("[inert]")).toBeNull();
+  h.present({ ids: [p0.id, p1.id, p2.id] });
+  frame();
+  expect(scroller()).not.toHaveAttribute("data-jump-visible");
+  expect(screen.getByText("Jump to latest").closest("[inert]")).not.toBeNull();
+  scrolled = 3400;
+  fireEvent.scroll(scroller());
+  expect(h.newerLoads).toEqual([]);
+  h.withdraw();
+  frame();
+  expect(scroller()).toHaveAttribute("data-jump-visible", "true");
+  expect(screen.getByText("Jump to latest").closest("[inert]")).toBeNull();
+  scrolled = 3400;
+  fireEvent.scroll(scroller());
+  expect(h.newerLoads).toEqual(["c"]);
 });
 
 it("holds the anchor row where it was when a presentation shows it", () => {

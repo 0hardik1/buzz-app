@@ -145,6 +145,19 @@ if that desktop app is up and running.
   **Activity** (its past sessions) and plugin tabs such as **Attention**.
   Local Claude and Codex transcripts can open on recent activity. Choose
   **Load earlier activity** to see more history.
+- **Settings → Agent details → Environment variables** sets variables one
+  local Claude Code, Codex, Goose or Pi agent starts with, such as API keys.
+  They're kept in the OS credential store on this computer, never synced, and
+  values aren't shown again after saving. Protected agents don't get them, and
+  a harness's own variables win, except that a saved `ANTHROPIC_API_KEY` wins
+  over the shared Claude key. Names that choose a model, provider or
+  endpoint, `PATH`, and `BUZZ_*`/`NOSTR_*` are refused. A save applies to agent
+  processes started afterward; running ones keep the old list until
+  **Restart agent**, which stops only that agent's processes in every
+  community so its next message starts them with the saved list. It asks
+  first, and it's refused while the agent is answering or in a call. A Codex or Pi agent
+  with its own list runs in its own process. Removing the agent from its last
+  community on this computer deletes its list.
 - **Instructions** change how an agent behaves. They don't give it new tools,
   accounts or permissions.
 - **Sessions.** By default an agent starts a fresh conversation for each
@@ -181,6 +194,10 @@ on and off, adds them from a Git repository or a local folder, and updates
 them. Don't assume an
 optional plugin is on. Agents can ask to install or enable one, which you
 approve or decline.
+
+For a Git-installed plugin, an agent's update request or a pinned install link
+can switch the tracked branch even when the code is unchanged. Review and
+confirm the update to save the new source; no reinstall is needed.
 
 A plugin runs with the same reach as Buzz itself, with no sandbox. Install
 one only if you trust its author with your account and your computer.
