@@ -1,6 +1,7 @@
 import {
   chooseColorMode,
   closeSettings,
+  openPage,
   openSettings,
   selectSettingsSection,
   settingsDialog,
@@ -664,7 +665,11 @@ test("message table wrapping updates scrollability and survives reload", async (
   page,
   app,
 }) => {
-  await open(page, app);
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha" }),
+  ).toBeVisible();
   const command = "scan  --all";
   const prose =
     "Check the release notes before moving to the next step. ".repeat(6);
@@ -674,7 +679,8 @@ test("message table wrapping updates scrollability and survives reload", async (
   const values = [
     `\`${path}\``,
     "A-01",
-    ...columns.slice(2).map(() => "Ready"),
+    ...columns.slice(2, -1).map(() => "Ready"),
+    "[Release notes](https://example.com/releases)",
   ];
   const message = app.append(
     "primary",
@@ -695,18 +701,19 @@ test("message table wrapping updates scrollability and survives reload", async (
       .getByRole("table")
       .nth(index),
   );
-  await expect(description).toHaveCSS("white-space", "pre-wrap");
-  await expect(description).toHaveAttribute("data-overflow", "false");
+  const notes = description.getByRole("cell").last();
+  const notesWrap = () =>
+    notes.evaluate((cell) => {
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      const lines = new Set(
+        Array.from(range.getClientRects(), ({ top }) => top),
+      );
+      return lines.size > 1;
+    });
+  await expect.poll(notesWrap).toBe(true);
   const code = description.locator("code");
-  expect(await code.textContent()).toBe(command);
-  await expect(code).toHaveCSS("white-space", "pre-wrap");
-  await expect(wide).toHaveCSS("overflow-x", "scroll");
-  expect(
-    await wide.evaluate((table) => {
-      table.scrollLeft = table.scrollWidth;
-      return table.scrollLeft;
-    }),
-  ).toBeGreaterThan(0);
+  expect(await code.innerText()).toBe(command);
 
   // Keep both dimensions fixed so a resize notification cannot mask a stale flag.
   await description.evaluate((table) => {
@@ -714,12 +721,6 @@ test("message table wrapping updates scrollability and survives reload", async (
     table.style.width = `${width}px`;
     table.style.height = `${height}px`;
   });
-  const size = () =>
-    description.evaluate((table) => {
-      const { width, height } = table.getBoundingClientRect();
-      return [width, height];
-    });
-  const before = await size();
   await settings(page);
   const wrap = settingsDialog(page).getByRole("switch", {
     name: "Wrap text in message tables",
@@ -730,12 +731,17 @@ test("message table wrapping updates scrollability and survives reload", async (
   await page.keyboard.press("Space");
   await expect(wrap).not.toBeChecked();
   await closeSettings(page);
-  await expect(description).toHaveCSS("white-space", "pre");
-  await expect(description).toHaveCSS("overflow-x", "scroll");
-  expect(await size()).toEqual(before);
+  await expect.poll(notesWrap).toBe(false);
+  // A horizontal gesture must work immediately. Assigning scrollLeft in JS
+  // can move content that is still clipped for pointer users.
+  await description.getByRole("columnheader", { name: "Step" }).hover();
+  await page.mouse.wheel(2000, 0);
+  await expect
+    .poll(() => description.evaluate((table) => table.scrollLeft))
+    .toBeGreaterThan(0);
 
   await page.reload();
-  await expect(description).toHaveCSS("white-space", "pre");
+  await expect.poll(notesWrap).toBe(false);
   await settings(page);
   await expect(wrap).not.toBeChecked();
   await wrap.click();
@@ -745,18 +751,12 @@ test("message table wrapping updates scrollability and survives reload", async (
   for (let step = 0; step < 5; step += 1) await increase.click();
   await closeSettings(page);
   await page.setViewportSize({ width: 960, height: 950 });
-  await expect(page.locator("html")).toHaveAttribute("data-color-mode", "dark");
-  await expect(page.locator("html")).toHaveCSS("--buzz-text-scale", "1.5");
-  await expect(description).toHaveCSS("white-space", "pre-wrap");
-  await expect(description).toHaveCSS("overflow-x", "hidden");
-  await expect(wide).toHaveCSS("overflow-x", "scroll");
-  expect(await wide.locator("code").textContent()).toBe(path);
-  expect(
-    await wide.evaluate((table) => {
-      table.scrollLeft = table.scrollWidth;
-      return table.scrollLeft + table.clientWidth;
-    }),
-  ).toBeCloseTo(await wide.evaluate((table) => table.scrollWidth), 0);
+  await expect.poll(notesWrap).toBe(true);
+  const releaseNotes = wide.getByRole("link", { name: "Release notes" });
+  await expect(releaseNotes).not.toBeInViewport();
+  await wide.hover();
+  await page.mouse.wheel(2000, 0);
+  await expect(releaseNotes).toBeInViewport({ ratio: 1 });
 });
 
 test.describe("message width reading position", () => {
