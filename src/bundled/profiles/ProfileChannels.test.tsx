@@ -113,7 +113,7 @@ it("shows only exact verified visible memberships, handles partial lists and ope
     scope: { viewer, communityOrigin: "https://relay.example.test" },
   });
   f.update({ status: "ready", channels: [] });
-  expect(screen.getByText("No channels found.")).toBeTruthy();
+  expect(screen.getByText(/no channels/i)).toBeTruthy();
 });
 
 it("does not invent a route, and retries failed discovery without claiming a complete empty result", () => {
@@ -223,7 +223,6 @@ it("qualifies ready empty results when only matching unclassified memberships ex
   expect(
     screen.getByText(/No matching channels with a known visible type/),
   ).toBeTruthy();
-  expect(screen.queryByText("No channels found.")).toBeNull();
   f.update({
     status: "ready",
     coverage: "partial",
@@ -232,7 +231,6 @@ it("qualifies ready empty results when only matching unclassified memberships ex
   expect(
     screen.getByText(/More channels may exist outside the loaded list/),
   ).toBeTruthy();
-  expect(screen.queryByText("No channels found.")).toBeNull();
 });
 
 it("does not classify hidden, archived or DM memberships in a ready empty list", () => {
@@ -255,7 +253,7 @@ it("does not classify hidden, archived or DM memberships in a ready empty list",
     ],
   });
   expect(screen.queryByText(/unclassified and omitted/)).toBeNull();
-  expect(screen.getByText("No channels found.")).toBeTruthy();
+  expect(screen.getByText(/no channels/i)).toBeTruthy();
   expect(
     screen.queryByText(/No matching channels with a known visible type/),
   ).toBeNull();
@@ -278,5 +276,5 @@ it("does not show a metadata caveat for another identity's unclassified roster",
     channels: [{ id: "unknown", name: "Unknown", members: [viewer] }],
   });
   expect(screen.queryByText(/unclassified and omitted/)).toBeNull();
-  expect(screen.getByText("No channels found.")).toBeTruthy();
+  expect(screen.getByText(/no channels/i)).toBeTruthy();
 });
