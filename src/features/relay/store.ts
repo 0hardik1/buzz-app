@@ -3866,6 +3866,8 @@ export function createChannelStore(
     resolve,
     searchPublic,
     findLabeled,
+    channelIdentity: () =>
+      transport ? transport.channelIdentity === true : undefined,
     matchPublic,
     readDirectory,
     anyChannel,
