@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - uses: ./.github/actions/setup
       - name: Lint and types
         run: ./bin/pnpm check
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - uses: ./.github/actions/setup
       - name: Vitest shard
         env:
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - uses: ./.github/actions/setup
       - name: Install pinned Pi test dependencies
         run: |
@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - uses: ./.github/actions/setup
       - name: Tauri system libraries
         run: |
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -225,7 +225,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -254,7 +254,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - uses: ./.github/actions/setup
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
@@ -281,8 +281,6 @@ jobs:
   browser:
     if: "true"
     name: Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})
-    needs:
-      - browser_fixture
     runs-on:
       group: buzz-runners
       labels: buzz-ubuntu-x64-8core
@@ -294,7 +292,7 @@ jobs:
         shell: bash
     env:
       HOME: /root
-      BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
+      BUZZ_BROWSER_NATIVE_TESTS: exclude
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -345,7 +343,76 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
+      - name: Trust this container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: $/.github/actions/setup
+        with:
+          browsers: "true"
+          browser-engine: ${{ matrix.engine }}
+      - name: Sample browser runner resources
+        run: |-
+          mkdir -p test-results/runner-resources
+          ./bin/node --input-type=module -e 'import fs from '\''node:fs'\'';
+          const target = process.argv[1];
+          const sample = () => {
+           const cpu = fs.readFileSync('\''/proc/stat'\'','\''utf8'\'').split('\''\n'\'').filter(x => /^cpu(?: |[0-9])/.test(x));
+           const memory = fs.readFileSync('\''/proc/meminfo'\'','\''utf8'\'').split('\''\n'\'').filter(x => /^(MemTotal|MemAvailable|SwapTotal|SwapFree):/.test(x));
+           fs.appendFileSync(target, JSON.stringify({time:new Date().toISOString(),cpu,memory})+'\''\n'\'');
+          };
+          sample(); setInterval(sample,1000);' test-results/runner-resources/samples.jsonl &
+          echo $! > "$RUNNER_TEMP/browser-resource-pid"
+      - name: Functional journeys
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
+      - name: Browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-journeys-${{ matrix.engine }}-${{ matrix.shard }}
+          path: test-results/browser
+          retention-days: 7
+      - name: Stop resource sampling
+        if: always()
+        run: if test -f "$RUNNER_TEMP/browser-resource-pid"; then kill "$(cat "$RUNNER_TEMP/browser-resource-pid")" || true; fi
+      - name: Runner resource evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runner-resources-browser-${{ matrix.engine }}-${{ matrix.shard }}
+          path: test-results/runner-resources
+          retention-days: 7
+  browser_native:
+    if: "true"
+    name: Native browser journeys (${{ matrix.engine }})
+    needs:
+      - browser_fixture
+    runs-on:
+      group: buzz-runners
+      labels: buzz-ubuntu-x64-8core
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /root
+      BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
+      BUZZ_BROWSER_NATIVE_TESTS: only
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        engine:
+          - chromium
+          - webkit
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -379,14 +446,13 @@ jobs:
           echo $! > "$RUNNER_TEMP/browser-resource-pid"
       - name: Functional journeys
         env:
-          BUZZ_BROWSER_WORKERS: "3"
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Native browser journeys (${{ matrix.engine }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --reporter=list,json
       - name: Browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: browser-journeys-${{ matrix.engine }}-${{ matrix.shard }}
+          name: browser-native-${{ matrix.engine }}
           path: test-results/browser
           retention-days: 7
       - name: Stop resource sampling
@@ -396,7 +462,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: runner-resources-browser-${{ matrix.engine }}-${{ matrix.shard }}
+          name: runner-resources-browser_native-${{ matrix.engine }}
           path: test-results/runner-resources
           retention-days: 7
   media_recorder:
@@ -408,7 +474,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: c589ccf1bb39a82eea50700969fb0a0e91468b58
+          ref: 5d0ede748e2a28374b756ec9dc5f25d9ba1a0ca7
       - uses: ./.github/actions/setup
       - name: Install pinned WebKit
         run: ./bin/pnpm exec playwright install webkit
@@ -434,6 +500,7 @@ jobs:
       - perf_smoke
       - browser_fixture
       - browser
+      - browser_native
       - media_recorder
       - agent_protection
     runs-on: ubuntu-24.04
@@ -448,10 +515,11 @@ jobs:
           PERF_SMOKE: ${{ needs.perf_smoke.result }}
           FIXTURE: ${{ needs.browser_fixture.result }}
           BROWSER: ${{ needs.browser.result }}
+          BROWSER_NATIVE: ${{ needs.browser_native.result }}
           MEDIA_RECORDER: ${{ needs.media_recorder.result }}
           AGENT_PROTECTION: ${{ needs.agent_protection.result }}
         run: |
-          for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
+          for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$BROWSER_NATIVE" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
             test "$result" = success || exit 1
           done
-run-name: CI proof — density
+run-name: CI proof — browser-start
