@@ -594,9 +594,10 @@ export function PluginImport({
     fromGit = false,
   ) {
     if (!imports || pending.current || blocked) return;
-    const observe = currentPlugin
-      ? checks.observe(currentPlugin, updateAction?.source)
-      : undefined;
+    const observe =
+      currentPlugin && savedSource
+        ? checks.observe(currentPlugin, updateAction?.source)
+        : undefined;
     const returnTo = document.activeElement as HTMLElement | null;
     sourceTrigger.current = returnTo;
     pending.current = true;
@@ -1226,7 +1227,7 @@ export function PluginImport({
                   type="button"
                   disabled={blocked || !candidate}
                   onClick={() => {
-                    if (currentPlugin && candidate)
+                    if (currentPlugin && savedSource && candidate)
                       checks.observe(currentPlugin, updateAction?.source)(
                         candidate,
                         null,

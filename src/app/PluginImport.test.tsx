@@ -22,7 +22,7 @@ import { createPluginUpdates } from "../plugins/updates";
 import { PluginImport } from "./PluginImport";
 import {
   createPluginUpdateChecks,
-  pluginUpdateAvailable,
+  sharedPluginUpdateChecks,
 } from "../plugins/update-checks";
 import userEvent from "@testing-library/user-event";
 import { cloneElement, StrictMode } from "react";
@@ -2354,6 +2354,9 @@ it("rejects a replacement source without the installed plugin ID", async () => {
   expect(
     screen.getByRole("button", { name: "Browse plugin folder" }),
   ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(sharedPluginUpdateChecks(manager.imports).snapshot()).toEqual({});
 });
 
 function savedFolderProps(imports: unknown) {
@@ -3931,7 +3934,7 @@ it("keeps a known Update usable while background discovery is pending", async ()
 });
 
 it.each([false, true])(
-  "retains a manually discovered update without a saved source (multiple=%s)",
+  "keeps a manually discovered update local until confirmed (multiple=%s)",
   async (multiple) => {
     const user = userEvent.setup();
     const imports = {
@@ -3972,18 +3975,13 @@ it.each([false, true])(
     await screen.findByRole("button", { name: /^Update$/ });
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(pluginUpdateAvailable(checks.snapshot(), rememberedPlugin)).toBe(
-      true,
-    );
-    expect(checks.snapshot()[rememberedManifest.id]?.release?.revision).toBe(
-      multiple ? "alternate" : "new",
-    );
+    expect(checks.snapshot()).toEqual({});
     expect(
-      screen.getAllByRole("button", { name: /^Update(?: Remembered)?$/ }),
-    ).toHaveLength(1);
-    expect(checks.snapshot()[rememberedManifest.id]?.candidate).toEqual(
-      rememberedPreview.candidates[multiple ? 1 : 0],
-    );
+      screen.getByRole("button", { name: "Update Remembered" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Update", exact: true }),
+    ).toBeNull();
     expect(manager.installImport).not.toHaveBeenCalled();
   },
 );
