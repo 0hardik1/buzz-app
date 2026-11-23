@@ -1,3 +1,5 @@
+@reference "../../shared/styles/globals.css";
+
 /* The popup has no padding of its own: the header stays put while the body
    scrolls within the space the popover was given. */
 .frame {
