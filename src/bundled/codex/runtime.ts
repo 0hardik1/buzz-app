@@ -2815,7 +2815,7 @@ export class CodexRuntime {
       (!communityTarget ||
         (!nextCommunityTurn &&
           (activeCommunityTurn?.finished || activeCommunityTurn?.stopped)) ||
-        communityLane.voice ||
+        communityLane.voice?.signal.aborted ||
         communityLane.voiceOpening ||
         communityTarget.unaddressed ||
         (request.model && request.model !== targetModel) ||
@@ -4975,7 +4975,7 @@ export class CodexRuntime {
       if (active.turnId && !entry.abort.signal.aborted)
         this.touch(request, entry, key);
       if (
-        adopted === undefined &&
+        (adopted === undefined || active.reply !== request) &&
         settings.scope === "community" &&
         lane.voice &&
         !lane.voice.signal.aborted
