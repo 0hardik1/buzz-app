@@ -700,6 +700,7 @@ function NoteCollection({
     <div
       className={styles.split}
       ref={split.ref}
+      data-panel-cards=""
       data-side={readerOpen ? "" : undefined}
     >
       <div className={styles.main}>

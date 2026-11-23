@@ -880,6 +880,7 @@ export function AgentsPage({
         ref={split.ref}
         style={split.style}
         className={styles.browse}
+        data-panel-cards=""
         data-side={
           (panel && tab === "yours") || (shared && tab === "marketplace")
             ? ""

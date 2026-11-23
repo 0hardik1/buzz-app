@@ -20,10 +20,7 @@
   position: relative;
   overflow: clip;
 }
-/* Open, the dock floats as its own card beside the conversation's, the same
-   small gap apart as the sidebar. */
 .board:has(> [data-panel-dock]:not([hidden], [data-closing])) {
-  column-gap: var(--space-1);
   grid-template-columns: minmax(20rem, 1fr) minmax(
       0,
       max(
@@ -472,11 +469,6 @@ details:not([open]) > summary .sectionChevron {
   grid-auto-rows: minmax(0, 1fr);
   /* Stacked panels are separate cards too. */
   row-gap: var(--space-1);
-}
-/* The grip sits in the middle of the gap between the cards. */
-.board .panelStack > [data-panel-resize] {
-  inset-inline-start: calc(-1 * var(--space-1) / 2 - 1px);
-  translate: 0;
 }
 .retainedPanel[hidden] {
   display: none;

@@ -1096,6 +1096,22 @@
     overflow: visible;
   }
 
+  /* Every split marked `data-panel-cards` floats its regions the same way:
+     while its side region shows (`data-side`, or an open panel dock), the
+     cards sit the sidebar's small gap apart, with no divider, and the split's
+     resize grip sits in the middle of that gap. Pages own only their column
+     widths and narrow-window behavior. */
+  [data-panel-cards]:is(
+    [data-side],
+    :has(> [data-panel-dock]:not([hidden], [data-closing]))
+  ) {
+    column-gap: var(--space-1);
+  }
+  [data-panel-cards] > * > [data-panel-resize][data-panel-resize] {
+    inset-inline-start: calc(-1 * var(--space-1) / 2 - 1px);
+    translate: 0;
+  }
+
   /* A joined surface keeps one outer edge; nested panels retain opaque
      fills for responsive overlays while their layout owns the separators. */
   .panel[data-joined] .panel {

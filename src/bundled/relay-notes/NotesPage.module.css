@@ -17,7 +17,6 @@
 }
 .side {
   position: relative;
-  border-inline-start: 1px solid var(--border-standard);
 }
 .page {
   display: flex;
@@ -145,9 +144,6 @@
   .split[data-side] > .main,
   .side > [data-panel-resize] {
     display: none;
-  }
-  .side {
-    border-inline-start: 0;
   }
 }
 
