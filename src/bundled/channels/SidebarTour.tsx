@@ -1,4 +1,9 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import {
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from "react";
 import {
   SchematicCard,
   SchematicDropLine,
@@ -10,6 +15,7 @@ import {
 import { Tour, type TourPage } from "../../shared/design-system/ui/Tour";
 import { useUnseen } from "../../shared/design-system/ui/EducationHint";
 import { sidebarTourKey, stayMessyKey, useSeen } from "./seen-context";
+import { runTidyShow, tidyShow } from "./tidy-show";
 
 export const sidebarTourPages: readonly TourPage[] = [
   {
@@ -134,6 +140,9 @@ export const sidebarTourPages: readonly TourPage[] = [
   },
 ];
 
+/** Without a card to trim, the tour ends on reordering with no question. */
+const untidyPages = sidebarTourPages.filter((page) => page.id !== "tidy");
+
 /** Introduces custom workspaces once per device, beside the sidebar. */
 export function SidebarTour({
   listRef,
@@ -146,6 +155,8 @@ export function SidebarTour({
   const seen = useSeen();
   const unseen = useUnseen(seen, sidebarTourKey);
   const [anchor, setAnchor] = useState<Element | null>(null);
+  // Ask about tidying only when some card would trim.
+  const trims = useSyncExternalStore(tidyShow.subscribe, tidyShow.pending);
   useLayoutEffect(() => {
     if (!ready || !unseen) return;
     setAnchor(listRef.current?.closest("aside") ?? null);
@@ -155,16 +166,19 @@ export function SidebarTour({
     <Tour
       open
       label="What’s new in the sidebar"
-      pages={sidebarTourPages}
+      pages={trims ? sidebarTourPages : untidyPages}
       anchor={anchor}
       side="right"
       align="center"
-      finishLabel="Tidy it up"
-      declineLabel="Stay messy"
+      {...(trims && { finishLabel: "Tidy it up", declineLabel: "Stay messy" })}
       onDismiss={(reason) => {
+        const answer = () => seen?.mark(sidebarTourKey);
         // Only a yes trims; closing early leaves the sidebar as it was.
-        if (reason !== "finished") seen?.mark(stayMessyKey);
-        seen?.mark(sidebarTourKey);
+        if (reason !== "finished") {
+          seen?.mark(stayMessyKey);
+          answer();
+        } else if (trims) void runTidyShow(answer);
+        else answer();
       }}
     />
   );

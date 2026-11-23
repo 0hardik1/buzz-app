@@ -468,13 +468,14 @@ function ResizableRows({
   label: string;
   children: ReactNode;
 }) {
-  const [size, resize, toggle] = useSidebarCardSize(scope, card);
+  const [size, resize, toggle, tidyKey] = useSidebarCardSize(scope, card);
   return (
     <SidebarCardResize
       label={label}
       size={size}
       onResize={resize}
       onToggle={toggle}
+      tidyKey={tidyKey}
     >
       {children}
     </SidebarCardResize>

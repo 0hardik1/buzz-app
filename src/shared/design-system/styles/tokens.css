@@ -918,6 +918,7 @@
   --time-state: 150ms;
   --time-panel-enter: 180ms;
   --time-settle: 220ms;
+  --time-showcase: 640ms;
   --ease-state: ease;
   --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-settle: cubic-bezier(0.645, 0.045, 0.355, 1);
@@ -1574,6 +1575,7 @@
   --duration-state: var(--time-state);
   --duration-panel-enter: var(--time-panel-enter);
   --duration-settle: var(--time-settle);
+  --duration-showcase: var(--time-showcase);
   --duration-field-focus: var(--time-state);
   --easing-state: var(--ease-state);
   --easing-enter: var(--ease-enter);

@@ -13,6 +13,7 @@ import { Button } from "../../shared/design-system/ui/Button";
 import { needsYou } from "./conversation-rows";
 import styles from "./Channels.module.css";
 import { sidebarTourKey, stayMessyKey, useSeen } from "./seen-context";
+import { tidyShow } from "./tidy-show";
 
 const never = () => () => {};
 
@@ -59,7 +60,14 @@ export function useSidebarCardSize(scope: string, card: string) {
     () =>
       seen?.has(sidebarTourKey) === false || seen?.has(stayMessyKey) === true,
   );
-  const size = saved ?? (untidy && card !== "solo" ? ALL : undefined);
+  const key = `${scope}/${card}`;
+  const held = useSyncExternalStore(tidyShow.subscribe, () =>
+    tidyShow.held(key),
+  );
+  // Full only because the tour is unanswered (or its show hasn't come here).
+  const provisional =
+    saved === undefined && (untidy || held) && card !== "solo";
+  const size = provisional ? ALL : saved;
   const resize = (next: number | undefined) => {
     const { [card]: _, ...rest } = savedSizes(scope);
     writeView(
@@ -70,7 +78,7 @@ export function useSidebarCardSize(scope: string, card: string) {
   };
   // Closing full lands on the default explicitly, so it holds while untidy.
   const toggle = () => resize(size === ALL ? DEFAULT_SIZE : ALL);
-  return [size, resize, toggle] as const;
+  return [size, resize, toggle, provisional ? key : undefined] as const;
 }
 
 /**
@@ -87,6 +95,7 @@ export function SidebarCardResize({
   size,
   onResize,
   onToggle,
+  tidyKey,
   children,
 }: {
   label: string;
@@ -96,6 +105,8 @@ export function SidebarCardResize({
   onResize(size: number): void;
   /** Open full, or close full back to the default. */
   onToggle(): void;
+  /** Set while the card is full only until the tour's tidy: it may trim. */
+  tidyKey?: string | undefined;
   children: ReactNode;
 }) {
   const list = useRef<HTMLDivElement>(null);
@@ -103,6 +114,11 @@ export function SidebarCardResize({
   const stop = useRef<() => void>(undefined);
   useEffect(() => () => stop.current?.(), []);
   const [count, setCount] = useState(0);
+  useEffect(() => {
+    const rows = list.current;
+    if (!tidyKey || !rows || count <= DEFAULT_SIZE) return;
+    return tidyShow.register(tidyKey, rows);
+  }, [tidyKey, count]);
   // Rows the card shows now, for assistive technology.
   const [shown, setShown] = useState(0);
   // Conversations past the edge that wait on you, and the lowest one's row.

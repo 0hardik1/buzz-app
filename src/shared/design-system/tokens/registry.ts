@@ -2194,6 +2194,12 @@ export const MOTION = [
     use: "A tab indicator or released panel settling into place.",
   },
   {
+    token: "duration-showcase",
+    variable: "--duration-showcase",
+    value: "640ms",
+    use: "A one-time change performed for the person to watch, such as the tour trimming cards.",
+  },
+  {
     token: "easing-state",
     variable: "--easing-state",
     value: "ease",

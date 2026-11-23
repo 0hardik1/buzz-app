@@ -8,6 +8,7 @@ import type { SeenStore } from "../../shared/design-system/ui/EducationHint";
 import { SeenContext } from "./seen-context";
 import { SidebarTour, sidebarTourPages } from "./SidebarTour";
 import { sidebarTourKey, stayMessyKey } from "./seen-context";
+import { tidyShow } from "./tidy-show";
 
 const firstTitle = "Meet the new sidebar";
 
@@ -25,10 +26,22 @@ const seen: SeenStore = {
   },
 };
 
+let unregister: (() => void) | undefined;
 beforeEach(() => {
   marks = new Set();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  unregister?.();
+  unregister = undefined;
+});
+
+/** A card that would trim, so the tour asks about tidying. */
+function untidyCard() {
+  const rows = document.createElement("div");
+  document.body.append(rows);
+  unregister = tidyShow.register("scope/card", rows);
+}
 
 function mount(ready = true) {
   const aside = document.createElement("aside");
@@ -51,6 +64,7 @@ test("sidebar tour waits for the layout, then shows its pages in order", async (
   const view = mount(false);
   expect(screen.queryByText(firstTitle)).toBeNull();
   view.unmount();
+  untidyCard();
   mount();
   for (const page of sidebarTourPages.slice(0, -1)) {
     expect(screen.getByText(page.title)).toBeInTheDocument();
@@ -59,6 +73,19 @@ test("sidebar tour waits for the layout, then shows its pages in order", async (
   expect(screen.getByText("Want a tidier sidebar?")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Tidy it up" }));
   expect(screen.queryByText("Want a tidier sidebar?")).toBeNull();
+  expect(marks.has(stayMessyKey)).toBe(false);
+  expect(marks.has(sidebarTourKey)).toBe(true);
+});
+
+test("sidebar tour ends on reordering, without the question, when no card would trim", async () => {
+  const user = userEvent.setup();
+  mount();
+  // Every page before reordering, which is now the last.
+  for (let page = 0; page < sidebarTourPages.length - 2; page++)
+    await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Reorder workspaces")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Stay messy" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Got it" }));
   expect(marks.has(stayMessyKey)).toBe(false);
   expect(marks.has(sidebarTourKey)).toBe(true);
 });
