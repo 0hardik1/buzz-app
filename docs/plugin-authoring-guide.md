@@ -79,6 +79,11 @@ Each line is the main call. Read the types for every field.
 
 Agent tool names match `/^[a-z][a-z0-9_]{0,63}$/` and are unique across plugins; prefix them with your plugin. Changing a tool's name, description or schema restarts some agent sessions. `addInstructions` text is sent on every turn, so keep it short.
 
+In Messages, a `buzz://plugin?id=<plugin>&page=<page>` link can open beside
+the conversation when the named plugin registers a matching panel with
+`addressable: true`. If no eligible panel matches, the link opens the plugin
+page. Use the panel's `matches` function to select which links it handles.
+
 In a Solo region, check `ui.headerMenuActions === true` before passing
 `headerMenuActions` to `ui.Workspace` or `ui.ChannelGroup`. Each **Actions**
 entry has a unique `id`, a `label`, and an `onSelect` callback.

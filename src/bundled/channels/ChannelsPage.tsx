@@ -1961,7 +1961,13 @@ function ChannelWorkspace({
         tabState.select(id);
         return true;
       }
-      if (isBuzzLink(url) && navigator && viewer) {
+      const { channelId, routedThread } = linkContext.current;
+      const pluginLink = parsed?.format === "plugin";
+      const pluginPanel =
+        pluginLink && channelId
+          ? panelOpening(panels, channelId, url, rootId)
+          : undefined;
+      if (!pluginPanel && isBuzzLink(url) && navigator && viewer) {
         const target = buzzLinkTarget(url, {
           viewer,
           communityOrigin: scope.slice(0, -(viewer.length + 1)),
@@ -1983,8 +1989,9 @@ function ChannelWorkspace({
           return true;
         }
       }
-      const { channelId, routedThread } = linkContext.current;
-      const next = channelId && panelOpening(panels, channelId, url, rootId);
+      const next = pluginLink
+        ? pluginPanel
+        : channelId && panelOpening(panels, channelId, url, rootId);
       if (next) {
         setSettings(undefined);
         panelTrigger.current =

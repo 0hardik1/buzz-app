@@ -16,6 +16,54 @@ const composer = (page, name) =>
 const entry = (page) =>
   page.evaluate(() => history.state.buzzNavigationV1.entry);
 
+const pluginLinkTest = test.extend({
+  pluginFixtures: true,
+  enabledPlugins: ["fixture.page-placement", "fixture.notes"],
+  colorScheme: "dark",
+  video: "on",
+});
+
+pluginLinkTest(
+  "plugin links in messages open an addressable panel and restore it through browser history",
+  async ({ page, app }, info) => {
+    await open(page, app);
+    const href = "buzz://plugin?id=fixture.page-placement&page=brief";
+    app.append(
+      "primary",
+      "alpha",
+      `[Read the brief](${href}) or [Preview the brief](${href}&route.view=preview).`,
+    );
+
+    const conversation = composer(page, "Alpha");
+    const project = page.getByRole("heading", { name: "Project brief" });
+    const preview = page.getByText("Review the launch plan.", { exact: true });
+
+    await page.getByRole("link", { name: "Read the brief" }).press("Enter");
+    await expect(project).toBeVisible();
+    await expect(conversation).toBeHidden();
+    await page.goBack();
+    await expect(conversation).toBeVisible();
+    await page.goForward();
+    await expect(project).toBeVisible();
+    await page.goBack();
+    await expect(conversation).toBeVisible();
+
+    await page.getByRole("link", { name: "Preview the brief" }).press("Enter");
+    await expect(preview).toBeVisible();
+    await expect(conversation).toBeVisible();
+    await page.goBack();
+    await expect(preview).toBeHidden();
+    await expect(conversation).toBeVisible();
+    await page.goForward();
+    await expect(preview).toBeVisible();
+    await expect(conversation).toBeVisible();
+    await page.mouse.move(0, 0);
+    await page.screenshot({
+      path: info.outputPath("brief-beside-messages.png"),
+    });
+  },
+);
+
 const providerTest = test.extend({ pluginFixtures: true });
 providerTest(
   "Settings provider closes before its parent and retires only its own return path",

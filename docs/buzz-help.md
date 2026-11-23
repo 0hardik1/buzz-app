@@ -176,6 +176,9 @@ them. Don't assume an
 optional plugin is on. Agents can ask to install or enable one, which you
 approve or decline.
 
+Links to plugins in Messages can open beside the conversation when the plugin
+offers a panel for that link. Back and Forward work for both panels and pages.
+
 A plugin runs with the same reach as Buzz itself, with no sandbox. Install
 one only if you trust its author with your account and your computer.
 

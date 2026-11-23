@@ -16,6 +16,8 @@ import { FolderOpenIcon } from "../../src/shared/design-system/icons";
 import type { PanelProps } from "../../src/features/panels/service";
 import type { NotificationInput } from "../../src/features/notifications/service";
 
+const projectBrief = "buzz://plugin?id=fixture.page-placement&page=brief";
+
 function DrillInFixture({ target, context }: PanelProps) {
   const [log, setLog] = useState(false);
   return (
@@ -309,8 +311,26 @@ export const fixturePlugins: readonly BundledPlugin[] = [
     },
     enabledByDefault: false,
     module: {
-      inject: ["pages"],
+      inject: ["pages", "panels"],
       apply(ctx) {
+        ctx.pages.register({
+          id: "brief",
+          title: "Project brief",
+          component: () => <h1>Project brief</h1>,
+        });
+        ctx.panels.register({
+          id: "brief-preview",
+          title: "Brief preview",
+          addressable: true,
+          matches: (target) => target === `${projectBrief}&route.view=preview`,
+          component: () => <p>Review the launch plan.</p>,
+        });
+        ctx.panels.register({
+          id: "brief-summary",
+          title: "Brief summary",
+          matches: (target) => target === projectBrief,
+          component: () => <p>Brief summary</p>,
+        });
         for (const [id, title, placement] of [
           ["wide", "A deliberately long topbar destination", "topbar"],
           ["tool", "Toolbar destination", "toolbar"],
@@ -666,6 +686,14 @@ export const fixturePlugins: readonly BundledPlugin[] = [
     module: {
       inject: ["panels", "pages"],
       apply(ctx) {
+        ctx.panels.register({
+          id: "foreign-brief",
+          title: "Unrelated panel",
+          addressable: true,
+          order: -20,
+          matches: (target) => target.startsWith(projectBrief),
+          component: () => <p>Unrelated panel</p>,
+        });
         // Order -10 on purpose: a global resolve(target) launcher bug must hit this instead.
         ctx.panels.register({
           id: "catch-all",

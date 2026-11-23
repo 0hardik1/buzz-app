@@ -98,6 +98,7 @@ const token = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const section = /^[a-z0-9][a-z0-9._-]{0,127}(?:\/[a-z0-9][a-z0-9._-]{0,127})?$/;
 const provider = /^[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,127}$/;
 const hex = /^[a-f0-9]{64}$/i;
+export const conversationDetailTargetPattern = /^[!-~]{1,4096}$/;
 const paramKey = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 const gitCommit = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 const MAX_PARAMS = 16;
@@ -475,7 +476,7 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           const input = record(value.detail);
           fields(input, ["target", "rootId"]);
           detail = Object.freeze({
-            target: text(input.target, /^[!-~]{1,4096}$/),
+            target: text(input.target, conversationDetailTargetPattern),
             ...(input.rootId !== undefined
               ? { rootId: text(input.rootId, hex).toLowerCase() }
               : {}),
