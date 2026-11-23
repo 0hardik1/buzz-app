@@ -2812,6 +2812,7 @@ export function createRelaySession(
     return messages === session.messages;
   }
   const session = Object.freeze({
+    lifetimeSignal: lifetime.signal,
     artifactIncremental: transport?.artifactIncremental,
     supportsMigrationWrites: true as const,
     memberAdditions,
@@ -2820,14 +2821,13 @@ export function createRelaySession(
     relayAuthor: transport?.relayAuthor,
     /** NIP-AP config artifacts: the relay's own verified answer, never merged
      * with live or local outgoing events or fed to any projection, and a
-     * kind-45010 writer when the host has one. Each read starts fresh. With
-     * `priority: "background"` a long scan queues behind foreground reads. */
+     * kind-45010 writer when the host has one. Each read starts fresh. */
     snapshotRead: transport
       ? (((filters, { signal, priority }) =>
           relayRead(filters, {
-            fresh: true,
             ...(signal ? { signal } : {}),
             ...(priority ? { priority } : {}),
+            fresh: true,
           })) satisfies SnapshotRead)
       : undefined,
     configArtifactWriter: transport?.configArtifacts,

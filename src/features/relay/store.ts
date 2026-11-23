@@ -1330,7 +1330,7 @@ export function createChannelStore(
       return;
     }
     accessVersions.set(channelId, (accessVersions.get(channelId) ?? 0) + 1);
-    discovery?.deny(channelId);
+    discovery?.revoke(channelId);
     allowed?.delete(channelId);
     transport?.revokeAccess(() => {
       heads.delete(channelId);
@@ -2572,8 +2572,17 @@ export function createChannelStore(
       return;
     }
     coverage = "partial";
+    // A retry after a failed read keeps the last complete read's stamp: the
+    // channels are kept too, and nothing since has revoked by omission.
     if (list.status !== "ready")
-      setList({ status: "loading", channels: list.channels, coverage });
+      setList({
+        status: "loading",
+        channels: list.channels,
+        coverage,
+        ...(list.rosterAsOf !== undefined
+          ? { rosterAsOf: list.rosterAsOf }
+          : {}),
+      });
     if (disposed) {
       listBusy = false;
       return;
@@ -4281,6 +4290,7 @@ export function createChannelStore(
     subscribeDirectory: (listener: Listener) =>
       subscribe(directoryListeners, listener),
     describe: describeReference,
+    revoked: (channelId: string) => discovery?.revoked(channelId) ?? false,
     // A cached-only store reads nothing: it says so, and offers no lookup.
     ...(options.cachedOnly
       ? { cachedOnly: true as const }
