@@ -842,8 +842,9 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   ).toBeFocused();
   const camera = page.getByRole("combobox", { name: "Camera", exact: true });
   await camera.press("Enter");
-  await expect(camera).toHaveAttribute("aria-expanded", "true");
-  await page.keyboard.press("End");
+  const currentCamera = page.getByRole("option", { selected: true });
+  await expect(currentCamera).toBeFocused();
+  await currentCamera.press("End");
   await expect(page.getByRole("option", { name: "Desk camera" })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect
