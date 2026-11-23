@@ -83,6 +83,7 @@ it("shows the base instructions, kept in the agents' storage", async () => {
           subscribe: () => () => {},
           types: () => types,
           storage,
+          strandedDefaults: async () => undefined,
         } as unknown as Agents
       }
     />,

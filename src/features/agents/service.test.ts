@@ -23778,6 +23778,32 @@ describe("synced teams", () => {
   });
 });
 
+it("offers to remove protection only once plugin start-up is over and its plugin isn't running", async () => {
+  const identities: AgentIdentity[] = [];
+  const f = await setup({ identities, starting: true });
+  const agent = await f.service.create({
+    type: "example/echo",
+    name: "Worker",
+  });
+  const identity = identities[0];
+  if (!identity) throw new Error("Expected native identity");
+  identities[0] = {
+    ...identity,
+    protection: { provider: "example", policy: {} },
+    protectionRevision: 1,
+  };
+  await f.service.refresh();
+  // The plugin may only be starting, so it isn't stranded yet.
+  expect(f.service.protectionStranded(agent.key)).toBe(false);
+  f.settleStartup();
+  expect(f.service.protectionStranded(agent.key)).toBe(true);
+  f.plugin.agentProtection.register({
+    processProtection: { readOnlyPaths: ["/provider"], hiddenPaths: [] },
+    checkEvidence: async () => true,
+  });
+  expect(f.service.protectionStranded(agent.key)).toBe(false);
+});
+
 it("revoking the runner while a protected shared tool waits cancels it before any side effect", async () => {
   const identities: AgentIdentity[] = [];
   const f = await setup({ identities, protection: true });
