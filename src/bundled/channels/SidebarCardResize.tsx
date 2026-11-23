@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import { readView, subscribeView, writeView } from "../../shared/view-state";
-import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
 import { needsYou } from "./conversation-rows";
 import styles from "./Channels.module.css";
@@ -21,10 +20,6 @@ const sizesKey = "sidebar:card-sizes";
 const DEFAULT_SIZE = 7;
 /** The saved size of a card opened full. */
 const ALL = Number.MAX_SAFE_INTEGER;
-/** Set once someone drags or double-clicks any grip on this device. */
-const learnedScope = "device";
-const learnedKey = "sidebar:grip-learned";
-const learn = () => writeView(learnedScope, learnedKey, true);
 
 function savedSizes(scope: string): Record<string, number> {
   const saved = readView<unknown>(scope, sizesKey, {});
@@ -104,11 +99,6 @@ export function SidebarCardResize({
     );
   }, []);
   const saved = useRef(size);
-  // The hint explains the grip until it has been used once.
-  const learned = useSyncExternalStore(
-    (change) => subscribeView(learnedScope, change),
-    () => readView<unknown>(learnedScope, learnedKey, false) === true,
-  );
   // Apply the saved size before paint, and again whenever rows come, go,
   // re-wrap or first get a size (a card opened after starting closed). Only
   // the grip saves a size; settling never does.
@@ -205,131 +195,112 @@ export function SidebarCardResize({
       </div>
       {/* Only a card with more than one row has anything to hide. */}
       {count > 1 && (
-        <Tooltip
-          side="bottom"
-          closeOnClick={false}
-          {...(learned && { open: false })}
-          content={
-            size === ALL
-              ? "Drag to resize · Double-click to reset"
-              : "Drag to resize · Double-click to show all"
-          }
-        >
-          <hr
-            ref={handle}
-            className={styles.cardResize}
-            aria-label={`Resize ${label}`}
-            aria-orientation="horizontal"
-            aria-valuemin={1}
-            aria-valuemax={count}
-            aria-valuenow={shown}
-            aria-valuetext={`${shown} of ${count} conversations`}
-            // Rows past the edge keep the handle showing, so the card reads
-            // as having more.
-            data-more={shown < count ? "" : undefined}
-            aria-keyshortcuts="Enter"
-            tabIndex={0}
-            onDoubleClick={() => {
-              learn();
-              onToggle();
-            }}
-            onKeyDown={(event) => {
-              const rows = list.current;
-              if (!rows || event.altKey || event.ctrlKey || event.metaKey)
-                return;
-              // Step one whole row from wherever the list ends now.
-              const ends = stops(rows);
-              const [first, last] = [ends[0], ends.at(-1)];
-              const current = rows.offsetHeight;
-              if (first === undefined || last === undefined) return;
-              if (event.key === "Enter") {
-                learn();
-                onToggle();
-              } else if (event.key === "ArrowUp")
-                onResize(
-                  through(
-                    ends,
-                    ends.filter((end) => end < current - 1).at(-1) ?? first,
-                  ),
-                );
-              else if (event.key === "ArrowDown")
-                onResize(
-                  through(ends, ends.find((end) => end > current + 1) ?? last),
-                );
-              else return;
+        <hr
+          ref={handle}
+          className={styles.cardResize}
+          aria-label={`Resize ${label}`}
+          aria-orientation="horizontal"
+          aria-valuemin={1}
+          aria-valuemax={count}
+          aria-valuenow={shown}
+          aria-valuetext={`${shown} of ${count} conversations`}
+          // Rows past the edge keep the handle showing, so the card reads
+          // as having more.
+          data-more={shown < count ? "" : undefined}
+          aria-keyshortcuts="Enter"
+          tabIndex={0}
+          onDoubleClick={onToggle}
+          onKeyDown={(event) => {
+            const rows = list.current;
+            if (!rows || event.altKey || event.ctrlKey || event.metaKey) return;
+            // Step one whole row from wherever the list ends now.
+            const ends = stops(rows);
+            const [first, last] = [ends[0], ends.at(-1)];
+            const current = rows.offsetHeight;
+            if (first === undefined || last === undefined) return;
+            if (event.key === "Enter") onToggle();
+            else if (event.key === "ArrowUp")
+              onResize(
+                through(
+                  ends,
+                  ends.filter((end) => end < current - 1).at(-1) ?? first,
+                ),
+              );
+            else if (event.key === "ArrowDown")
+              onResize(
+                through(ends, ends.find((end) => end > current + 1) ?? last),
+              );
+            else return;
+            event.preventDefault();
+          }}
+          onPointerDown={(event) => {
+            const rows = list.current;
+            if (event.button !== 0 || stop.current || !rows) return;
+            event.preventDefault();
+            const { pointerId, clientY: startY } = event;
+            const start = rows.offsetHeight;
+            const ends = stops(rows);
+            const [min = 0] = ends;
+            const max = ends.at(-1) ?? start;
+            // Rows sliding under the pointer must not take hover mid-drag. The
+            // grip stays hit-testable, so a double-click still lands on it.
+            const surface = rows.closest("nav") ?? rows;
+            const grip = event.currentTarget;
+            let next = start;
+            let frame: number | undefined;
+            // Preview on the element; the saved size changes on release.
+            const move = (event: PointerEvent) => {
+              if (event.pointerId !== pointerId) return;
               event.preventDefault();
-            }}
-            onPointerDown={(event) => {
-              const rows = list.current;
-              if (event.button !== 0 || stop.current || !rows) return;
-              event.preventDefault();
-              const { pointerId, clientY: startY } = event;
-              const start = rows.offsetHeight;
+              next = Math.min(
+                max,
+                Math.max(min, start + event.clientY - startY),
+              );
+              frame ??= requestAnimationFrame(() => {
+                frame = undefined;
+                rows.style.maxHeight = `${next}px`;
+              });
+            };
+            const finish = (event: Event) => {
+              if ("pointerId" in event && event.pointerId !== pointerId) return;
+              stop.current?.();
+              // Released, the list glides onto the nearest whole row. Dragged
+              // to the bottom, it keeps showing every row as new ones arrive.
+              // A click without a drag (half of a double-click) changes nothing.
+              if (event.type !== "pointerup" || next === start)
+                return apply(rows, size);
               const ends = stops(rows);
-              const [min = 0] = ends;
-              const max = ends.at(-1) ?? start;
-              // Rows sliding under the pointer must not take hover mid-drag. The
-              // grip stays hit-testable, so a double-click still lands on it.
-              const surface = rows.closest("nav") ?? rows;
-              const grip = event.currentTarget;
-              let next = start;
-              let frame: number | undefined;
-              // Preview on the element; the saved size changes on release.
-              const move = (event: PointerEvent) => {
-                if (event.pointerId !== pointerId) return;
-                event.preventDefault();
-                next = Math.min(
-                  max,
-                  Math.max(min, start + event.clientY - startY),
-                );
-                frame ??= requestAnimationFrame(() => {
-                  frame = undefined;
-                  rows.style.maxHeight = `${next}px`;
-                });
-              };
-              const finish = (event: Event) => {
-                if ("pointerId" in event && event.pointerId !== pointerId)
-                  return;
-                stop.current?.();
-                // Released, the list glides onto the nearest whole row. Dragged
-                // to the bottom, it keeps showing every row as new ones arrive.
-                // A click without a drag (half of a double-click) changes nothing.
-                if (event.type !== "pointerup" || next === start)
-                  return apply(rows, size);
-                learn();
-                const ends = stops(rows);
-                const target = through(ends, nearest(ends, next));
-                if (target === size) apply(rows, size);
-                else onResize(target);
-              };
-              stop.current = () => {
-                stop.current = undefined;
-                if (frame !== undefined) cancelAnimationFrame(frame);
-                window.removeEventListener("pointermove", move);
-                window.removeEventListener("pointerup", finish);
-                window.removeEventListener("pointercancel", finish);
-                window.removeEventListener("blur", finish);
-                handle.current?.removeAttribute("data-resizing");
-                rows.removeAttribute("data-resizing");
-                document.documentElement.style.removeProperty("cursor");
-                document.body.style.removeProperty("user-select");
-                surface.style.removeProperty("pointer-events");
-                grip.style.removeProperty("pointer-events");
-              };
-              window.addEventListener("pointermove", move);
-              window.addEventListener("pointerup", finish);
-              window.addEventListener("pointercancel", finish);
-              window.addEventListener("blur", finish);
-              event.currentTarget.setAttribute("data-resizing", "");
-              rows.setAttribute("data-resizing", "");
-              rows.style.maxHeight = `${start}px`;
-              document.documentElement.style.cursor = "grabbing";
-              document.body.style.userSelect = "none";
-              surface.style.pointerEvents = "none";
-              grip.style.pointerEvents = "auto";
-            }}
-          />
-        </Tooltip>
+              const target = through(ends, nearest(ends, next));
+              if (target === size) apply(rows, size);
+              else onResize(target);
+            };
+            stop.current = () => {
+              stop.current = undefined;
+              if (frame !== undefined) cancelAnimationFrame(frame);
+              window.removeEventListener("pointermove", move);
+              window.removeEventListener("pointerup", finish);
+              window.removeEventListener("pointercancel", finish);
+              window.removeEventListener("blur", finish);
+              handle.current?.removeAttribute("data-resizing");
+              rows.removeAttribute("data-resizing");
+              document.documentElement.style.removeProperty("cursor");
+              document.body.style.removeProperty("user-select");
+              surface.style.removeProperty("pointer-events");
+              grip.style.removeProperty("pointer-events");
+            };
+            window.addEventListener("pointermove", move);
+            window.addEventListener("pointerup", finish);
+            window.addEventListener("pointercancel", finish);
+            window.addEventListener("blur", finish);
+            event.currentTarget.setAttribute("data-resizing", "");
+            rows.setAttribute("data-resizing", "");
+            rows.style.maxHeight = `${start}px`;
+            document.documentElement.style.cursor = "grabbing";
+            document.body.style.userSelect = "none";
+            surface.style.pointerEvents = "none";
+            grip.style.pointerEvents = "auto";
+          }}
+        />
       )}
     </>
   );
