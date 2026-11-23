@@ -1284,6 +1284,7 @@ export class ClaudeRuntime {
       channelId,
       model,
       effort,
+      route: chooseModel,
       synced,
       team,
       workingUntil,
@@ -1639,6 +1640,7 @@ export class ClaudeRuntime {
             ...(model ? { model } : {}),
             ...(effort ? { effort } : {}),
           },
+          ...(chooseModel ? { route: chooseModel } : {}),
           admit,
           // Mentions already show the host's fallback under the request.
           ...this.turnAttribution(
