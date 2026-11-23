@@ -58,7 +58,7 @@ jobs:
           test -x fixture-bridge
           test -x buzzodz
           VERIFY
-          printf 'setInterval(() => {}, 1000);\n' > "$RUNNER_TEMP/artifact-keepalive.cjs"
+          printf 'setInterval(() => {}, 1000);\n' > /tmp/artifact-keepalive.cjs
       - name: Normal download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         id: normal
@@ -82,7 +82,7 @@ jobs:
         timeout-minutes: 1
         continue-on-error: true
         env:
-          NODE_OPTIONS: --require ${{ runner.temp }}/artifact-keepalive.cjs
+          NODE_OPTIONS: --require /tmp/artifact-keepalive.cjs
         with:
           artifact-ids: ${{ needs.produce.outputs.artifact-id }}
           merge-multiple: true
