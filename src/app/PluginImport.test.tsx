@@ -3979,9 +3979,7 @@ it.each([false, true])(
     expect(
       screen.getByRole("button", { name: "Update Remembered" }),
     ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Update", exact: true }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Update$/ })).toBeNull();
     expect(manager.installImport).not.toHaveBeenCalled();
   },
 );
