@@ -1989,7 +1989,11 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   Keychain may ask to let one build check the other's setup.
 - Experimental macOS plugins may offer native-private credential entry. Where
   supported, Buzz saves that credential in this build's OS secure storage, not
-  chat or plugin JavaScript. Provider **Clear** retires that provider's key;
+  chat or plugin JavaScript. Before entry, Buzz asks to confirm: continuing
+  removes the slot's saved credential, so cancelling the entry leaves it empty,
+  while cancelling the confirmation keeps it. Install and update reviews list
+  each credential slot with the addresses, header and format it is sent with.
+  Provider **Clear** retires that provider's key;
   sign-out also attempts tracked credential cleanup. Missing or inconsistent
   storage history can disable saving rather than silently reconnecting it.
   Availability does not mean a provider operation or paid request is enabled.

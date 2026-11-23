@@ -9,8 +9,9 @@ use std::{
 
 const REFUSED: &str = "Reviewed invocation is unavailable or retired";
 
-// Up to 128 tombstones last through this app process. Unregister-before-register cannot revive
-// a disposed fiber; the same envelope is independently consumed in HostCalls.
+// Up to 128 renderer-named tombstones last through this app process; native clears
+// reclaim theirs on return. Unregister-before-register cannot revive a disposed fiber;
+// the same envelope is independently consumed in HostCalls.
 #[derive(Clone, Default)]
 pub(crate) struct Invocations(Arc<Mutex<HashMap<String, Entry>>>);
 struct Entry {
@@ -18,13 +19,25 @@ struct Entry {
     live: bool,
     retired: Arc<tokio::sync::Notify>,
     finished: tokio::sync::watch::Sender<bool>,
+    /// Host-generated work no renderer can name: nothing to tombstone once it returns.
+    reclaim: bool,
 }
 impl Invocations {
     pub(crate) fn own(&self, call: &str, plugin: &str) -> Result<Retirement, String> {
         self.reserve(call, plugin)?;
         Ok(Retirement(self.clone(), call.into()))
     }
+    /// A native clear's owner, under an ID only the host knows. It still excludes
+    /// other reviews and retires like any owner, but leaves no lifetime entry.
+    pub(crate) fn own_clear(&self, plugin: &str) -> Result<Retirement, String> {
+        let call = uuid::Uuid::new_v4().to_string();
+        self.admit(&call, plugin, true)?;
+        Ok(Retirement(self.clone(), call))
+    }
     fn reserve(&self, call: &str, plugin: &str) -> Result<(), String> {
+        self.admit(call, plugin, false)
+    }
+    fn admit(&self, call: &str, plugin: &str, reclaim: bool) -> Result<(), String> {
         let mut state = self.0.lock().map_err(|_| REFUSED)?;
         if state.len() >= 128 || state.contains_key(call) {
             return Err(REFUSED.into());
@@ -40,6 +53,7 @@ impl Invocations {
                 live: true,
                 retired: Arc::default(),
                 finished: tokio::sync::watch::channel(false).0,
+                reclaim,
             },
         );
         Ok(())
@@ -66,7 +80,12 @@ impl Invocations {
     fn end_review(&self, call: &str) {
         if let Ok(mut state) = self.0.lock() {
             if let Some(entry) = state.get_mut(call) {
+                // Subscribed waiters read this retained `true` before the
+                // sender closes, so removal still acknowledges completion.
                 entry.finished.send_replace(true);
+                if entry.reclaim {
+                    state.remove(call);
+                }
             }
         }
     }
@@ -92,6 +111,7 @@ impl Invocations {
                         live: false,
                         retired: Arc::default(),
                         finished: tokio::sync::watch::channel(true).0,
+                        reclaim: false,
                     },
                 );
             }

@@ -208,9 +208,11 @@ export interface HostSecrets {
   status(slot: string): Promise<HostSecretStatus>;
   /** Failure may leave saving in progress; do not automatically retry. */
   set(slot: string, value: string): Promise<void>;
-  /** Native-private replacement entry. The old enrollment is retired before
-   * input; cancel leaves it missing. Disposing the scope waits for retirement.
-   * Desktop support is checked natively; never fall back to renderer entry. */
+  /** Native-private replacement entry. A native confirmation comes first;
+   * declining rejects and leaves the saved credential unchanged. Continuing
+   * retires the old enrollment before input, so cancelling entry resolves
+   * missing. Disposing the scope waits for retirement. Desktop support is
+   * checked natively; never fall back to renderer entry. */
   enroll?(slot: string): Promise<HostSecretStatus>;
   /** Failure does not promise the credential remains usable or rolled back. */
   clear(slot: string): Promise<void>;

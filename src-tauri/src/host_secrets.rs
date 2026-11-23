@@ -8,6 +8,7 @@ mod private_input;
 const UNAVAILABLE: &str = "Saved plugin credentials are unavailable";
 const SAVE_UNKNOWN: &str =
     "Buzz couldn't confirm saving the credential. Saving may still finish; do not retry yet.";
+const DECLINED: &str = "Credential entry was cancelled; the saved credential was not changed";
 const WAIT: std::time::Duration = buzzodz_plugins::secrets::CLEANUP_BUDGET;
 
 fn viewer(identity: &IdentityHost, id: &str, revision: &str, slot: &str) -> Result<String, String> {
@@ -54,7 +55,7 @@ pub(crate) async fn plugin_host_secret_clear(
 ) -> Result<(), String> {
     let viewer = viewer(&identity, &id, &revision, &slot)?;
     reviewed.retire_plugin_and_wait(&id).await?;
-    let owner = reviewed.own(&uuid::Uuid::new_v4().to_string(), &id)?;
+    let owner = reviewed.own_clear(&id)?;
     crate::with_manager(manager, move |m| {
         let _owner = owner;
         m.secret_clear(&id, &revision, &slot, &viewer)
@@ -139,6 +140,42 @@ pub(crate) async fn plugin_host_secret_enroll<R: tauri::Runtime>(
     let call = once.call_id().to_owned();
     let owner = reviewed.own(&call, &id)?;
     let manager = manager.0.clone().map_err(|_| UNAVAILABLE)?;
+    let current = || -> Result<(), String> {
+        if !calls.current(webview.label(), &once)
+            || identity.current_viewer().ok().flatten().as_deref() != Some(snapshot.as_str())
+            || !reviewed.try_live(&call)
+        {
+            return Err(UNAVAILABLE.into());
+        }
+        app.state::<crate::sign_out::Instance>()
+            .check_secret_admission()
+    };
+    let (plugin, artifact, key_slot, viewer) =
+        (id.clone(), revision.clone(), slot.clone(), snapshot.clone());
+    // Only an installed, enabled, declared slot may open a native dialog.
+    let status_manager = manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        status_manager.secret_status(&plugin, &artifact, &key_slot, &viewer)
+    })
+    .await
+    .map_err(|_| UNAVAILABLE)?
+    .map_err(|_| UNAVAILABLE)?;
+    current()?;
+    let state = reviewed.inner().clone();
+    let label = format!("{id} · {slot}");
+    // Asked every time: a status read is no lease on what clearing would remove.
+    let Some(owner) = private_input::confirm(
+        app.clone(),
+        state.clone(),
+        call.clone(),
+        label.clone(),
+        owner,
+    )
+    .await?
+    else {
+        return Err(DECLINED.into());
+    };
+    current()?;
     let (clear_manager, plugin, artifact, key_slot, viewer) = (
         manager.clone(),
         id.clone(),
@@ -157,23 +194,9 @@ pub(crate) async fn plugin_host_secret_enroll<R: tauri::Runtime>(
     .await
     .map_err(|_| UNAVAILABLE)?;
     cleared.map_err(|_| "Buzz couldn't confirm retiring the old credential or finishing cleanup. No new entry was opened; retry cleanup before connecting again.")?;
-    if !calls.current(webview.label(), &once)
-        || identity.current_viewer().ok().flatten().as_deref() != Some(snapshot.as_str())
-        || !reviewed.try_live(&call)
-    {
-        return Err(UNAVAILABLE.into());
-    }
-    app.state::<crate::sign_out::Instance>()
-        .check_secret_admission()?;
-    let state = reviewed.inner().clone();
-    let Some((value, owner)) = private_input::enter(
-        app.clone(),
-        state.clone(),
-        call.clone(),
-        format!("{id} · {slot}"),
-        owner,
-    )
-    .await?
+    current()?;
+    let Some((value, owner)) =
+        private_input::enter(app.clone(), state.clone(), call.clone(), label, owner).await?
     else {
         return Ok(buzzodz_plugins::SecretStatus::Missing);
     };

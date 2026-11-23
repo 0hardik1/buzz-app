@@ -361,23 +361,43 @@ impl Fixture {
             "activation":uuid::Uuid::new_v4().to_string(), "callId":uuid::Uuid::new_v4().to_string()
         }})
     }
+    fn dialog<T: Send + 'static>(&self) -> (mpsc::Receiver<()>, tokio::sync::oneshot::Sender<T>) {
+        let (shown, entered) = mpsc::channel();
+        let (user, answer) = tokio::sync::oneshot::channel();
+        let fixture = Some((shown, answer));
+        if let Some(dialog) = self
+            .app
+            .try_state::<super::private_input::FixtureDialog<T>>()
+        {
+            *dialog.0.lock().unwrap() = fixture;
+        } else {
+            self.app
+                .manage(super::private_input::FixtureDialog(Mutex::new(fixture)));
+        }
+        (entered, user)
+    }
+    /// Secure entry, reached through an already accepted replacement confirmation.
     fn input(
         &self,
     ) -> (
         mpsc::Receiver<()>,
         tokio::sync::oneshot::Sender<Option<String>>,
     ) {
-        let (started, entered) = mpsc::channel();
-        let (user, input) = tokio::sync::oneshot::channel();
-        if let Some(fixture) = self.app.try_state::<super::private_input::FixtureInput>() {
-            *fixture.0.lock().unwrap() = Some((started, input));
-        } else {
-            self.app
-                .manage(super::private_input::FixtureInput(Mutex::new(Some((
-                    started, input,
-                )))));
-        }
-        (entered, user)
+        let (_, accept) = self.dialog::<bool>();
+        accept.send(true).unwrap();
+        self.dialog()
+    }
+    /// Replaces any pre-accepted confirmation with one the test answers.
+    fn confirmation(&self) -> (mpsc::Receiver<()>, tokio::sync::oneshot::Sender<bool>) {
+        self.dialog()
+    }
+    fn unshown<T: Send + 'static>(&self) -> bool {
+        self.app
+            .state::<super::private_input::FixtureDialog<T>>()
+            .0
+            .lock()
+            .unwrap()
+            .is_some()
     }
 }
 
@@ -420,6 +440,7 @@ fn replace_cleanup_denial_retires_the_old_key_without_showing_input() {
     let (_entered, _user) = f.input();
     f.store.denied.store(true, Ordering::SeqCst);
     assert!(f.call("enroll", f.enrollment()).is_err());
+    assert!(!f.unshown::<bool>(), "clearing follows the confirmation");
     assert!(f
         .app
         .state::<super::private_input::FixtureInput>()
@@ -479,6 +500,7 @@ fn cancelled_or_stale_enrollment_cannot_reach_input_or_clear_an_existing_key() {
     let stale = f.enrollment();
     f.app.state::<crate::host_request::HostCalls>().page_load();
     assert!(f.call("enroll", stale).is_err());
+    assert!(f.unshown::<bool>(), "no confirmation for refused work");
     assert!(f
         .app
         .state::<super::private_input::FixtureInput>()
@@ -587,4 +609,155 @@ fn registered_private_enrollment_uses_qualified_production_caller_construction()
         .unwrap()
         .is_some());
     assert_eq!(*f.store.items.lock().unwrap(), witness);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn replacement_confirmation_cancel_keeps_the_saved_key_then_entry_cancel_leaves_it_empty() {
+    let f = Fixture::ready();
+    f.call("set", f.body()).unwrap();
+    let (_entered, _user) = f.input();
+    let (asked, answer) = f.confirmation();
+    let reply = f.send(
+        &f.view,
+        f.view.url().unwrap().as_str(),
+        "plugin_host_secret_enroll",
+        f.enrollment(),
+    );
+    asked.recv_timeout(LIMIT).unwrap();
+    // Nothing is cleared while the confirmation is open.
+    assert_eq!(f.call("status", f.body()).unwrap(), "saved");
+    answer.send(false).unwrap();
+    assert_eq!(
+        reply.recv_timeout(LIMIT).unwrap().unwrap_err(),
+        json!(DECLINED).to_string()
+    );
+    assert!(f.unshown::<Option<String>>(), "no entry after declining");
+    assert_eq!(f.call("status", f.body()).unwrap(), "saved");
+    assert_eq!(f.store.items.lock().unwrap().len(), 1);
+
+    let (entered, user) = f.input();
+    let reply = f.send(
+        &f.view,
+        f.view.url().unwrap().as_str(),
+        "plugin_host_secret_enroll",
+        f.enrollment(),
+    );
+    entered.recv_timeout(LIMIT).unwrap();
+    assert_eq!(f.call("status", f.body()).unwrap(), "missing");
+    user.send(None).unwrap();
+    assert_eq!(reply.recv_timeout(LIMIT).unwrap().unwrap(), "missing");
+    assert!(f.store.items.lock().unwrap().is_empty());
+    assert_eq!(f.store.adds.load(Ordering::SeqCst), 1);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_held_confirmation_yields_to_disposal_retirement_and_waiter_loss_without_clearing() {
+    for kind in ["disposed", "retired", "waiter lost"] {
+        let f = Fixture::ready();
+        f.call("set", f.body()).unwrap();
+        let (_entered, _user) = f.input();
+        let (asked, _answer) = f.confirmation();
+        let body = f.enrollment();
+        let call = body["once"]["callId"].as_str().unwrap().to_owned();
+        let reply = f.send(
+            &f.view,
+            f.view.url().unwrap().as_str(),
+            "plugin_host_secret_enroll",
+            body,
+        );
+        asked.recv_timeout(LIMIT).unwrap();
+        let state = f.app.state::<crate::reviewed_invocation::Invocations>();
+        assert!(state.own("successor", ID).is_err(), "{kind}");
+        match kind {
+            "disposed" => tauri::async_runtime::block_on(state.cancel_and_wait(&call)).unwrap(),
+            "retired" => tauri::async_runtime::block_on(state.retire_plugin_and_wait(ID)).unwrap(),
+            _ => {
+                // Retires on its first poll, then may be dropped before completion.
+                let _ = tauri::async_runtime::block_on(async {
+                    tokio::time::timeout(Duration::from_millis(1), state.retire_plugin_and_wait(ID))
+                        .await
+                });
+            }
+        }
+        assert_eq!(
+            reply.recv_timeout(LIMIT).unwrap().unwrap_err(),
+            json!(DECLINED).to_string(),
+            "{kind}"
+        );
+        assert!(f.unshown::<Option<String>>(), "{kind}");
+        assert_eq!(f.call("status", f.body()).unwrap(), "saved", "{kind}");
+        assert_eq!(f.store.items.lock().unwrap().len(), 1, "{kind}");
+        let _successor = state.own("successor", ID).unwrap();
+    }
+}
+
+#[test]
+fn registered_clears_never_exhaust_credential_controls() {
+    let f = Fixture::ready();
+    let state = f.app.state::<crate::reviewed_invocation::Invocations>();
+    // Renderer-named retirements stay as tombstones beside native clears.
+    let tombstone = uuid::Uuid::new_v4().to_string();
+    state.cancel(&tombstone);
+    let mut absent = f.body();
+    absent["slot"] = json!("absent");
+    for _ in 0..200 {
+        assert!(f.call("clear", absent.clone()).is_err());
+    }
+    for _ in 0..200 {
+        assert_eq!(f.call("clear", f.body()).unwrap(), Value::Null);
+    }
+    assert!(state.own(&tombstone, ID).is_err(), "tombstone kept");
+    f.call("set", f.body()).unwrap();
+    assert_eq!(f.call("clear", f.body()).unwrap(), Value::Null);
+    assert_eq!(f.call("status", f.body()).unwrap(), "missing");
+    if cfg!(target_os = "macos") {
+        let (entered, user) = f.input();
+        let reply = f.send(
+            &f.view,
+            f.view.url().unwrap().as_str(),
+            "plugin_host_secret_enroll",
+            f.enrollment(),
+        );
+        entered.recv_timeout(LIMIT).unwrap();
+        user.send(Some("FAKE-AFTER-CLEARS".into())).unwrap();
+        assert_eq!(reply.recv_timeout(LIMIT).unwrap().unwrap(), "saved");
+    }
+}
+
+#[test]
+fn a_held_native_clear_keeps_exclusion_until_its_worker_returns() {
+    let f = Fixture::ready();
+    f.call("set", f.body()).unwrap();
+    let (started, at_store) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    *f.store.stall.lock().unwrap() = Some((started, released));
+    let reply = f.send(
+        &f.view,
+        f.view.url().unwrap().as_str(),
+        "plugin_host_secret_clear",
+        f.body(),
+    );
+    at_store.recv_timeout(LIMIT).unwrap();
+    drop(reply);
+    let state = f.app.state::<crate::reviewed_invocation::Invocations>();
+    assert!(state.own("successor", ID).is_err());
+    // A waiter dropped mid-wait releases nothing.
+    let lost = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(Duration::from_millis(50), state.retire_plugin_and_wait(ID)).await
+    });
+    assert!(lost.is_err());
+    assert!(state.own("successor", ID).is_err());
+    let subscribed = state.inner().clone();
+    let waiter = std::thread::spawn(move || {
+        tauri::async_runtime::block_on(subscribed.retire_plugin_and_wait(ID))
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(!waiter.is_finished());
+    release.send(()).unwrap();
+    // Completion is acknowledged as finished, not as a closed channel.
+    assert_eq!(waiter.join().unwrap(), Ok(()));
+    let _successor = state.own("successor", ID).unwrap();
+    assert_eq!(f.call("status", f.body()).unwrap(), "missing");
 }

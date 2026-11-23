@@ -73,3 +73,28 @@ fn promotion_admission_is_one_shot_and_does_not_complete_the_owner() {
     let _lock = state.0.lock().unwrap();
     assert!(!state.try_consume("held"));
 }
+
+#[test]
+fn a_native_clear_owner_is_reclaimed_only_when_it_returns() {
+    let state = Invocations::default();
+    for i in 0..127 {
+        state.cancel(&format!("tombstone-{i}"));
+    }
+    for _ in 0..300 {
+        drop(state.own_clear("example.plugin").unwrap());
+    }
+    let held = state.own_clear("example.plugin").unwrap();
+    assert!(state.own("successor", "example.plugin").is_err());
+    let mut subscribed = {
+        let entries = state.0.lock().unwrap();
+        assert_eq!(entries.len(), 128);
+        let (_, entry) = entries.iter().find(|(_, entry)| entry.reclaim).unwrap();
+        entry.finished.subscribe()
+    };
+    drop(held);
+    // The retained `true`, not a closed channel, answers a subscribed waiter.
+    assert!(*tauri::async_runtime::block_on(subscribed.wait_for(|done| *done)).unwrap());
+    assert_eq!(state.0.lock().unwrap().len(), 127);
+    assert!(state.own("tombstone-0", "example.plugin").is_err());
+    let _successor = state.own("successor", "example.plugin").unwrap();
+}
