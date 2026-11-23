@@ -45,6 +45,7 @@ import {
   type TurnResult,
 } from "../../features/agents/service";
 import { compactAt } from "../../features/agents/compact-at";
+import { launchModel } from "../../features/agents/model-routes";
 import { workflowOf } from "../../features/agents/owner-attestation";
 import {
   agentFolders,
@@ -1872,7 +1873,8 @@ export class GooseRuntime {
   private choice(entry: Entry) {
     return {
       provider: entry.config.provider.trim(),
-      model: entry.config.model.trim(),
+      // A saved model route picks per turn; the process starts on the default.
+      model: launchModel(entry.config.model.trim()),
       effort: entry.config.effort,
     };
   }
