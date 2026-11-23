@@ -691,7 +691,6 @@ export function NewMessage({
       <RecipientPicker
         session={session}
         scope={scope}
-        appearance="field"
         selected={recipients}
         labels={named}
         disabled={locked}

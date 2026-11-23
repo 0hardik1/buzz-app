@@ -1208,6 +1208,10 @@ For a prominent composed value, use `Input textSize="large"` for the complete
 frame, reserving twelve characters for editing before moving an affix to its
 own line. Keep the affix at the input's type size and connect it through
 `aria-describedby`; it remains readable when enlarged text wraps.
+The same wrapping frame holds chosen values before its input, such as the
+recipient chips in a To field: the label is `leading`, chips sit on the panel
+fill to stand off the inset frame, and the frame keeps the shared focus stroke
+and disabled fill.
 
 SearchField, Combobox.Control, and code Textarea default to no autocorrection,
 capitalization, or spellcheck. Callers can override these defaults explicitly.

@@ -658,7 +658,6 @@ function ForwardMessageDialog({
             channelOptions={destinations}
             selectedChannel={channel}
             onChannelChange={setChannel}
-            appearance="field"
             initiallyOpen={false}
             searchOnly
             onChange={setPeople}
