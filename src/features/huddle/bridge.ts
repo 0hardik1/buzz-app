@@ -47,3 +47,7 @@ export const nativeHuddles: HuddleBridge = {
   touch: (id) => invoke("huddle_touch", { id }),
   send: (id, samples) => invoke("huddle_pcm", { id, samples }),
 };
+
+/** Development: native drop counts by call kind; `reset` zeroes them. */
+export const nativeHuddleStats = (reset = false) =>
+  invoke<Record<string, Record<string, number>>>("huddle_stats", { reset });

@@ -267,6 +267,7 @@ async fn open(
 struct Receiver {
     jitter: PeerJitterBuffer,
     last_packet: tokio::time::Instant,
+    seq: Option<u16>,
 }
 struct Codec {
     encoder: AudioEncoder,
@@ -274,12 +275,14 @@ struct Codec {
     /// The only pubkey decoded, if any. Indices are reused, so it is checked
     /// on every frame, by pubkey, before any decoder exists.
     only: Option<String>,
+    drops: &'static super::Drops,
 }
 impl Codec {
     fn new(only: Option<String>) -> Result<Self> {
         Ok(Self {
             encoder: AudioEncoder::new()?,
             receivers: BTreeMap::new(),
+            drops: &super::DROPS[only.is_some() as usize],
             only,
         })
     }
@@ -301,9 +304,16 @@ impl Codec {
                 jitter: PeerJitterBuffer::new(index)
                     .map_err(|e| format!("Audio decoder unavailable: {e}"))?,
                 last_packet: tokio::time::Instant::now(),
+                seq: None,
             });
         }
         if let Some(receiver) = self.receivers.get_mut(&index) {
+            // Forward skips are lost packets; a backward one is reordering.
+            let skipped = receiver.seq.map_or(1, |last| header.seq.wrapping_sub(last));
+            if skipped < 1000 {
+                super::Drops::add(&self.drops.lost, u64::from(skipped.saturating_sub(1)));
+                receiver.seq = Some(header.seq);
+            }
             // Malformed or excessively late media must not end the call.
             if receiver
                 .jitter
@@ -311,6 +321,8 @@ impl Codec {
                 .is_ok()
             {
                 receiver.last_packet = tokio::time::Instant::now();
+            } else {
+                super::Drops::add(&self.drops.rejected, 1);
             }
         }
         Ok(())
@@ -466,7 +478,9 @@ pub(super) async fn run(
                 samples = pcm.recv() => {
                     let Some(samples) = samples else { break; };
                     let frame = codec.encoder.encode(&samples)?;
-                    let _ = out.try_send(Message::Binary(frame.into()));
+                    if out.try_send(Message::Binary(frame.into())).is_err() {
+                        super::Drops::add(&codec.drops.socket, 1);
+                    }
                 }
             }
         }

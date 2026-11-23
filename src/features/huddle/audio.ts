@@ -169,7 +169,12 @@ export const openHuddleAudio: OpenHuddleAudio = async (send, ended, signal) => {
         if (closed) return;
         let entry = playback.get(peer);
         if (!entry) {
-          entry = createPlayout(context, output, 0.06);
+          entry = createPlayout(
+            context,
+            output,
+            0.06,
+            `play ${peer.slice(0, 8)}`,
+          );
           playback.set(peer, entry);
         }
         entry.play(samples);

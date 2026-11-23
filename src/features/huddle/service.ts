@@ -8,6 +8,7 @@ import { discoverHuddles } from "./discovery";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import type { HuddleAudio, OpenHuddleAudio } from "./audio";
+import { huddleAudio } from "./diagnostics";
 import type { Context } from "@deepseek-ai/cordis";
 
 export type HuddleSnapshot = Readonly<{
@@ -291,6 +292,7 @@ export function createHuddles(
         (error) => {
           if (valid(attempt)) void leave(message(error));
         },
+        "mic send",
       ),
     };
     current = attempt;
@@ -376,6 +378,7 @@ export function createHuddles(
         return;
       }
       if (event.type === "audio") {
+        huddleAudio.frame(`receive ${event.peer.slice(0, 8)}`, 30);
         activity(event.peer, event.samples);
         attempt.audio?.play(event.peer, event.samples);
         return;

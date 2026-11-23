@@ -1,4 +1,5 @@
 import captureUrl from "../../features/huddle/capture.worklet.js?url&no-inline";
+import { huddleAudio } from "../../features/huddle/diagnostics";
 import { createPlayout } from "../../features/huddle/playout";
 import type { AppServer } from "./rpc";
 
@@ -38,12 +39,47 @@ export async function openVoice(
   const wait = <T>(operation: Promise<T>) =>
     Promise.race([operation, cancelled]);
   let off = () => {};
+  // Development: the decoder element plays the voice here instead of the relay.
+  const local = () => huddleAudio.playback() === "local";
+  const offPlayback = huddleAudio.subscribe(() => {
+    if (decoder) decoder.muted = !local();
+  });
+  const stats = huddleAudio.enabled
+    ? setInterval(() => void receiveStats().catch(() => {}), 1000)
+    : undefined;
+  const totals: Record<string, number> = {};
+  async function receiveStats() {
+    for (const report of (await peer.getStats()).values()) {
+      if (report.type !== "inbound-rtp" || report.kind !== "audio") continue;
+      for (const [counter, value] of [
+        ["packets", report.packetsReceived],
+        ["packets lost", report.packetsLost],
+        ["concealments", report.concealmentEvents],
+        [
+          "concealed ms",
+          ((report.concealedSamples ?? 0) -
+            (report.silentConcealedSamples ?? 0)) /
+            48,
+        ],
+      ] as const) {
+        if (typeof value !== "number") continue;
+        huddleAudio.count(
+          "codex webrtc",
+          counter,
+          Math.round(value - (totals[counter] ?? value)),
+        );
+        totals[counter] = value;
+      }
+    }
+  }
   let rejectConnected!: (error: Error) => void;
   const close = () => {
     if (closed) return closing;
     closed = true;
     signal.removeEventListener("abort", close);
     off();
+    offPlayback();
+    clearInterval(stats);
     cancel(new Error("Voice connection closed"));
     rejectConnected(new Error("Voice connection closed"));
     peer.close();
@@ -97,6 +133,8 @@ export async function openVoice(
     capture = new AudioWorkletNode(context, "buzz-huddle-capture");
     capture.port.onmessage = ({ data }: MessageEvent<Float32Array>) => {
       if (closed) return;
+      huddleAudio.frame("codex decoded", 50);
+      if (local()) return;
       // The Huddle seat owns bounded buffering and serial native sends.
       void output(Array.from(data)).catch(fail);
     };
@@ -106,9 +144,10 @@ export async function openVoice(
       remote?.disconnect();
       const stream = new MediaStream([track]);
       // Keep WebRTC decoding active even though the worklet, rather than a
-      // media element, consumes the sound. The element itself stays muted.
+      // media element, consumes the sound. The element stays muted unless
+      // development playback is local.
       decoder ??= new Audio();
-      decoder.muted = true;
+      decoder.muted = !local();
       decoder.srcObject = stream;
       void decoder.play().catch(fail);
       remote = context.createMediaStreamSource(stream);

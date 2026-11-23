@@ -60,6 +60,7 @@ export function createHuddleVoices(
       (samples) => bridge.send(id, samples),
       abort.signal,
       fail,
+      "agent send",
     );
     function stop() {
       if (closing) return closing;

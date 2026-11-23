@@ -44,6 +44,54 @@ impl Huddles {
         Ok(())
     }
 }
+/// Audio each native hop discarded, for development diagnostics: index 0 is
+/// the person's own call, 1 an agent's seat. Counts only, never audio.
+pub(super) struct Drops {
+    /// Frames from the page while the encoder queue was full.
+    pcm: AtomicU64,
+    /// Encoded frames while the WebSocket write queue was full.
+    socket: AtomicU64,
+    /// Received packets the jitter buffer refused, such as late ones.
+    rejected: AtomicU64,
+    /// Sequence numbers skipped between received packets.
+    lost: AtomicU64,
+}
+pub(super) static DROPS: [Drops; 2] = [Drops::new(), Drops::new()];
+impl Drops {
+    const fn new() -> Self {
+        Self {
+            pcm: AtomicU64::new(0),
+            socket: AtomicU64::new(0),
+            rejected: AtomicU64::new(0),
+            lost: AtomicU64::new(0),
+        }
+    }
+    pub(super) fn add(counter: &AtomicU64, value: u64) {
+        counter.fetch_add(value, Ordering::Relaxed);
+    }
+}
+
+/// Native drop counts by call kind; `reset` zeroes them after reading.
+#[tauri::command]
+pub(crate) fn huddle_stats(reset: bool) -> Value {
+    let read = |counter: &AtomicU64| {
+        if reset {
+            counter.swap(0, Ordering::Relaxed)
+        } else {
+            counter.load(Ordering::Relaxed)
+        }
+    };
+    let [person, agent] = DROPS.each_ref().map(|d| {
+        json!({
+            "pcm queue dropped": read(&d.pcm),
+            "socket queue dropped": read(&d.socket),
+            "jitter rejected": read(&d.rejected),
+            "packets lost": read(&d.lost),
+        })
+    });
+    json!({ "native you": person, "native agent": agent })
+}
+
 struct Active {
     /// The agent this call seats, or `None` for the person's own call.
     agent: Option<String>,
@@ -596,7 +644,9 @@ pub(crate) fn huddle_pcm(
     }
     let calls = huddles.0.lock().map_err(|_| "Huddles unavailable")?;
     if let Some(a) = calls.get(&id).filter(|a| !*a.stop.borrow()) {
-        let _ = a.pcm.try_send(samples);
+        if a.pcm.try_send(samples).is_err() {
+            Drops::add(&DROPS[a.agent.is_some() as usize].pcm, 1);
+        }
     }
     Ok(())
 }
