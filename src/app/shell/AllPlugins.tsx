@@ -23,7 +23,6 @@ import {
   CaretRightIcon,
   PuzzleIcon,
 } from "../../shared/design-system/icons/index";
-import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   NavigationCard,
@@ -32,6 +31,7 @@ import {
 import {
   PopoverPopup,
   PopoverRoot,
+  PopoverTitle,
   PopoverTrigger,
 } from "../../shared/design-system/ui/Popover";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
@@ -182,7 +182,6 @@ export function AllPlugins({
         padding="none"
         side="right"
         align="start"
-        aria-label="All plugins"
         // Opening a plugin hands focus to its page, not back to this row.
         finalFocus={() =>
           opened.current
@@ -192,28 +191,24 @@ export function AllPlugins({
       >
         <div className={styles.frame}>
           <div className={styles.header}>
-            <InlineHeader
-              title="Your plugins"
-              actions={
-                <Select
-                  variant="compact"
-                  size="xs"
-                  align="end"
-                  label="Sort pinned plugins"
-                  value={sort}
-                  groups={[
-                    {
-                      label: "Sort pinned plugins",
-                      options: [
-                        { value: "alphabetical", label: "A–Z" },
-                        { value: "custom", label: "Custom" },
-                      ],
-                    },
-                  ]}
-                  onValueChange={(value) =>
-                    onSortChange(value === "custom" ? "custom" : "alphabetical")
-                  }
-                />
+            <PopoverTitle>Your plugins</PopoverTitle>
+            <Select
+              variant="compact"
+              size="xs"
+              align="end"
+              label="Sort pinned plugins"
+              value={sort}
+              groups={[
+                {
+                  label: "Sort pinned plugins",
+                  options: [
+                    { value: "alphabetical", label: "A–Z" },
+                    { value: "custom", label: "Custom" },
+                  ],
+                },
+              ]}
+              onValueChange={(value) =>
+                onSortChange(value === "custom" ? "custom" : "alphabetical")
               }
             />
           </div>
