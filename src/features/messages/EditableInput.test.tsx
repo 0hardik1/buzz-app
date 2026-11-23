@@ -186,7 +186,7 @@ it("keeps exactly one typed colon when the conversion exceeds the limit", () => 
   act(() =>
     expect(
       h.input.insertText("too long", undefined, { start: 0, end: 2 }, ":"),
-    ).toBe(true),
+    ).toBe("typed"),
   );
   expect(h.input).toHaveValue(":x:");
   expect([h.input.selectionStart, h.input.selectionEnd]).toEqual([3, 3]);
@@ -5038,7 +5038,7 @@ describe("group chip", () => {
       end: start + "@crew".length,
     }));
   const add = (h: ReturnType<typeof mount>, group = crew) => {
-    let result = false;
+    let result: boolean | "typed" = false;
     act(() => {
       result = h.input.insertText("", group);
     });
