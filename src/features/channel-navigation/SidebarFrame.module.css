@@ -73,11 +73,22 @@
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-/* Global destinations share the channel list's row geometry. */
+/* Global destinations share the channel list's row geometry. Everything at a
+   row's end measures from one inset inside its fill: counts, dots and typing
+   end on it, and trailing icon buttons centre where a 1rem glyph would end on
+   it, as leading icons centre in their slot. */
 .channelList,
 .sidebarFilter {
   --channel-row-fill-start: var(--space-1);
   --channel-row-fill-end: var(--space-1);
+  --sidebar-row-inset: var(--space-3);
+  --sidebar-row-action-size: calc(var(--space-6) + var(--space-1));
+  --sidebar-row-action-end: calc(
+    var(--channel-row-fill-end) +
+    var(--sidebar-row-inset) -
+    (var(--sidebar-row-action-size) - 1rem) /
+    2
+  );
 }
 /* Wrapped channel rows paint on the wrapper; direct destination and Solo chat
    rows paint on the navigation item itself, so shorten them to the fill and
@@ -96,7 +107,7 @@
       var(--space-half) -
       var(--channel-row-fill-start)
     )
-    var(--space-2);
+    var(--sidebar-row-inset);
 }
 /* Text-only rows keep their label clear of the pill's rounded
    edge. The label's design-system class is matched by attribute so the module
@@ -247,6 +258,13 @@
 .cards .sidebar {
   --sidebar-padding-inline: 0px;
   --sidebar-padding-end: 0px;
+}
+/* In a card, row fills reach the card's padding, so a fill sits as far from
+   the card's sides as the last row's does from its bottom. Labels keep their
+   place, since row padding is measured from the fill. */
+.cards .sidebar :is(.channelList, .sidebarFilter) {
+  --channel-row-fill-start: 0px;
+  --channel-row-fill-end: 0px;
 }
 /* Cards scroll without a visible scrollbar. */
 .cards .sidebar .channelList {

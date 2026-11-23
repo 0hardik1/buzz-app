@@ -134,9 +134,10 @@
   --session-action-size: calc(var(--space-6) + var(--space-1));
   /* Match the channel sidebar's leading and trailing content inset. */
   --session-row-inset: var(--space-2);
-  /* A 1rem glyph centered in the trailing slot lands on the row inset. */
+  /* A 1rem glyph centered in the trailing slot lands on the sidebar's trailing
+     inset (SidebarFrame), or the row inset outside the sidebar. */
   --session-trailing-offset: calc(
-    var(--session-row-inset) -
+    var(--sidebar-row-inset, var(--session-row-inset)) -
     (var(--session-action-size) - 1rem) /
     2
   );
@@ -332,7 +333,7 @@
     .organizedRow
     > div
     > [data-variant="row"]:has([data-solo-working-indicator]:not(:empty)) {
-    padding-inline-end: var(--session-row-inset);
+    padding-inline-end: var(--sidebar-row-inset, var(--session-row-inset));
   }
   .sidebarContents
     .organizedRow:is(

@@ -281,6 +281,13 @@
     transition: none;
   }
 }
+/* The pages card has no grip, but keeps the room a grip adds under the last
+   row. */
+[data-sidebar-cards]
+  .channelSection[data-sidebar-section="pages"]
+  > .sectionContent {
+  padding-block-end: var(--space-1);
+}
 [data-sidebar-cards] .channelSection[data-sidebar-card][data-drop-target] {
   border-radius: var(--radius-container);
 }
