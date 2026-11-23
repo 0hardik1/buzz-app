@@ -1048,7 +1048,7 @@ it("copies a channel link that opens the same channel", async () => {
   await copy();
   expect(await screen.findByText("Link copied.")).toBeInTheDocument();
   const [link] = writeText.mock.calls[0] ?? [];
-  expect(link).toBe("https://relay.test/channel/beta");
+  expect(link).toBe("https://relay.test/open/channel/beta");
   expect(
     buzzLinkTarget(parseCommunityShareLink(link)?.link ?? "", {
       viewer: "a".repeat(64),

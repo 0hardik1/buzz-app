@@ -278,7 +278,9 @@ test("message actions reveal, copy, restore focus and reply across responsive la
       .getByText("Link copied", { exact: true }),
   ).toBeVisible();
   const copiedLink = await page.evaluate(() => window.copiedMessages.at(-1));
-  expect(copiedLink).toBe(`https://primary.example/channel/alpha/${event.id}`);
+  expect(copiedLink).toBe(
+    `https://primary.example/open/message?channel=alpha&id=${event.id}`,
+  );
   await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   const panel = page.getByRole("complementary", {
@@ -592,7 +594,9 @@ test("copied Buzz links and the desktop alias reveal their destination from a co
       .getByText("Link copied", { exact: true }),
   ).toBeVisible();
   const copiedLink = await page.evaluate(() => window.copiedMessageLink);
-  expect(copiedLink).toBe(`https://primary.example/channel/alpha/${event.id}`);
+  expect(copiedLink).toBe(
+    `https://primary.example/open/message?channel=alpha&id=${event.id}`,
+  );
   const sharedConversation = page
     .getByRole("navigation", { name: "Subscribed channels" })
     .getByRole("button", { name: "Alice Fixture", exact: true });

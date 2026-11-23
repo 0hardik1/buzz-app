@@ -505,23 +505,32 @@ it("opens an agent card's link as Create agent on the Agents page in the receivi
     expect(parseBuzzLink(invalid), invalid).toBeNull();
 });
 
-it("round-trips conversation links through their community's https form", () => {
+it("round-trips navigation links through their community's /open/ form", () => {
   const thread = `buzz://message?channel=general&id=${"a".repeat(64)}&thread=${"b".repeat(64)}`;
+  const pr = `buzz://pr?owner=${"c".repeat(64)}&d=repo&id=${"a".repeat(64)}`;
   for (const [link, shared] of [
-    ["buzz://channel/general", "https://community.example/channel/general"],
     [
-      `buzz://channel/general/${"a".repeat(64)}`,
-      `https://community.example/channel/general/${"a".repeat(64)}`,
+      "buzz://channel/general",
+      "https://community.example/open/channel/general",
+    ],
+    [
+      `buzz://message?channel=general&id=${"a".repeat(64)}`,
+      `https://community.example/open/message?channel=general&id=${"a".repeat(64)}`,
     ],
     [
       thread,
-      `https://community.example/channel/general/${"a".repeat(64)}?thread=${"b".repeat(64)}`,
+      `https://community.example/open/message?channel=general&id=${"a".repeat(64)}&thread=${"b".repeat(64)}`,
+    ],
+    [
+      pr,
+      `https://community.example/open/pr?owner=${"c".repeat(64)}&d=repo&id=${"a".repeat(64)}`,
     ],
   ] as const) {
     const href = communityShareLink(link, scope.communityOrigin);
     expect(href).toBe(shared);
     const parsed = parseCommunityShareLink(shared);
     expect(parsed?.origin).toBe(scope.communityOrigin);
+    expect(parsed?.link).toBe(link);
     expect(parseBuzzLink(parsed?.link ?? "")).toEqual(parseBuzzLink(link));
   }
   expect(
@@ -529,40 +538,46 @@ it("round-trips conversation links through their community's https form", () => 
   ).toBeUndefined();
   expect(
     communityShareLink("buzz://channel/general", "http://127.0.0.1:3000"),
-  ).toBe("http://127.0.0.1:3000/channel/general");
+  ).toBe("http://127.0.0.1:3000/open/channel/general");
   expect(communityShareLink("buzz://settings", scope.communityOrigin)).toBe(
     undefined,
   );
   expect(communityShareLink(thread, undefined)).toBeUndefined();
 });
 
-it("reads only well-formed shared conversation links", () => {
+it("reads only well-formed shared /open/ links", () => {
   const id = "a".repeat(64);
   for (const href of [
-    "https://community.example/channel/",
-    "https://community.example/channel/general/",
-    `https://community.example/channel/general/${id}/extra`,
-    "https://community.example/channel/general/not-an-event",
-    "https://community.example/channel/general?thread=" + id,
-    `https://community.example/channel/general/${id}?thread=${id}&thread=${id}`,
-    `https://community.example/channel/general/${id}#top`,
-    `https://user@community.example/channel/general/${id}`,
-    `ftp://community.example/channel/general/${id}`,
+    "https://community.example/open",
+    "https://community.example/open/",
+    "https://community.example/open/join?code=x",
+    "https://community.example/open/settings",
+    "https://community.example/open/channel/",
+    "https://community.example/open/message?channel=general",
+    `https://community.example/open/message?channel=general&id=${id}&thread=bad`,
+    `https://community.example/open/message?channel=general&id=${id}#top`,
+    `https://user@community.example/open/message?channel=general&id=${id}`,
+    `ftp://community.example/open/message?channel=general&id=${id}`,
+    `https://community.example/channel/general/${id}`,
+    "https://community.example/channel/general",
+    `https://community.example/prefix/open/message?channel=general&id=${id}`,
     "https://community.example/invite/code",
     "not a url",
   ])
     expect(parseCommunityShareLink(href), href).toBeNull();
-  // Parameters a link picks up as it is shared, such as tracking, are ignored.
+  // Parameters a link picks up as it is shared, such as tracking, pass through.
   expect(
     parseCommunityShareLink(
-      `https://community.example/channel/general/${id}?utm_source=mail&thread=${id}`,
+      `https://community.example/open/message?channel=general&id=${id}&utm_source=mail`,
     ),
   ).toEqual({
     origin: "https://community.example",
-    link: `buzz://message?channel=general&id=${id}&thread=${id}`,
+    link: `buzz://message?channel=general&id=${id}&utm_source=mail`,
   });
   expect(
-    parseCommunityShareLink(`https://Other.Example:8443/channel/general/${id}`),
+    parseCommunityShareLink(
+      `https://Other.Example:8443/open/message?channel=general&id=${id}`,
+    ),
   ).toEqual({
     origin: "https://other.example:8443",
     link: `buzz://message?channel=general&id=${id}`,

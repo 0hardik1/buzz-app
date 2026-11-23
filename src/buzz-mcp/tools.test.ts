@@ -932,7 +932,9 @@ it.each([
   ["message link", { message_url: `buzz://message?channel=chan&id=${nested}` }],
   [
     "shared link",
-    { message_url: `https://relay.example/channel/chan/${nested}` },
+    {
+      message_url: `https://relay.example/open/message?channel=chan&id=${nested}`,
+    },
   ],
 ] as const)(
   "keeps agent ownership and nested reply context in a %s read",
@@ -1081,8 +1083,8 @@ it("reads an edited message with the files and emoji its latest edit leaves", as
 it("reads a shared https link only from the community it names", async () => {
   const { client } = fake(community);
   for (const message_url of [
-    `https://other.example/channel/chan/${nested}`,
-    `https://relay.example:8443/channel/chan/${nested}`,
+    `https://other.example/open/message?channel=chan&id=${nested}`,
+    `https://relay.example:8443/open/message?channel=chan&id=${nested}`,
   ])
     await expect(
       callTool(client, { channel: "chan", root }, "read", { message_url }),
@@ -1094,13 +1096,13 @@ it("reads a shared https link only from the community it names", async () => {
   };
   await expect(
     callTool(normalized, { channel: "chan", root }, "read", {
-      message_url: `https://RELAY.example:443/channel/chan/${nested}`,
+      message_url: `https://RELAY.example:443/open/message?channel=chan&id=${nested}`,
     }),
   ).resolves.toContain(nested);
   const unknown = { ...client, community: undefined };
   await expect(
     callTool(unknown, { channel: "chan", root }, "read", {
-      message_url: `https://relay.example/channel/chan/${nested}`,
+      message_url: `https://relay.example/open/message?channel=chan&id=${nested}`,
     }),
   ).rejects.toThrow("another community");
 });

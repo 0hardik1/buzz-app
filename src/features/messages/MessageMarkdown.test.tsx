@@ -1082,15 +1082,17 @@ it("renders this community's shared https links as Buzz links", () => {
   const id = "a".repeat(64);
   const scope = `https://relay.example:${"b".repeat(64)}`;
   const html = render(
-    `https://relay.example/channel/design/${id} [here](https://relay.example/channel/design) https://other.example/channel/design/${id}`,
+    `https://relay.example/open/message?channel=design&id=${id} [here](https://relay.example/open/channel/design) https://other.example/open/message?channel=design&id=${id}`,
     { scope },
   );
   expect(html).toContain(`href="buzz://message?channel=design&amp;id=${id}"`);
   expect(html).toContain('href="buzz://channel/design"');
-  expect(html).toContain(`href="https://other.example/channel/design/${id}"`);
+  expect(html).toContain(
+    `href="https://other.example/open/message?channel=design&amp;id=${id}"`,
+  );
   expect(html).not.toContain(' href="https://relay.example');
   expect(html).toContain(
-    `data-shared-href="https://relay.example/channel/design/${id}"`,
+    `data-shared-href="https://relay.example/open/message?channel=design&amp;id=${id}"`,
   );
 });
 

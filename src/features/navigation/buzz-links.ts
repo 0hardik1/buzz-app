@@ -268,32 +268,33 @@ export function parseBuzzLink(href: string): BuzzLink | null {
   }
 }
 
-/** The https form of a conversation link: a page on community `origin`'s
- * relay that opens it in Buzz. Unlike a `buzz://` link, it names its
- * community; `undefined` when `href` is not a conversation link or the origin
- * is not a web one. */
+/** The https form of a navigation link: community `origin`'s relay serves
+ * `/open/<rest>` for `buzz://<rest>` and opens it in Buzz. Unlike a `buzz://`
+ * link, it names its community; `undefined` when `href` is not a conversation
+ * or entity link or the origin is not a web one. */
 export function communityShareLink(
   href: string | undefined,
   origin: string | undefined,
 ): string | undefined {
   const link = href ? parseBuzzLink(href) : null;
-  if (link?.format !== "legacy" || !origin) return undefined;
+  if (
+    !href ||
+    !origin ||
+    (link?.format !== "legacy" && link?.format !== "entity")
+  )
+    return undefined;
   try {
     const url = new URL(origin);
     if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
-    url.pathname = `/channel/${encodeURIComponent(link.channelId)}${
-      link.messageId ? `/${link.messageId}` : ""
-    }`;
-    if (link.threadRootId) url.searchParams.set("thread", link.threadRootId);
-    return url.href;
+    return `${url.origin}/open/${href.slice("buzz://".length)}`;
   } catch {
     return undefined;
   }
 }
 
-/** A shared https conversation link (`communityShareLink`): the community
- * origin it names and the `buzz://` link it stands for. Whether that origin is
- * the receiving community is the caller's check. */
+/** A shared https link (`communityShareLink`): the community origin it names
+ * and the `buzz://` link it stands for. Whether that origin is the receiving
+ * community is the caller's check. */
 export function parseCommunityShareLink(
   href: string,
 ): Readonly<{ origin: string; link: string }> | null {
@@ -304,23 +305,16 @@ export function parseCommunityShareLink(
       (url.protocol !== "https:" && url.protocol !== "http:") ||
       url.username ||
       url.password ||
-      url.hash
+      url.hash ||
+      !url.pathname.startsWith("/open/")
     )
       return null;
-    const path = /^\/channel\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname);
-    const threads = url.searchParams.getAll("thread");
-    if (!path || threads.length > 1) return null;
-    const [, channel = "", message] = path;
-    const [thread] = threads;
-    if (thread !== undefined && !message) return null;
-    const link = message
-      ? `buzz://message?${new URLSearchParams({
-          channel: decodeURIComponent(channel),
-          id: message,
-          ...(thread !== undefined ? { thread } : {}),
-        })}`
-      : `buzz://channel/${channel}`;
-    return parseBuzzLink(link) ? { origin: url.origin, link } : null;
+    const rest = `${url.pathname.slice("/open/".length)}${url.search}`;
+    const link = `buzz://${rest}`;
+    const target = rest ? parseBuzzLink(link) : null;
+    return target?.format === "legacy" || target?.format === "entity"
+      ? { origin: url.origin, link }
+      : null;
   } catch {
     return null;
   }

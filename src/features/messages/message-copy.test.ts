@@ -105,7 +105,7 @@ it("shares a message as an https link on its community's relay", () => {
       `https://relay.test:${person}`,
     ),
   ).toBe(
-    `https://relay.test/channel/general/${row.id}?thread=${"d".repeat(64)}`,
+    `https://relay.test/open/message?channel=general&id=${row.id}&thread=${"d".repeat(64)}`,
   );
   expect(messageShareLink(row, undefined)).toBeUndefined();
 });

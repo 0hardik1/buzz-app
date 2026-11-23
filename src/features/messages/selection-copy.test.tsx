@@ -165,7 +165,7 @@ describe("serializeNode", () => {
   });
 
   it("copies a link opened in its in-app form as authored", () => {
-    const shared = "https://relay.example/channel/general";
+    const shared = "https://relay.example/open/channel/general";
     const paragraph = query(
       "p",
       mount(
