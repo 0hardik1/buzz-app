@@ -883,8 +883,10 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   const glyph = outline.locator("span[aria-hidden]");
   await expect(glyph).toHaveCSS("width", "16px");
   await expect(glyph).toHaveCSS("height", "16px");
-  const buttonBox = await outline.boundingBox();
-  const glyphBox = await glyph.boundingBox();
+  const [buttonBox, glyphBox] = await glyph.evaluate((element) => [
+    element.closest("button").getBoundingClientRect().toJSON(),
+    element.getBoundingClientRect().toJSON(),
+  ]);
   expect(glyphBox.x - buttonBox.x).toBeCloseTo(12, 0);
   expect(glyphBox.y - buttonBox.y).toBeCloseTo(12, 0);
   expect(buttonBox.width - glyphBox.width).toBeCloseTo(24, 0);
