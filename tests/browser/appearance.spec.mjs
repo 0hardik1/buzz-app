@@ -10,7 +10,14 @@ import {
 } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { stopRoutes } from "./playwright-test.mjs";
-import { open, anchor, expectAnchor, upper, settle } from "./timeline.mjs";
+import {
+  open,
+  anchor,
+  expectAnchor,
+  upper,
+  settle,
+  virtuaIdle,
+} from "./timeline.mjs";
 import { wcagRatio } from "../../scripts/design-system/apca.mjs";
 
 test.use({ historyCounts: { alpha: 20, beta: 1 }, launchAnimation: true });
@@ -673,15 +680,6 @@ test("message table wrapping updates scrollability and survives reload", async (
   const command = "scan  --all";
   const prose =
     "Check the release notes before moving to the next step. ".repeat(6);
-  const columns = Array.from({ length: 12 }, (_, i) => `Component-${i + 1}`);
-  const path =
-    "fixtures/releases/configuration/weekly/checks/latest-manifest.json";
-  const values = [
-    `\`${path}\``,
-    "A-01",
-    ...columns.slice(2, -1).map(() => "Ready"),
-    "[Release notes](https://example.com/releases)",
-  ];
   const message = app.append(
     "primary",
     "alpha",
@@ -689,18 +687,11 @@ test("message table wrapping updates scrollability and survives reload", async (
       "| Step | Notes |",
       "| --- | --- |",
       `| \`${command}\` | ${prose.trim()} |`,
-      "",
-      `| ${columns.join(" | ")} |`,
-      `| ${columns.map(() => "---").join(" | ")} |`,
-      `| ${values.join(" | ")} |`,
     ].join("\n"),
   );
-  const [description, wide] = [0, 1].map((index) =>
-    page
-      .locator(`[data-message-id="${message.id}"]`)
-      .getByRole("table")
-      .nth(index),
-  );
+  const description = page
+    .locator(`[data-message-id="${message.id}"]`)
+    .getByRole("table");
   const notes = description.getByRole("cell").last();
   const notesWrap = () =>
     notes.evaluate((cell) => {
@@ -752,9 +743,35 @@ test("message table wrapping updates scrollability and survives reload", async (
   await closeSettings(page);
   await page.setViewportSize({ width: 960, height: 950 });
   await expect.poll(notesWrap).toBe(true);
+
+  // Give the wide table its own row in the narrow pane. Resizing the long
+  // prose message can move the timeline's scroll target during pointer input.
+  const columns = Array.from({ length: 12 }, (_, i) => `Component-${i + 1}`);
+  const path =
+    "fixtures/releases/configuration/weekly/checks/latest-manifest.json";
+  const values = [
+    `\`${path}\``,
+    "A-01",
+    ...columns.slice(2, -1).map(() => "Ready"),
+    "[Release notes](https://example.com/releases)",
+  ];
+  const wideMessage = app.append(
+    "primary",
+    "alpha",
+    [
+      `| ${columns.join(" | ")} |`,
+      `| ${columns.map(() => "---").join(" | ")} |`,
+      `| ${values.join(" | ")} |`,
+    ].join("\n"),
+  );
+  const wide = page
+    .locator(`[data-message-id="${wideMessage.id}"]`)
+    .getByRole("table");
   const releaseNotes = wide.getByRole("link", { name: "Release notes" });
+  await wide.scrollIntoViewIfNeeded();
+  await virtuaIdle(page);
   await expect(releaseNotes).not.toBeInViewport();
-  await wide.hover();
+  await wide.hover({ position: { x: 16, y: 16 } });
   await page.mouse.wheel(2000, 0);
   await expect(releaseNotes).toBeInViewport({ ratio: 1 });
 });
