@@ -56,6 +56,7 @@ import {
 } from "../../features/solo/default-agent";
 import { readView, writeView } from "../../shared/view-state";
 import type { RelayData } from "../../features/relay/service";
+import { keypair, signed } from "../../features/relay/testing";
 import type { CommunityReader } from "../../features/communities/service";
 import {
   createNavigationController,
@@ -180,6 +181,7 @@ function setup(
     status = "ready" as AgentsSnapshot["status"],
     more = [] as RegisteredAgentType[],
     dirtySettings = false,
+    busyRun = undefined as (() => Promise<void>) | undefined,
     found = portable as readonly PortableAgent[],
     warnings = [] as readonly string[],
     discover = async (): Promise<FoundAgents> => ({
@@ -249,16 +251,49 @@ function setup(
       <p>Provider settings</p>
     );
   };
-  const tabs = dirtySettings
+  // Runs work as Restart agent does, holding the panel while it runs.
+  const BusySettings = () => {
+    const [running, setRunning] = useState(false);
+    const [error, setError] = useState("");
+    useAgentSaveState(false, running);
+    return (
+      <>
+        {error && <p role="alert">{error}</p>}
+        <button
+          type="button"
+          disabled={running}
+          onClick={() => {
+            setError("");
+            setRunning(true);
+            busyRun?.()
+              .catch((reason: unknown) => setError(String(reason)))
+              .finally(() => setRunning(false));
+          }}
+        >
+          Run
+        </button>
+      </>
+    );
+  };
+  const tabs = busyRun
     ? [
         {
           id: "settings",
           title: "Settings",
           role: "settings" as const,
-          component: DirtySettings,
+          component: BusySettings,
         },
       ]
-    : [{ id: "reply", title: "Reply", component: () => <p>Reply tab</p> }];
+    : dirtySettings
+      ? [
+          {
+            id: "settings",
+            title: "Settings",
+            role: "settings" as const,
+            component: DirtySettings,
+          },
+        ]
+      : [{ id: "reply", title: "Reply", component: () => <p>Reply tab</p> }];
   const type = {
     key: "test/echo",
     pluginId: "test",
@@ -392,6 +427,8 @@ function setup(
     conversationFolder: () => undefined,
     setConversationInstructions: vi.fn(async () => {}),
     conversationInstructions: async () => undefined,
+    setConversationSections: vi.fn(async () => {}),
+    conversationSections: async () => undefined,
     note: () => false,
     classifier: () => "unavailable",
     saveTeam: vi.fn(async (change: TeamChange) => {
@@ -487,6 +524,8 @@ function setup(
         : [],
     registerTab: () => {},
     controlAttention: () => {},
+    recommend: () => {},
+    gatewayHarnesses: () => {},
     registerSessionRouter: () => {},
     registerExecution: () => {},
     bindExecution: async () => {},
@@ -495,6 +534,16 @@ function setup(
     execution: async () => undefined,
     harness: {} as Agents["harness"],
     subscribeSteps: () => () => {},
+    isReady: () => true,
+    whenReady: async () => {},
+    switchable: () => false,
+    switchableAgents: () => [],
+    switchToAutomatic: async () => ({ previous: {} }),
+    restartAgent: async () => {},
+    reserveVoice: () => () => {},
+    restoreSettings: async () => {},
+    readNote: () => undefined,
+    setNote: async () => {},
   } satisfies Agents;
   const disconnected = { status: "disconnected", generation: 0, scope };
   const relay = {
@@ -612,10 +661,23 @@ it("opens memory Buzz links in their community and rejects a retired page's call
     channelId = "11111111-1111-4111-8111-111111111111",
     messageId = "e".repeat(64);
   const url = `buzz://message?channel=${channelId}&id=${messageId}`;
+  // The relay names the linked channel, so its link isn't withheld.
+  const relayKey = keypair();
+  const metadata = signed(relayKey, {
+    kind: 39000,
+    content: "",
+    tags: [["d", channelId], ["name", "open"], ["public"]],
+  });
   const owner = createRelaySession({
     viewer,
-    relayAuthor: "d".repeat(64),
-    query: async () => [],
+    relayAuthor: relayKey.pubkey,
+    query: async (filters) =>
+      filters.some(
+        (filter) =>
+          filter.kinds?.includes(39000) && filter["#d"]?.includes(channelId),
+      )
+        ? [metadata]
+        : [],
     media: () => undefined,
   });
   const memories = createAgentMemories(
@@ -3914,6 +3976,231 @@ it.each(["error", "unavailable"] as const)(
   },
 );
 
+it("tells a browser's Import an agent that agents run in the desktop app", async () => {
+  const user = userEvent.setup();
+  const navigator = {
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  // Outside the desktop app no agent type registers.
+  const { agents } = setup([], { status: "unavailable", page: { navigator } });
+  const none: RegisteredAgentType[] = [];
+  agents.types = () => none;
+  await user.click(screen.getByRole("button", { name: "New agent" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Import an agent" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Import an agent" });
+  expect(
+    within(dialog).getByText(
+      "Agents runs in the desktop app. Open Buzz there to import one.",
+    ),
+  ).toBeVisible();
+  // The page behind it says the same.
+  expect(
+    screen.getByText("Agents runs in the desktop app", { exact: true }),
+  ).toBeInTheDocument();
+  expect(within(dialog).queryByText(/Manage plugins/)).not.toBeInTheDocument();
+});
+
+it("tells Import an agent that agents could not load, as the page does", async () => {
+  const user = userEvent.setup();
+  const navigator = {
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  const { agents } = setup([], { status: "error", page: { navigator } });
+  const none: RegisteredAgentType[] = [];
+  agents.types = () => none;
+  await user.click(screen.getByRole("button", { name: "New agent" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Import an agent" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Import an agent" });
+  // Without a reason, the page's own fallback.
+  expect(
+    within(dialog).getByText("Agents could not load. Try again."),
+  ).toBeVisible();
+  expect(within(dialog).queryByText(/Manage plugins/)).not.toBeInTheDocument();
+});
+
+// No plugin registered a type that runs agents here: every agent plugin off,
+// or one on that failed to activate. The dialog names what is missing.
+it("links Import an agent to Manage plugins while no type runs agents here", async () => {
+  const user = userEvent.setup();
+  const navigator = {
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  const { agents } = setup([agent("Ada", 1)], { page: { navigator } });
+  const none: RegisteredAgentType[] = [];
+  agents.types = () => none;
+  await user.click(screen.getByRole("button", { name: "New agent" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Import an agent" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Import an agent" });
+  expect(
+    within(dialog).getByText(/No harness that runs agents on this computer/),
+  ).toHaveTextContent(
+    "No harness that runs agents on this computer is available. Check Manage plugins.",
+  );
+  await user.click(
+    within(dialog).getByRole("button", { name: "Manage plugins" }),
+  );
+  expect(navigator.open).toHaveBeenCalledExactlyOnceWith({
+    version: 1,
+    kind: "settings",
+    section: "plugins",
+  });
+  // Settings opens in place of the dialog, not over it.
+  expect(
+    screen.queryByRole("dialog", { name: "Import an agent" }),
+  ).not.toBeInTheDocument();
+});
+
+// Only a hosted type is on. Import keeps it out, since an imported agent
+// needs a key here, and must not claim no plugin is on: Manage plugins shows
+// one enabled.
+it("does not say no plugin is on when only a hosted type is", async () => {
+  const user = userEvent.setup();
+  const navigator = {
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  const { agents, types } = setup([agent("Ada", 1)], { page: { navigator } });
+  const cloud = {
+    ...types[0],
+    key: "test/cloud",
+    title: "Cloud",
+    remote: {},
+  } as unknown as RegisteredAgentType;
+  const hosted = [cloud];
+  agents.types = () => hosted;
+  await user.click(screen.getByRole("button", { name: "New agent" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Import an agent" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Import an agent" });
+  expect(
+    within(dialog).getByText(/No harness that runs agents on this computer/),
+  ).toHaveTextContent(
+    "No harness that runs agents on this computer is available. Check Manage plugins.",
+  );
+  expect(within(dialog).queryByText(/plugin is turned on/)).toBeNull();
+  await user.click(
+    within(dialog).getByRole("button", { name: "Manage plugins" }),
+  );
+  expect(navigator.open).toHaveBeenCalledExactlyOnceWith({
+    version: 1,
+    kind: "settings",
+    section: "plugins",
+  });
+});
+
+it("keeps Manage plugins plain text while an import is still running", async () => {
+  const user = userEvent.setup();
+  const navigator = {
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  const { agents, change } = setup([], { page: { navigator } });
+  let finish = () => {};
+  agents.port.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve({ agent: agent("Ada", 1), notes: [] });
+      }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: /Import them now/ }),
+  );
+  const dialog = screen.getByRole("dialog", { name: "Import an agent" });
+  await user.click(
+    await within(dialog).findByRole("button", { name: "Import as Echo, Ada" }),
+  );
+  // The last agent plugin goes off while Ada is still importing.
+  const none: RegisteredAgentType[] = [];
+  agents.types = () => none;
+  act(() => change({}));
+  expect(
+    within(dialog).getByText(/No harness that runs agents on this computer/),
+  ).toHaveTextContent(
+    "No harness that runs agents on this computer is available. Check Manage plugins.",
+  );
+  // Opening Settings would close the dialog over the import, which Close
+  // and Escape may not do either, so the link waits as plain text.
+  expect(
+    within(dialog).queryByRole("button", { name: "Manage plugins" }),
+  ).not.toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("dialog", { name: "Import an agent" })).toBeVisible();
+  finish();
+  await user.click(
+    await within(dialog).findByRole("button", { name: "Manage plugins" }),
+  );
+  expect(navigator.open).toHaveBeenCalledExactlyOnceWith({
+    version: 1,
+    kind: "settings",
+    section: "plugins",
+  });
+  expect(
+    screen.queryByRole("dialog", { name: "Import an agent" }),
+  ).not.toBeInTheDocument();
+});
+
+it("links a Marketplace agent's Import to Manage plugins while no agent type plugin is on", async () => {
+  const user = userEvent.setup();
+  const navigator = {
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  const view = setup([], { page: { navigator } });
+  const none: RegisteredAgentType[] = [];
+  view.agents.types = () => none;
+  const owner = createRelaySession(null);
+  const session = {
+    ...owner.session,
+    read: vi.fn().mockResolvedValue([
+      {
+        id: "ab".repeat(32),
+        pubkey: "cd".repeat(32),
+        kind: 30175,
+        created_at: 1,
+        tags: [
+          ["d", "helper"],
+          ["shared", "true"],
+        ],
+        content: JSON.stringify({
+          display_name: "Marketplace helper",
+          system_prompt: "Help with tasks.",
+        }),
+      },
+    ]),
+  };
+  const snapshot = { status: "ready" as const, generation: 1, session };
+  const relay = { ...view.relay, snapshot: () => snapshot };
+  try {
+    view.rerender(
+      <AgentsPage agents={view.agents} relay={relay} navigator={navigator} />,
+    );
+    await user.click(screen.getByRole("tab", { name: "Marketplace" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Marketplace helper" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    const dialog = screen.getByRole("dialog", { name: "Marketplace helper" });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Manage plugins" }),
+    );
+    expect(navigator.open).toHaveBeenCalledExactlyOnceWith({
+      version: 1,
+      kind: "settings",
+      section: "plugins",
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "Marketplace helper" }),
+    ).not.toBeInTheDocument();
+  } finally {
+    view.unmount();
+    owner.dispose();
+  }
+});
+
 it("says in Settings where an agent's config lives, and why it is only here", async () => {
   const user = userEvent.setup();
   const { agents, notify } = setup([agent("Ada", 1)]);
@@ -4907,6 +5194,68 @@ it("leaves an agent a link opened while an unfinished agent's Delete was finishi
   );
 });
 
+it("leaves a running save or restart open when another agent is visited, so its error stays", async () => {
+  const user = userEvent.setup();
+  const ada = agent("Ada", 1);
+  const bo = agent("Bo", 2);
+  let fail!: (reason: string) => void;
+  const busyRun = vi
+    .fn<() => Promise<void>>()
+    .mockImplementationOnce(
+      () => new Promise<void>((_, reject) => (fail = reject)),
+    )
+    .mockResolvedValue(undefined);
+  const { agents, relay, rerender } = setup([ada, bo], { busyRun });
+  await user.click(
+    within(screen.getByRole("grid", { name: "Agents" })).getByText("Ada"),
+  );
+  await user.click(screen.getByRole("button", { name: "Run" }));
+
+  const target = {
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.agents",
+    pageId: "agents",
+    scope: null,
+    route: { version: 1, params: { agent: bo.pubkey } },
+  } as const;
+  const navigator = {
+    snapshot: () => ({ entry: { id: "bo", target } }),
+    open: vi.fn(async () => ({ status: "opened" as const })),
+  } as unknown as Navigation;
+  const navigation: PageNavigation = {
+    entryId: "bo",
+    target,
+    signal: new AbortController().signal,
+    focus: "content",
+    position: () => undefined,
+    savePosition() {},
+    passThrough: () => () => {},
+    forSession: () => navigation,
+    resolve: () => true,
+    complete: () => true,
+  };
+  const page = (
+    <AgentsPage
+      agents={agents}
+      relay={relay}
+      navigator={navigator}
+      navigation={navigation}
+    />
+  );
+  try {
+    rerender(page);
+    expect(screen.getByRole("heading", { name: "Ada" })).toBeInTheDocument();
+  } finally {
+    await act(async () => fail("Restart failed"));
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent("Restart failed");
+  expect(screen.getByRole("heading", { name: "Ada" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Run" }));
+  expect(busyRun).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
 it("keeps a draft open behind Import without asking, and deleting the open agent closes it without asking", async () => {
   const user = userEvent.setup();
   const ada = agent("Ada", 1);
@@ -5142,8 +5491,10 @@ it("asks before Create or another card's Open settings replaces an unsaved draft
 });
 
 it("announces the Bestie on its card without repeating it in actions", async () => {
+  const user = userEvent.setup();
   const ada = agent("Ada", 1);
   const view = setup([ada]);
+  const copy = vi.spyOn(navigator.clipboard, "writeText");
   const choices = {
     status: "ready",
     complete: true,
@@ -5179,10 +5530,17 @@ it("announces the Bestie on its card without repeating it in actions", async () 
     within(menu).queryByRole("menuitem", { name: "Remove as bestie" }),
   ).toBeNull();
   // Right-click carries the same ordinary actions as the card's "..." menu.
-  expect(
-    within(menu).getByRole("menuitem", { name: "Copy public key" }),
-  ).toBeVisible();
+  const copyKey = within(menu).getByRole("menuitem", {
+    name: "Copy public key",
+  });
+  expect(copyKey).toBeVisible();
   expect(within(menu).queryByRole("menuitemcheckbox")).toBeNull();
+  // It copies the npub that the Settings row copies, never the raw hex key.
+  await user.click(copyKey);
+  expect(copy).toHaveBeenCalledExactlyOnceWith(
+    "npub1zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygse4sl3h",
+  );
+  copy.mockRestore();
 });
 
 it("offers Make my bestie from the card's actions button", async () => {
@@ -7326,4 +7684,54 @@ describe("a team Save that finishes after its editor is gone", () => {
       f.dispose();
     }
   });
+});
+
+it("shows Automatic as a read-only detail on a recommended agent card", async () => {
+  vi.stubEnv(
+    "VITE_BUZZ_RECOMMENDED_AGENT",
+    JSON.stringify([
+      { harness: "codex", model: "model-a", label: "Model A", effort: "high" },
+    ]),
+  );
+  try {
+    const saved = {
+      ...agent("Ada", 1),
+      type: "test/codex",
+      config: { preset: "recommended" },
+    };
+    const { agents } = setup([saved], {
+      more: [
+        {
+          key: "test/codex",
+          pluginId: "test",
+          revision: "1",
+          id: "codex",
+          title: "Codex",
+          summary: () => "model-a",
+          icon: RobotIcon,
+          defaults: () => ({ config: {} }),
+          CreateModel: () => <button type="button">Manual model</button>,
+          tabs: [
+            {
+              id: "settings",
+              title: "Settings",
+              role: "settings",
+              component: () => <p>Model settings</p>,
+            },
+          ],
+        } as RegisteredAgentType,
+      ],
+    });
+    const card = screen.getByRole("gridcell", { name: "Ada" });
+    expect(
+      within(card).queryByRole("button", { name: "Manual model" }),
+    ).not.toBeInTheDocument();
+    expect(within(card).getByText("Model A (Automatic)")).toBeVisible();
+    expect(
+      within(card).queryByRole("button", { name: "Automatic" }),
+    ).not.toBeInTheDocument();
+    expect(agents.save).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

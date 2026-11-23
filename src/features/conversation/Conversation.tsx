@@ -1,3 +1,4 @@
+import { hostComposerProvenance } from "../messages/mention-draft";
 import { ActivityIndicatorPresentation } from "./typing-presentation";
 import {
   createContext,
@@ -28,6 +29,7 @@ import { ThreadPanel, type ThreadPanelProps } from "../messages/ThreadPanel";
 import { useListedChannel } from "../relay/listed-channel";
 import { ownSolo } from "../solo/labels";
 import { useSoloHasPeople } from "../solo/people";
+import { AdminSetupRecovery } from "../solo/AdminSetupRecovery";
 import {
   ConversationHost,
   type ConversationHostServices,
@@ -143,8 +145,9 @@ export function ConversationChannel(props: ChannelProps) {
   const { session, scope, extensions, channel, active, children } = props;
   const channelName = props.channelName ?? channel?.name ?? "";
   // While the channel is open the profile cache keeps room for its whole roster
-  // on top of its base; leaving gives the room back. A retained tab in the
-  // background and a preview that does not visit the channel hold none.
+  // on top of its base; leaving gives the room back after a short hold. A
+  // retained tab in the background and a preview that does not visit the
+  // channel hold none.
   const members = useListedChannel(
     session.channels,
     channel?.id,
@@ -309,18 +312,28 @@ export function ConversationComposer(props: Own<MessageComposerProps>) {
     shared.soloConversation,
   );
   return (
-    <MessageComposer
-      {...shared}
-      {...(shared.soloConversation
-        ? {
-            label: withPeople
-              ? "Message this conversation"
-              : "Message your agents",
-          }
-        : {})}
-      chatPresentation={shared.ownSoloConversation}
-      requireMention={shared.soloConversation}
-      {...props}
-    />
+    <>
+      {shared.session.outbox && !props.threadRootId && (
+        <AdminSetupRecovery
+          key={shared.channelId}
+          outbox={shared.session.outbox}
+          channelId={shared.channelId}
+        />
+      )}
+      <MessageComposer
+        evidenceOwner={hostComposerProvenance}
+        {...shared}
+        {...(shared.soloConversation
+          ? {
+              label: withPeople
+                ? "Message this conversation"
+                : "Message your agents",
+            }
+          : {})}
+        chatPresentation={shared.ownSoloConversation}
+        requireMention={shared.soloConversation}
+        {...props}
+      />
+    </>
   );
 }

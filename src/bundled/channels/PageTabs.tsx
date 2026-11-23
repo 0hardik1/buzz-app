@@ -1,4 +1,10 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import type { RelaySession } from "../../features/relay/session";
 import type {
@@ -41,7 +47,7 @@ import {
 import { useConversationTabs } from "./useConversationTabs";
 import { ConversationTab as ConversationReader } from "./ConversationTab";
 import { panelOpening } from "../../features/panels/service";
-import { useCoveredByDock } from "./useCoveredByDock";
+import { coveringDock, useCoveredByDock } from "./useCoveredByDock";
 import styles from "./Channels.module.css";
 
 export type { PageTabOptions, PageTabsProps, PageTabTarget };
@@ -82,7 +88,8 @@ export function PageTabs({
   }) {
   const tabState = useChannelTabState(session, undefined, `page:${id}`);
   const list = useChannelList(session.channels);
-  const { channels, profiles } = useChannelLabels(
+  // Every joined row, as in Channels: sidebar visibility is not access.
+  const { joined: channels, profiles } = useChannelLabels(
     // As in Channels, a Huddle room's tabs show the unavailable placeholder.
     list.channels.filter(
       (channel) => !channel.huddle && !channel.metadataPending,
@@ -227,10 +234,17 @@ export function PageTabs({
       return true;
     };
     opening.current = (
-      { channelId, threadId, messageId },
+      { channelId, threadId, messageId, unreadSince },
       { keep, markRead } = {},
     ) => {
-      if (!mounted.current || !secondary.canOpenConversation(channelId))
+      // A thread tab shows a channel the viewer can only read; a
+      // conversation tab needs one they can post in.
+      if (
+        !mounted.current ||
+        !(threadId
+          ? secondary.canOpenThread(channelId)
+          : secondary.canOpenConversation(channelId))
+      )
         return false;
       setCloses(committedCloses.current);
       const known = new Set(tabState.tabs.map((tab) => tab.id));
@@ -245,6 +259,7 @@ export function PageTabs({
           messageId ?? threadId,
           (existing?.kind === "thread" && existing.rootId) || threadId,
           messageId ? "reveal" : "focus",
+          messageId ? undefined : unreadSince,
         );
       else {
         const tab = `conversation:${channelId}`;
@@ -368,6 +383,20 @@ export function PageTabs({
       : 1,
   );
   const primaryTarget = workspace?.target;
+  const latestRequest = primaryTarget?.messageId
+    ? undefined
+    : workspace?.latestRequest;
+  const revealLatest = useEffectEvent(() => {
+    tabState.selectMain(undefined);
+    // The coverage observer may still be measuring a newly mounted workspace.
+    const dock = showingPanel ? coveringDock(split.ref.current) : undefined;
+    if (!dock) return;
+    if (dock.contains(document.activeElement)) secondary.closePane();
+    else tabState.setPaneOpen(false);
+  });
+  useLayoutEffect(() => {
+    if (latestRequest && !latestRequest.aborted) revealLatest();
+  }, [latestRequest]);
   const primaryChannel =
     primaryTarget &&
     channels.find((channel) => channel.id === primaryTarget.channelId);
@@ -377,7 +406,10 @@ export function PageTabs({
     ...(primaryTarget.threadId
       ? {
           kind: "thread" as const,
-          messageId: primaryTarget.messageId ?? primaryTarget.threadId,
+          messageId:
+            primaryTarget.messageId ??
+            primaryTarget.subthreadId ??
+            primaryTarget.threadId,
           rootId: primaryTarget.threadId,
         }
       : {
@@ -513,6 +545,8 @@ export function PageTabs({
                             key={JSON.stringify(primaryTarget)}
                             tab={primaryTab}
                             intro={workspace.intro}
+                            subthreadId={primaryTarget?.subthreadId}
+                            latestRequest={latestRequest}
                             active={
                               secondary.selectedMain === "conversation" &&
                               !covered

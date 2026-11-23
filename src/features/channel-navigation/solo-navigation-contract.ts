@@ -48,6 +48,17 @@ export type SoloRegionSource = Readonly<{
   actions?: (binding: SoloRegionBinding) => readonly SoloRegionAction[];
   /** Agents a draft from `openDraft` may address. Without it, any available agent. */
   draftAgent?(binding: SoloRegionBinding, pubkey: string): boolean;
+  /** On draft Send, after the start record is saved and before chat creation or
+   * its first message. The host waits up to 3 seconds; rejection or timeout warns
+   * and continues. Timed-out work is not canceled. Not called by createChat. */
+  prepareStart?(
+    binding: SoloRegionBinding,
+    input: Readonly<{
+      channelId: string;
+      members: readonly string[];
+      start: SoloDraftStart;
+    }>,
+  ): void | Promise<void>;
   /** Show and change this chat's workspace in its composer. Read from local
    * state; a change shows through `read`'s next revision. */
   workspace?(
@@ -79,6 +90,8 @@ export type SoloRegionHandle = Readonly<{
   label: string;
   /** Keyed draft context is retained in navigation and the saved start record. */
   draftContext: true;
+  /** `ui.ChannelGroup` accepts `placement: "team-row"`. */
+  teamRowChannelGroups: true;
   /** The same device state as component props, available before mount. */
   state(binding: SoloRegionBinding): SoloRegionProps["state"];
   /** Open New chat for this region. Its first send creates the chat with this
@@ -111,15 +124,62 @@ export type SoloRegionProps = Readonly<{
     Card: ComponentType<SoloCardProps>;
     Disclosure: ComponentType<SoloDisclosureProps>;
     Workspace?: ComponentType<SoloWorkspaceProps>;
+    /** A joined channel's native heading and actions around source-owned content. */
+    ChannelGroup?: ComponentType<SoloChannelGroupProps>;
+    /** Workspace and ChannelGroup accept entries for their Solo overflow menus. */
+    headerMenuActions?: true;
     Chats?: ComponentType<Readonly<{ all?: boolean }>>;
+    /** All ordinary chats without workspace chrome; keeps host rows and filing. */
+    ChatList?: ComponentType;
   }>;
+}>;
+/** A leading action whose artwork shares the native disclosure slot. */
+export type SoloHeaderLeading = Readonly<{
+  /** Non-interactive artwork for the action button. */
+  icon: ReactNode;
+  label: string;
+  onActivate(): void;
+  /** Render the intact controls in a non-interactive anchor, for example for a hover card. */
+  wrapControls?(controls: ReactNode): ReactNode;
+}>;
+export type SoloHeaderMenuAction = Pick<
+  SoloRegionAction,
+  "id" | "label" | "onSelect"
+>;
+export type SoloChannelGroupProps = Readonly<{
+  channelId: string;
+  selected?: boolean;
+  onSelect(): void;
+  expanded: boolean;
+  controls: string;
+  disclosureLabel: string;
+  onToggle(): void;
+  /** Offered only while the host permits starting a chat from this channel. */
+  onNewTask?(): void;
+  headerLeading?: SoloHeaderLeading | undefined;
+  /** Entries for the Solo channel overflow. The host ignores these in Team-row placement. */
+  headerMenuActions?: readonly SoloHeaderMenuAction[] | undefined;
+  /** Independent header content that stays visible when collapsed. */
+  headerAccessory?: ReactNode;
+  /** Compact, non-interactive content shown in place of quiet header actions. */
+  headerMetadata?: ReactNode;
+  /** Shows the disclosure, task action and content with the channel's Team
+   * sidebar row, which stays the heading, instead of in the region. */
+  placement?: "team-row";
+  children?: ReactNode;
 }>;
 export type SoloWorkspaceProps = Readonly<{
   id: string;
   selected?: boolean;
   onSelect?(): void;
   onNewTask?(): void;
-  /** Reveal a moved or externally opened child; selection alone does not expand. */
+  headerLeading?: SoloHeaderLeading | undefined;
+  headerMenuActions?: readonly SoloHeaderMenuAction[] | undefined;
+  /** Independent header content that stays visible when collapsed. */
+  headerAccessory?: ReactNode;
+  /** Compact, non-interactive content shown in place of quiet header actions. */
+  headerMetadata?: ReactNode;
+  /** @deprecated Legacy no-op. Use the workspace disclosure to open it. */
   reveal?: string;
   dropTarget?: boolean;
   children?: ReactNode;
