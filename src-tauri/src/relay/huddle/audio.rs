@@ -685,6 +685,7 @@ mod tests {
                 stop,
                 &updates,
                 &touched,
+                false,
             )
             .await
         });
@@ -1082,7 +1083,7 @@ mod tests {
                 super::super::super::lease_time(),
             ));
             let mut relay = socket;
-            let playing = run(seated, pcm, stopped, &updates, &touched);
+            let playing = run(seated, pcm, stopped, &updates, &touched, false);
             let relay_side = async {
                 send(
                     &mut relay,
