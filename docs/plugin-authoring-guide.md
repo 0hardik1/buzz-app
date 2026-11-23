@@ -125,7 +125,7 @@ Declare in `manifest.json` the commands, processes, network origins and files yo
 }
 ```
 
-- `await ctx.host.runCommand("status", input?)` runs a declared command with no shell and a 5 s deadline. It returns stdout, or `null` on failure.
+- `await ctx.host.runCommand("status", input?)` runs a declared command with no shell and a 5 s deadline. It returns stdout, or `null` on failure. The command's environment has `BUZZ_PLUGIN_ID`, the calling plugin's manifest id. It names a well-behaved plugin, not proof: an unsandboxed plugin can call the host command with another plugin's id.
 - `await ctx.host.request({ url, method?, headers?, body? })` calls a declared HTTPS origin and returns `{ status, headers, body }`. Plain `fetch` to other origins is blocked, so use this.
 - `await ctx.host.writeClipboardText?.(text)` copies plain text the way Buzz does. It needs no grant; check it exists.
 - `ctx.host.spawn?.(id, { args?, onStdout? })` starts a declared process (desktop only).
