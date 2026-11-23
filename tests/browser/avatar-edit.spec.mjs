@@ -837,8 +837,15 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
     .locator("video[aria-label='Camera preview']")
     .locator("..");
   await expect(stage).toHaveCSS("border-radius", "50%");
-  await page.getByRole("combobox", { name: "Camera", exact: true }).click();
-  await page.getByRole("option", { name: "Desk camera" }).click();
+  await expect(
+    page.getByRole("button", { name: "Record 3 seconds", exact: true }),
+  ).toBeFocused();
+  const camera = page.getByRole("combobox", { name: "Camera", exact: true });
+  await camera.press("Enter");
+  await expect(camera).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("End");
+  await expect(page.getByRole("option", { name: "Desk camera" })).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect
     .poll(() => page.evaluate(() => window.avatarTestCamera))
     .toBe("two");
