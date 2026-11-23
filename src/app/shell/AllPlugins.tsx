@@ -317,7 +317,7 @@ function PluginRow({
               {...drag.listeners}
               aria-label={`Reorder ${plugin.label}`}
               title="Drag, or use the arrow keys, to reorder"
-              size="xs"
+              size="sm"
               variant="glyph"
               icon={<GripVerticalIcon size={16} aria-hidden="true" />}
               onKeyDown={(event) => {

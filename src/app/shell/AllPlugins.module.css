@@ -59,9 +59,13 @@
 /* Reorder leads the row and pin ends it. Both always show; unpinned rows keep
    the reorder slot empty so every plugin's icon lines up. */
 .grip {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
-  width: var(--space-5);
-  margin-inline-start: var(--space-1);
+  width: var(--size-row);
+  /* The handle tucks into the row's leading inset so it sits close to the
+     plugin it moves; it stays above the row so it keeps its own clicks. */
+  margin-inline-end: calc(-1 * var(--space-2));
   min-height: var(--size-row);
   flex: none;
   align-items: center;
