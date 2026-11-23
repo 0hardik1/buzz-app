@@ -96,6 +96,12 @@ if that desktop app is up and running.
 - **Messages.** Hover or right-click a message to react, **Reply**, copy a link,
   forward it, or start a chat about it. On an agent's reply, **View activity**
   shows what it did.
+- **Pins.** **Pin to channel** (**Pin to DM** in a DM) in a message's More
+  menu adds it to the pin list, up to 250; the pin button in the header lists
+  them. Solo chats have no pins.
+  Anyone who can post can pin or unpin any message. Forum posts can't be
+  pinned. A community that doesn't take pins refuses them, and Buzz says so.
+  Agents pin with the `pin` tool.
 - **Composer.** **#** links a channel. On desktop, **!** gives your agents a
   folder and **/** a skill. Attach files by pasting or dragging them in.
 - **Drafts.** Every message box open on a conversation shares its draft. A box
