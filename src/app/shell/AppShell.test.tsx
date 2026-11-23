@@ -913,7 +913,6 @@ it.each(["sidebar", "topbar"] as const)(
       const role = "button";
       const nav = screen.getByRole("navigation", { name: landmark });
       const inbox = within(nav).getByRole(role, { name: "Inbox" });
-      // Rich previews replace the trigger's ordinary title hint.
       expect(inbox).toHaveAttribute("aria-haspopup", "dialog");
       expect(inbox).not.toHaveAttribute("title");
       expect(

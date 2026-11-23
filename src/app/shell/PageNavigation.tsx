@@ -160,7 +160,6 @@ export function PageNavigation({
         onClick={select}
         selected={selected === page.key}
         label={label}
-        title={page.preview && previewed(page) ? undefined : label}
         variant="row"
         trailing={
           <>
