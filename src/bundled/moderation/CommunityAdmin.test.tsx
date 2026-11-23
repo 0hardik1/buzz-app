@@ -708,35 +708,138 @@ it("ignores a late mint from a previous Invite visit", async () => {
   ).toBeNull();
 });
 
-it("mints a link that never expires", async () => {
-  const user = userEvent.setup();
-  const calls = broker({
-    invite: () =>
-      Response.json({
-        invite_id: "0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f",
-        code: "abc",
-        url: "https://primary.example/invite/abc",
-        expires_at: null,
-        max_uses: null,
-        uses_remaining: null,
-      }),
+const permanentInvite = (code: string, expires_at: number | null = null) =>
+  Response.json({
+    invite_id: "0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f",
+    code,
+    url: `https://primary.example/invite/${code}`,
+    expires_at,
+    max_uses: null,
+    uses_remaining: null,
   });
-  const { relay: data } = relay(owner);
-  render(<CommunityAdmin relay={data} active={() => true} />);
-  await user.click(await screen.findByRole("tab", { name: "Invite" }));
-  await screen.findByDisplayValue("https://primary.example/invite/abc");
+
+async function chooseNever(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
     screen.getByRole("button", { name: "Choose invite expiry" }),
   );
   await user.click(
     await screen.findByRole("menuitemradio", { name: "Never expires" }),
   );
-  await waitFor(() =>
-    expect(calls.filter((c) => c.route === "invite").at(-1)?.body).toEqual({
-      never_expires: true,
-      max_uses: null,
-    }),
+}
+
+it("mints a link that never expires only when the admin creates it", async () => {
+  const user = userEvent.setup();
+  let count = 0;
+  const calls = broker({
+    invite: () => permanentInvite(String(++count), count === 1 ? 1 : null),
+  });
+  const mints = () => calls.filter((c) => c.route === "invite");
+  const { relay: data } = relay(owner);
+  render(<CommunityAdmin relay={data} active={() => true} />);
+  await user.click(await screen.findByRole("tab", { name: "Invite" }));
+  await screen.findByDisplayValue("https://primary.example/invite/1");
+  await chooseNever(user);
+  const create = await screen.findByRole("button", { name: "Create link" });
+  expect(mints()).toHaveLength(1);
+  await user.click(create);
+  await screen.findByDisplayValue("https://primary.example/invite/2");
+  expect(mints().at(-1)?.body).toEqual({ never_expires: true, max_uses: null });
+  expect(screen.queryByRole("button", { name: "Create link" })).toBeNull();
+});
+
+it("asks again instead of minting when Never settings change or the tab returns", async () => {
+  const user = userEvent.setup();
+  let count = 0;
+  const calls = broker({ invite: () => permanentInvite(String(++count)) });
+  const mints = () => calls.filter((c) => c.route === "invite");
+  const { relay: data } = relay(owner);
+  const view = render(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="invite" />,
   );
+  await screen.findByDisplayValue("https://primary.example/invite/1");
+  await chooseNever(user);
+  await user.click(await screen.findByRole("button", { name: "Create link" }));
+  await screen.findByDisplayValue("https://primary.example/invite/2");
+  await user.click(
+    screen.getByRole("button", { name: "Choose maximum invite uses" }),
+  );
+  await user.click(
+    await screen.findByRole("menuitemradio", { name: /^1 use$/ }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Create link" }),
+  ).toBeVisible();
+  view.rerender(
+    <CommunityAdmin
+      relay={data}
+      active={() => true}
+      selectedMethod="members"
+    />,
+  );
+  view.rerender(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="invite" />,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Create link" }),
+  ).toBeVisible();
+  expect(mints()).toHaveLength(2);
+  expect(screen.queryByDisplayValue(/invite\/2$/)).toBeNull();
+});
+
+it("drops a permanent link that resolves after its settings changed", async () => {
+  const user = userEvent.setup();
+  let finish!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  let count = 0;
+  const calls = broker({
+    invite: () => (++count === 2 ? held : permanentInvite(String(count))),
+  });
+  const mints = () => calls.filter((c) => c.route === "invite");
+  const { relay: data } = relay(owner);
+  render(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="invite" />,
+  );
+  await screen.findByDisplayValue("https://primary.example/invite/1");
+  await chooseNever(user);
+  await user.click(await screen.findByRole("button", { name: "Create link" }));
+  await waitFor(() => expect(mints()).toHaveLength(2));
+  await user.click(
+    screen.getByRole("button", { name: "Choose maximum invite uses" }),
+  );
+  await user.click(
+    await screen.findByRole("menuitemradio", { name: /^1 use$/ }),
+  );
+  await act(async () => {
+    finish(permanentInvite("old"));
+    await held;
+  });
+  expect(screen.getByRole("button", { name: "Create link" })).toBeVisible();
+  expect(screen.queryByDisplayValue(/invite\/old$/)).toBeNull();
+  expect(mints()).toHaveLength(2);
+});
+
+it("withholds a finite link a relay returns for a Never request", async () => {
+  const user = userEvent.setup();
+  let count = 0;
+  broker({
+    invite: () => permanentInvite(String(++count), 1700003600),
+  });
+  const { relay: data } = relay(owner);
+  render(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="invite" />,
+  );
+  await screen.findByDisplayValue("https://primary.example/invite/1");
+  await chooseNever(user);
+  await user.click(await screen.findByRole("button", { name: "Create link" }));
+  expect(
+    await screen.findByPlaceholderText(
+      "This relay can’t make permanent links yet. Choose an expiry instead.",
+    ),
+  ).toHaveValue("");
+  expect(screen.queryByDisplayValue(/invite\/2$/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Copy link" })).toBeDisabled();
 });
 
 it("lists invite links and revokes one by row or by pasted link", async () => {
