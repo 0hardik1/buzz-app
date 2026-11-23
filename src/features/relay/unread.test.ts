@@ -8327,6 +8327,26 @@ it("mark all reads mentions in a public channel the viewer has not joined", asyn
   expect(h.session.unread.attention("lobby", mention.id).unread).toBe(false);
 });
 
+it("mark all in a public channel the viewer has not joined leaves its unseen posts unread after joining", async () => {
+  const h = setup();
+  h.emit([
+    roster(h.relay, "lobby", [h.alice.pubkey], 10),
+    metadata(h.relay, "lobby", "lobby", 10, [["t", "stream"], ["public"]]),
+  ]);
+  const mention = message(h.alice, "lobby", "mention", 20, [
+    ["p", h.viewer.pubkey],
+  ]);
+  h.emit([mention]);
+  await h.session.unread.markAllChannelsRead();
+  expect(h.session.unread.attention("lobby", mention.id).unread).toBe(false);
+  expect(h.journal()?.state.frontiers.lobby).toBeUndefined();
+  h.emit([roster(h.relay, "lobby", [h.alice.pubkey, h.viewer.pubkey], 31)]);
+  const unseen = message(h.alice, "lobby", "unseen", 25);
+  h.emit([unseen]);
+  expect(h.session.unread.attention("lobby", unseen.id).unread).toBe(true);
+  expect(h.session.unread.attention("lobby", mention.id).unread).toBe(false);
+});
+
 it("a dwell at a bottom mention too tall to observe, in a channel the viewer has not joined, reads only that mention", async () => {
   const h = setup();
   h.emit([

@@ -3164,12 +3164,38 @@ export function createUnread({
     const undoableLocalKeys = new Set(
       [...keys].filter((key) => key !== messageForceKey(channelId)),
     );
+    // Outside a channel, read only its retained mentions: a channel read mark
+    // would also read posts the viewer never saw once they join.
+    const mentions = outside(channelId)
+      ? rows
+          .filter(({ event }) => event.pubkey !== viewer)
+          .map(({ event }) => ({
+            key: `msg:${event.id}`,
+            timestamp: event.created_at,
+            channelId,
+            ...(threadReference(event) && root(event)
+              ? { rootId: root(event) }
+              : {}),
+          }))
+      : undefined;
     return async () => {
       // The save's frontier advance can end overlays before it returns, and
       // Undo never restores them.
       const hadForced = Boolean(forcedMessages.get(channelId)?.size);
-      const result =
-        rows.length || reads.snapshot().capability === "frontier-sync"
+      const result = mentions
+        ? await reads.readMessages(
+            mentions,
+            undefined,
+            valid,
+            false,
+            fence,
+            [...keys],
+            {
+              explicit: true,
+              undo: { keys: undoableLocalKeys, valid: undoValid },
+            },
+          )
+        : rows.length || reads.snapshot().capability === "frontier-sync"
           ? await reads.read(channelId, cut, valid, true, [...keys], fence, {
               keys: undoableLocalKeys,
               valid: undoValid,
