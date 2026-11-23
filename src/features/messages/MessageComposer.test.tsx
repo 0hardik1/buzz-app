@@ -19981,6 +19981,23 @@ it("in a Solo chat with agents only, a group further in the draft joins the tool
     tags: [first.pubkey, second.pubkey, cam.pubkey],
   });
 });
+it("in a Solo chat with agents only, a group that opens the draft is for its members alone when the first is outside the chat", async () => {
+  const { h, sendingTo } = mountSoloAgents();
+  await choicesLoaded();
+  h.fill("!Crew");
+  offerCrew(h, [
+    { pubkey: "d".repeat(64), name: "Cy" },
+    { pubkey: second.pubkey, name: "Bea" },
+  ]);
+  await h.user.keyboard("{Enter}");
+  act(() => void h.commands().insertText("hi"));
+  expect(sendingTo("Bea")).toBeInTheDocument();
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "@Crew hi",
+    tags: [second.pubkey],
+  });
+});
 it.each([
   ["picked", 0],
   ["saved in a draft", 1],
