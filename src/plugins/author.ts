@@ -39,6 +39,8 @@ export type {
   PluginDialogProps,
   PluginFieldProps,
   PluginInputProps,
+  PluginMenuItem,
+  PluginMenuProps,
   PluginSwitchProps,
   PluginUi,
 } from "../features/plugin-ui/contract";
@@ -252,6 +254,7 @@ export type {
   SoloWorkspaceSnapshot,
   SoloWorkspaceProps,
   SoloChannelGroupProps,
+  SoloHeaderMenuAction,
   SoloRegionBinding,
   SoloRegionSnapshot,
   SoloRegionAction,

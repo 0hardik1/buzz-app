@@ -55,6 +55,11 @@ export function apply(ctx: Context) {
   const seen: Seen | undefined = ctx.reflect.get("seen");
   const key = "example.plugin/welcome";
   if (seen?.has(key) === false) seen.mark(key);
+  const relaySession = ctx.relay.snapshot().session;
+  if (relaySession.supportsMigrationWrites === true) {
+    void relaySession.channelCreation.create({ name: "Imported", visibility: "private", migration: "example-import" });
+    void relaySession.memberAdditions.add("channel", "person", { migration: "example-import" });
+  }
   const sharingPolicy: GeneralAccessPolicy = { subject: "record", allowPublic: false, visibilityDescription: () => "Record access changes." };
   const general: ChannelGeneralAccessProps = { capability: ctx.relay.snapshot().session.channelDetails, channelId: "record", policy: sharingPolicy };
   const picker: ChannelMembersDialogProps = { session: ctx.relay.snapshot().session, channelId: "record", trigger: { current: null }, close() {},
@@ -88,6 +93,11 @@ export function apply(ctx: Context) {
     void createElement(ui.Switch, { label: "Alerts", onCheckedChange: (checked: boolean) => void checked });
     // @ts-expect-error Internal and legacy variants are not part of the plugin contract.
     void createElement(ui.Button, { variant: "glass", children: "Glass" });
+    // @ts-expect-error Menu is missing on hosts from before it was added and must be checked.
+    void createElement(ui.Menu, { "aria-label": "More", items: [] });
+    if (ui.Menu)
+      void createElement(ui.Menu, { "aria-label": "More", align: "end",
+        items: [{ label: "Dismiss", tone: "destructive", onSelect: () => {} }] });
   }
   const unread: UnreadCapability = ctx.relay.snapshot().session.unread;
   const conversations: ReturnType<UnreadCapability["inbox"]> = unread.inbox();
