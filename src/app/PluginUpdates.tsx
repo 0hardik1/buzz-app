@@ -109,11 +109,12 @@ export function PluginUpdates({
     [navigation],
   );
   useEffect(() => {
+    const online = () => navigator.onLine !== false;
     const updates = createPluginUpdates(
       plugins,
       async (repository) =>
         (await relay.snapshot().session.authorizeGit?.(repository)) ?? null,
-      () => navigator.onLine !== false,
+      online,
     );
     setStore(updates);
     const unregisterUpdates = installRequests.registerUpdates(updates);
@@ -132,7 +133,7 @@ export function PluginUpdates({
     const check = async (force = false) => {
       clearTimeout(timer);
       if (!ready()) return;
-      if (reconnect && running === 0) {
+      if (reconnect && running === 0 && online()) {
         reconnect = false;
         force ||= failed();
       }
@@ -142,7 +143,7 @@ export function PluginUpdates({
       if (localDelay !== undefined) timer = setTimeout(scheduled, localDelay);
       const delay = await pending;
       if (disposed || !ready()) return;
-      if (reconnect) {
+      if (reconnect && online()) {
         reconnect = false;
         if (failed()) return check(true);
       }
