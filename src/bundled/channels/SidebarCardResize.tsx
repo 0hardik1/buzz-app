@@ -46,6 +46,7 @@ function savedSizes(scope: string): Record<string, number> {
  *
  * A card never sized shows everything, like the earlier sidebar, until the
  * tour's "Tidy it up" trims it to the default. "Stay messy" keeps it full.
+ * Solo was already trimmed before, so it keeps the default either way.
  */
 export function useSidebarCardSize(scope: string, card: string) {
   const seen = useSeen();
@@ -58,7 +59,7 @@ export function useSidebarCardSize(scope: string, card: string) {
     () =>
       seen?.has(sidebarTourKey) === false || seen?.has(stayMessyKey) === true,
   );
-  const size = saved ?? (untidy ? ALL : undefined);
+  const size = saved ?? (untidy && card !== "solo" ? ALL : undefined);
   const resize = (next: number | undefined) => {
     const { [card]: _, ...rest } = savedSizes(scope);
     writeView(
