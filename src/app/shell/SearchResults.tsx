@@ -1578,11 +1578,7 @@ export function SearchResults({
       detail: [
         person.fullName,
         person.username && `@${person.username}`,
-        newSession
-          ? "New chat"
-          : dm
-            ? "Direct message"
-            : "Start a direct message",
+        newSession ? "New message" : dm ? "Direct message" : "New message",
       ]
         .filter(Boolean)
         .join(" · "),
@@ -1954,7 +1950,7 @@ export function SearchResults({
           icon: RobotIcon,
           trailing: (
             <span className="search-peek-start text-body-sm text-subtle">
-              Start chat{" "}
+              New message{" "}
               <span aria-hidden="true">
                 <kbd>↵</kbd>
               </span>
@@ -2317,15 +2313,15 @@ export function SearchResults({
             showDateChoices
               ? { label: "Dates", destinations: dateChoices }
               : {
-                  label: "Channels",
+                  label: "Conversations",
                   destinations: channelChoices,
-                  empty: "No matching channels.",
+                  empty: "No matching conversations.",
                 },
           ]
         : asking
           ? [
               {
-                label: `New chat with ${askAgent?.name ?? "your agent"}`,
+                label: `New message to ${askAgent?.name ?? "your agent"}`,
                 icon: RobotIcon,
                 tone: "agent",
                 multiline: true,
