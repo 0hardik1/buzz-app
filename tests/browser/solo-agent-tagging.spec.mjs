@@ -92,8 +92,13 @@ test("a Solo chat alone with an agent tags it while a background read-state snap
   // Diagnostic: where Retry's pointer events land and which inventory reads
   // follow. Synthetic fields only; attached before the snapshot is released.
   const inventoryReads = [];
+  let inventoryDropped = 0;
   const observeInventory = (request) => {
     if (!query(request) || !isInventory(request.postDataJSON())) return;
+    if (inventoryReads.length >= 32) {
+      inventoryDropped++;
+      return;
+    }
     const read = {
       relay: request.url().includes("/api/relay/primary/")
         ? "primary"
@@ -149,8 +154,13 @@ test("a Solo chat alone with an agent tags it while a background read-state snap
     page.on("request", observeInventory);
     await page.evaluate(() => {
       const events = [];
-      window.__retryDiagnostic = events;
+      let dropped = 0;
+      const types = ["pointerdown", "pointerup", "click"];
       const record = (event) => {
+        if (events.length >= 64) {
+          dropped++;
+          return;
+        }
         const retry = [...document.querySelectorAll("button")].find(
           (button) => button.textContent === "Retry agent list",
         );
@@ -180,8 +190,14 @@ test("a Solo chat alone with an agent tags it while a background read-state snap
           searching: status,
         });
       };
-      for (const type of ["pointerdown", "pointerup", "click"])
+      for (const type of types)
         document.addEventListener(type, record, { capture: true });
+      window.__retryDiagnostic = () => {
+        for (const type of types)
+          document.removeEventListener(type, record, { capture: true });
+        delete window.__retryDiagnostic;
+        return { events, dropped };
+      };
     });
     retryBox = await retry.boundingBox();
     await retry.click();
@@ -193,12 +209,13 @@ test("a Solo chat alone with an agent tags it while a background read-state snap
     // and the snapshot is released whatever happens to it.
     try {
       page.off("request", observeInventory);
+      // Detaching the listeners also returns what they recorded.
       const pointer = await page
-        .evaluate(() => window.__retryDiagnostic ?? null)
+        .evaluate(() => window.__retryDiagnostic?.() ?? null)
         .catch((error) => ({ unavailable: String(error).slice(0, 120) }));
       await testInfo.attach("retry-diagnostic", {
         body: JSON.stringify(
-          { inventoryReads, retryBox, pointer, refused },
+          { inventoryReads, inventoryDropped, retryBox, pointer, refused },
           null,
           2,
         ),
