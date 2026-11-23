@@ -190,6 +190,23 @@ it("reads a full host as no own setup outside a turn", async () => {
   await expect(auth.check()).resolves.toBeUndefined();
 });
 
+it("counts a device-list key for ordinary agents, after the person's own setup", async () => {
+  store(false);
+  state.agentEnv.set("", ["ANTHROPIC_API_KEY"]);
+  await expect(new ClaudeAuth(host().spawn).check()).resolves.toEqual({});
+  // The person's own sign-in still wins: Claude starts without a key.
+  const own = host({ loggedIn: true });
+  const signedIn = new ClaudeAuth(own.spawn);
+  await expect(signedIn.check()).resolves.toEqual({});
+  expect(signedIn.usesOwnSetup).toBe(true);
+  await signedIn.authorize(own.spawn, true)("claude", { env: ENV });
+  expect(own.started).toEqual([{ id: "claude", options: { env: ENV } }]);
+  // Security reviews still need the saved key.
+  await expect(new ClaudeAuth(host().spawn).review()).rejects.toThrow();
+  state.agentEnv.clear();
+  await expect(new ClaudeAuth(host().spawn).check()).resolves.toBeUndefined();
+});
+
 it("asks again until a key is saved, then once until it is saved or checked", async () => {
   const { spawn } = host();
   store(false);

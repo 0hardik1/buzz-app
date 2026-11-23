@@ -98,7 +98,12 @@ async function queryModels(spawn: Spawn, signal: AbortSignal) {
     process = await ClaudeProcess.start(
       async (id, options) => {
         request.signal.throwIfAborted();
-        child = await spawn(id, options);
+        // As an ordinary agent's, with the device's variables, so a key kept
+        // only there lists its models. A review never comes this way.
+        child = await spawn(id, {
+          ...options,
+          secrets: [...(options?.secrets ?? []), "agent-env"],
+        });
         if (request.signal.aborted) await child.kill();
         request.signal.throwIfAborted();
         return child;

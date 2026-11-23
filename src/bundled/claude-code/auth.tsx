@@ -234,13 +234,14 @@ export class ClaudeAuth {
   }
 
   /** Whether Claude can run turns: an account to show, or undefined. The
-   * person's own setup comes first, so a saved key never overrides it. */
+   * person's own setup comes first, so a key never overrides it; then the
+   * saved key, or the device list's, which ordinary agents start with. */
   async check(): Promise<Connection | undefined> {
     this.saved = undefined;
     this.own = undefined;
     const own = await this.settled();
     if (own) return own;
-    return (await this.has()) ? {} : undefined;
+    return (await this.has()) || (await deviceSetsKey()) ? {} : undefined;
   }
 
   /** What Settings needs, asked again: whether the person has a setup of
@@ -351,6 +352,10 @@ export class ClaudeAuth {
       : error;
   }
 }
+
+/** Whether the device's variables set an Anthropic API key. */
+const deviceSetsKey = async () =>
+  !!(await deviceEnvNames())?.includes("ANTHROPIC_API_KEY");
 
 /** Whether the device's variables or the local agent's own set an Anthropic
  * API key, which native code gives its `claude` in place of the saved one. */

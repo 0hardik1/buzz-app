@@ -86,7 +86,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.agentProtection.registerModels({
     label: "Goose",
     models: async () => {
-      const { providers } = await setup.providers();
+      // Read afresh, and as the review worker sees goose: without the
+      // device's variables, which it never gets.
+      const review = new GooseSetup(desktop, undefined, false);
+      const { providers } = await review.providers();
       const listed = await Promise.allSettled(
         providers
           .filter(
@@ -94,7 +97,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
               provider.configured && !REVIEW_REFUSED.has(provider.id),
           )
           .map(async (provider) =>
-            (await setup.models(provider.id)).map((model) => ({
+            (await review.models(provider.id)).map((model) => ({
               provider: provider.id,
               id: model.id,
               label: `${provider.name} · ${model.label}`,

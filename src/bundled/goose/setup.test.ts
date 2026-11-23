@@ -956,6 +956,21 @@ describe("GooseSetup", () => {
     }
   });
 
+  it("discovers review models without the device's environment variables", async () => {
+    const fake = fakeSpawn();
+    const asked: Parameters<Spawn>[1][] = [];
+    const spawn: Spawn = async (id, options) => {
+      if (id === "goose") asked.push(options);
+      return fake.spawn(id, options);
+    };
+    const review = new GooseSetup({ ...fake, spawn }, undefined, false);
+    const { providers } = await review.providers();
+    for (const provider of providers.filter((item) => item.configured))
+      await review.models(provider.id);
+    expect(asked.length).toBeGreaterThan(0);
+    for (const options of asked) expect(options).not.toHaveProperty("secrets");
+  });
+
   it("says when the bundled goose-acp is missing", async () => {
     const fake = fakeSpawn();
     const spawn: Spawn = async (id, options) => {
