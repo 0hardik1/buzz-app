@@ -19948,6 +19948,39 @@ it("in a Solo chat with agents only, a group of people outside it whose label st
     tags: [first.pubkey],
   });
 });
+it("in a Solo chat with agents only, a group further in the draft joins the toolbar's agent", async () => {
+  const cam = { pubkey: "f".repeat(64), name: "Cam" };
+  writeView(
+    "scope",
+    "draft:channel",
+    typedDraft(
+      savedCrew("Plan this, then ask @Crew", "Crew", [
+        { pubkey: second.pubkey, name: "Bea" },
+        cam,
+      ]),
+    ),
+  );
+  const { h, ada, sendingTo } = mountSoloAgents({
+    members: [first.pubkey, second.pubkey, cam.pubkey],
+    unpicked: true,
+  });
+  h.setLibrary([first, second, cam]);
+  h.setProfiles(
+    new Map([
+      [first.pubkey, { name: "Ada", isAgent: true }],
+      [second.pubkey, { name: "Bea", isAgent: true }],
+      [cam.pubkey, { name: "Cam", isAgent: true }],
+    ]),
+  );
+  await choicesLoaded();
+  act(() => h.commands().audience?.only([ada]));
+  expect(sendingTo("Ada, Bea, Cam")).toBeInTheDocument();
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "Plan this, then ask @Crew",
+    tags: [first.pubkey, second.pubkey, cam.pubkey],
+  });
+});
 it.each([
   ["picked", 0],
   ["saved in a draft", 1],
