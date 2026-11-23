@@ -40,6 +40,18 @@ async function refreshBackground(page) {
     document.dispatchEvent(new Event("visibilitychange")),
   );
 }
+async function dismissUpdateNotice(page, name) {
+  const notice = page.getByRole("dialog", {
+    name: `Update ${name}`,
+    exact: true,
+  });
+  const toast = page.locator("[data-sonner-toast]").filter({ has: notice });
+  await expect(toast).toHaveAttribute("data-mounted", "true");
+  await animationsSettled(toast, { subtree: true });
+  await toast.hover();
+  await button(notice, "Dismiss plugin update notice").click();
+  await expect(notice).toBeHidden();
+}
 // Native IPC is the boundary fixture; Settings -> manager -> platform adapter are production.
 async function nativeImports(
   page,
@@ -2051,13 +2063,7 @@ for (const source of ["folder", "git"]) {
     });
     await refreshBackground(page);
     await expect.poll(sourceReads).toBe(2);
-    if (source === "git")
-      await expect(
-        page.getByRole("dialog", {
-          name: "Update Refresh example",
-          exact: true,
-        }),
-      ).toBeVisible();
+    if (source === "git") await dismissUpdateNotice(page, "Refresh example");
     const readsBeforeOpen = await sourceReads();
     await openSettings(page);
     await selectSettingsSection(page, "Manage plugins");
@@ -2080,8 +2086,6 @@ for (const source of ["folder", "git"]) {
           ).length,
       ),
     ).toBe(1);
-    if (source === "git")
-      await button(page, "Dismiss plugin update notice").click();
     await button(page, "Update Refresh example").click();
     await expect(
       page.getByRole("dialog", { name: "Update Refresh example", exact: true }),
@@ -2152,6 +2156,7 @@ test("a background Git update refreshes an already open details pane", async ({
     pane.getByRole("button", { name: "Update", exact: true }),
   ).toBeVisible();
   await expect(pane.getByText("Up to date", { exact: true })).toHaveCount(0);
+  await dismissUpdateNotice(page, "Refresh example");
   await button(page, "Close plugin details").click();
   await expect(button(page, "Update Refresh example")).toBeVisible();
 });
