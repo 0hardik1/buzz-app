@@ -1,5 +1,5 @@
+import { animate, useReducedMotion } from "motion/react";
 import {
-  SidebarFilterButton,
   SidebarViewMenuItems,
   type SidebarViewFilter,
   type SidebarViewSort,
@@ -28,7 +28,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CaretDownIcon,
-  CaretLeftIcon,
   DotsThreeIcon,
   PlusIcon,
   TrashIcon,
@@ -39,21 +38,12 @@ import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
-import {
-  NavigationItem,
-  markNavigationArrival,
-} from "../../shared/design-system/ui/NavigationItem";
-import {
-  setSidebarSeeAll,
-  takeSidebarSeeAllScroll,
-  useSidebarSeeAll,
-  useSidebarSeeAllReturning,
-} from "./useSidebarSeeAll";
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
-import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
+import { SidebarCardResize, sidebarHeightSpring } from "./SidebarCardResize";
+import { isWorkspaceCard } from "./sidebar-sections";
 import {
   SidebarCardDisplayContext,
   useSidebarCardDisplay,
@@ -91,6 +81,7 @@ export function SidebarSection({
   channelCount,
   removalFocus,
   heightScope,
+  excludedRows,
   iconView = false,
   rename,
   children,
@@ -114,8 +105,10 @@ export function SidebarSection({
   /** Keep the disclosure affordance visible instead of revealing it on hover. */
   channelCount?: number | undefined;
   removalFocus?: (() => HTMLElement | null | undefined) | undefined;
-  /** Where a card remembers the height its grip was left at; omit to fit. */
+  /** Scope for this card's view preferences. */
   heightScope?: string | undefined;
+  /** Rows the grip may reveal beyond the current filter. */
+  excludedRows?: (() => ReactNode) | undefined;
   /** Offer showing the card's rows as identity tiles instead of names. */
   iconView?: boolean;
   createChannel?:
@@ -166,13 +159,23 @@ export function SidebarSection({
   children: ReactNode;
 }) {
   const id = useId();
-  const cancelRemove = useRef<HTMLButtonElement>(null);
-  const actionsTrigger = useRef<HTMLButtonElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const workspace = isWorkspaceCard(sectionKey);
   const [display, setDisplay] = useSidebarCardDisplay(
     iconView ? heightScope : undefined,
     sectionKey,
   );
+  const body = useRef<HTMLDivElement>(null);
+  const minimize = () => {
+    const content = body.current;
+    if (content?.contains(document.activeElement))
+      content.parentElement
+        ?.querySelector<HTMLElement>(`summary[aria-controls="${id}"]`)
+        ?.focus({ preventScroll: true });
+    onToggle(false);
+  };
+  const cancelRemove = useRef<HTMLButtonElement>(null);
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const unreadsFirst = useSidebarUnreadsFirst(heightScope)(sectionKey);
   // The menu unmounts while hidden, so it must not reopen when shown again.
   const unreadsFirstChoice = heightScope
@@ -189,29 +192,6 @@ export function SidebarSection({
   const showMenu = !hideMoreActions || viewChoices;
   if (!showMenu && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
-  const seeingAll = useSidebarSeeAll() === sectionKey;
-  const returning = useSidebarSeeAllReturning();
-  const back = useRef<HTMLButtonElement>(null);
-  // Going in or back, focus follows to the other level's control.
-  const focusBack = useRef(false);
-  useEffect(() => {
-    if (seeingAll && focusBack.current) back.current?.focus();
-    focusBack.current = false;
-  }, [seeingAll]);
-  // Going in starts the card at its top; Back returns the main level to where
-  // it was scrolled, then marks the See all the reader came from.
-  const wasSeeingAll = useRef(seeingAll);
-  useLayoutEffect(() => {
-    const was = wasSeeingAll.current;
-    wasSeeingAll.current = seeingAll;
-    if (was === seeingAll) return;
-    const scroller = sidebarScroller(sectionKey);
-    if (seeingAll) {
-      if (scroller) scroller.scrollTop = 0;
-      return;
-    }
-    return arriveFromSeeAll(sectionKey, scroller, takeSidebarSeeAllScroll());
-  }, [seeingAll, sectionKey]);
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
   const [removing, setRemoving] = useState(false);
@@ -230,335 +210,338 @@ export function SidebarSection({
       setRemoving(false);
     }
   };
+  const renderBody = (content: ReactNode) => (
+    <SidebarSectionBody id={id} body={body} open={open} workspace={workspace}>
+      {content}
+    </SidebarSectionBody>
+  );
   return (
-    <>
-      {/* Back is its own card above the one it returns from. */}
-      {seeingAll && (
-        <div
-          className={styles.channelSection}
-          data-sidebar-card=""
-          data-see-all=""
-          data-see-all-returning={returning || undefined}
-        >
-          <NavigationItem
-            ref={back}
-            data-see-all-back=""
-            icon={<CaretLeftIcon size={14} />}
-            label="Back"
-            aria-label="Back to all cards"
-            onClick={() => setSidebarSeeAll(undefined)}
-          />
-        </div>
-      )}
-      <div
-        ref={dropRef}
-        className={styles.channelSection}
-        data-sidebar-card=""
-        data-sidebar-section={sectionKey}
-        data-drop-target={dropTarget || undefined}
-        data-drop-edge={dropEdge}
-        data-section-dragging={dragging || undefined}
-        data-menu-open={menuOpen || undefined}
-        data-see-all={seeingAll || undefined}
-        data-see-all-returning={returning || undefined}
-      >
-        <NavigationSectionHeading
-          disclosure
-          revealActions
-          actions={
-            <>
-              {showMenu && (
-                <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
-                  <MenuTrigger
-                    ref={actionsTrigger}
-                    render={(props) => (
-                      <IconButton
-                        {...props}
-                        size="compact"
-                        aria-label={`More actions for ${title}`}
-                        icon={<DotsThreeIcon strokeWidth={2.5} size={15} />}
-                      />
-                    )}
-                  />
-                  <MenuPopup
-                    align="end"
-                    aria-label={`More actions for ${title}`}
-                  >
-                    <SidebarViewMenuItems
-                      title={title}
-                      filter={filter}
-                      sort={sort}
-                      unreadsFirst={unreadsFirstChoice}
-                      display={displayChoice}
+    <div
+      ref={dropRef}
+      className={styles.channelSection}
+      data-sidebar-card=""
+      data-sidebar-workspace={workspace || undefined}
+      data-sidebar-section={sectionKey}
+      data-drop-target={dropTarget || undefined}
+      data-drop-edge={dropEdge}
+      data-section-dragging={dragging || undefined}
+      data-menu-open={menuOpen || undefined}
+    >
+      <NavigationSectionHeading
+        disclosure
+        revealActions
+        actions={
+          <>
+            {showMenu && (
+              <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
+                <MenuTrigger
+                  ref={actionsTrigger}
+                  render={(props) => (
+                    <IconButton
+                      {...props}
+                      size="compact"
+                      aria-label={`More actions for ${title}`}
+                      icon={<DotsThreeIcon strokeWidth={2.5} size={15} />}
                     />
-                    {viewChoices &&
-                      !hideMoreActions &&
-                      (createSection || move || menuActions) && (
-                        <MenuSeparator />
-                      )}
-                    {!hideMoreActions && createSection && (
+                  )}
+                />
+                <MenuPopup align="end" aria-label={`More actions for ${title}`}>
+                  <SidebarViewMenuItems
+                    title={title}
+                    filter={filter}
+                    sort={sort}
+                    unreadsFirst={unreadsFirstChoice}
+                    display={displayChoice}
+                  />
+                  {viewChoices &&
+                    !hideMoreActions &&
+                    (createSection || move || menuActions) && <MenuSeparator />}
+                  {!hideMoreActions && createSection && (
+                    <MenuItem
+                      disabled={!createSection.available}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (actionsTrigger.current)
+                          createSection.open(actionsTrigger.current);
+                      }}
+                    >
+                      <MenuIcon>
+                        <PlusIcon size={14} />
+                      </MenuIcon>
+                      Create workspace
+                    </MenuItem>
+                  )}
+                  {!hideMoreActions && move && (
+                    <>
                       <MenuItem
-                        disabled={!createSection.available}
+                        disabled={!move.up}
                         onClick={() => {
+                          move.up?.();
                           setMenuOpen(false);
-                          if (actionsTrigger.current)
-                            createSection.open(actionsTrigger.current);
                         }}
                       >
                         <MenuIcon>
-                          <PlusIcon size={14} />
+                          <ArrowUpIcon size={14} />
                         </MenuIcon>
-                        Create workspace
+                        Move up
                       </MenuItem>
-                    )}
-                    {!hideMoreActions && move && (
-                      <>
-                        <MenuItem
-                          disabled={!move.up}
-                          onClick={() => {
-                            move.up?.();
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <MenuIcon>
-                            <ArrowUpIcon size={14} />
-                          </MenuIcon>
-                          Move up
-                        </MenuItem>
-                        <MenuItem
-                          disabled={!move.down}
-                          onClick={() => {
-                            move.down?.();
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <MenuIcon>
-                            <ArrowDownIcon size={14} />
-                          </MenuIcon>
-                          Move down
-                        </MenuItem>
-                      </>
-                    )}
-                    {!hideMoreActions &&
-                      menuActions?.(() => setMenuOpen(false), actionsTrigger)}
-
-                    {!hideMoreActions && canRemove && (
-                      <>
-                        <MenuSeparator />
-                        <MenuItem
-                          tone="danger"
-                          onClick={() => {
-                            setRemoveError("");
-                            setMenuOpen(false);
-                            setRemoveOpen(true);
-                          }}
-                        >
-                          <MenuIcon>
-                            <TrashIcon size={14} />
-                          </MenuIcon>
-                          Remove workspace
-                        </MenuItem>
-                      </>
-                    )}
-                  </MenuPopup>
-                </MenuRoot>
-              )}
-              {filter && <SidebarFilterButton title={title} filter={filter} />}
-              {headerActions}
-              {newMessage && (
-                <IconButton
-                  hint="familiar"
-                  size="compact"
-                  aria-label="New message"
-                  title="New message"
-                  onClick={newMessage}
-                  icon={<PlusIcon strokeWidth={2.5} size={15} />}
-                />
-              )}
-              {canRemove && (
-                <Dialog
-                  size="compact"
-                  open={removeOpen}
-                  onOpenChange={setRemoveOpen}
-                  dismissOnOutsideClick
-                  preventClose={removing}
-                  initialFocus={cancelRemove}
-                  finalFocus={() =>
-                    actionsTrigger.current?.isConnected
-                      ? actionsTrigger.current
-                      : (removalFocus?.() ?? false)
-                  }
-                  title={`Remove ${title}?`}
-                  description={`${channelCount === undefined ? "Assigned conversations" : `${channelCount} ${channelCount === 1 ? "conversation" : "conversations"}`} will return to their default sections.`}
-                  actions={
-                    <>
-                      <Button
-                        ref={cancelRemove}
-                        type="button"
-                        disabled={removing}
-                        onClick={() => setRemoveOpen(false)}
+                      <MenuItem
+                        disabled={!move.down}
+                        onClick={() => {
+                          move.down?.();
+                          setMenuOpen(false);
+                        }}
                       >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        loading={removing}
-                        onClick={() => void remove()}
-                      >
-                        Remove workspace
-                      </Button>
+                        <MenuIcon>
+                          <ArrowDownIcon size={14} />
+                        </MenuIcon>
+                        Move down
+                      </MenuItem>
                     </>
-                  }
-                >
-                  {removeError && <p role="alert">{removeError}</p>}
-                  {removing && (
-                    <p role="status" className="sr-only">
-                      Removing section and waiting for confirmation…
-                    </p>
                   )}
-                </Dialog>
-              )}
-              {createChannel && (
-                <IconButton
-                  size="compact"
-                  aria-label="Create channel"
-                  title={
-                    createChannel.available
-                      ? "Create channel"
-                      : "Channel creation unavailable"
-                  }
-                  disabled={!createChannel.available}
-                  onClick={(event) => createChannel.open(event.currentTarget)}
-                  icon={<PlusIcon strokeWidth={2.5} size={15} />}
-                />
-              )}
-            </>
-          }
-        >
-          {rename?.editing ? (
-            <SectionNameEditor
-              title={title}
-              save={rename.save}
-              stop={rename.stop}
-            />
-          ) : (
-            <details open={open}>
-              {/* biome-ignore lint/a11y/noStaticElementInteractions: summary has native keyboard activation. */}
-              <summary
-                ref={dragHandle?.ref}
-                tabIndex={0}
-                {...dragHandle?.listeners}
-                aria-label={title}
-                aria-controls={id}
-                onClick={(event) => {
-                  event.preventDefault();
-                  clearTimeout(pendingToggle.current);
-                  // Keyboard activation has no click count and toggles at once.
-                  if (!rename || event.detail === 0) onToggle(!open);
-                  else if (event.detail === 1)
-                    pendingToggle.current = setTimeout(
-                      () => onToggle(!open),
-                      DOUBLE_CLICK_MS,
-                    );
-                }}
-                onDoubleClick={
-                  rename &&
-                  ((event) => {
-                    event.preventDefault();
-                    clearTimeout(pendingToggle.current);
-                    rename.start();
-                  })
+                  {!hideMoreActions &&
+                    menuActions?.(() => setMenuOpen(false), actionsTrigger)}
+
+                  {!hideMoreActions && canRemove && (
+                    <>
+                      <MenuSeparator />
+                      <MenuItem
+                        tone="danger"
+                        onClick={() => {
+                          setRemoveError("");
+                          setMenuOpen(false);
+                          setRemoveOpen(true);
+                        }}
+                      >
+                        <MenuIcon>
+                          <TrashIcon size={14} />
+                        </MenuIcon>
+                        Remove workspace
+                      </MenuItem>
+                    </>
+                  )}
+                </MenuPopup>
+              </MenuRoot>
+            )}
+            {headerActions}
+            {newMessage && (
+              <IconButton
+                hint="familiar"
+                size="compact"
+                aria-label="New message"
+                title="New message"
+                onClick={newMessage}
+                icon={<PlusIcon strokeWidth={2.5} size={15} />}
+              />
+            )}
+            {canRemove && (
+              <Dialog
+                size="compact"
+                open={removeOpen}
+                onOpenChange={setRemoveOpen}
+                dismissOnOutsideClick
+                preventClose={removing}
+                initialFocus={cancelRemove}
+                finalFocus={() =>
+                  actionsTrigger.current?.isConnected
+                    ? actionsTrigger.current
+                    : (removalFocus?.() ?? false)
+                }
+                title={`Remove ${title}?`}
+                description={`${channelCount === undefined ? "Assigned conversations" : `${channelCount} ${channelCount === 1 ? "conversation" : "conversations"}`} will return to their default sections.`}
+                actions={
+                  <>
+                    <Button
+                      ref={cancelRemove}
+                      type="button"
+                      disabled={removing}
+                      onClick={() => setRemoveOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      loading={removing}
+                      onClick={() => void remove()}
+                    >
+                      Remove workspace
+                    </Button>
+                  </>
                 }
               >
-                <span className={styles.sectionLabel}>
-                  {sectionKey === "starred" ? (
-                    <SidebarStarIcon />
-                  ) : typeof icon === "string" && session ? (
-                    <SidebarGroupIcon icon={icon} session={session} />
-                  ) : (
-                    icon
-                  )}
-                  <FadingLabel className={styles.sectionTitle}>
-                    {title}
-                  </FadingLabel>
-                </span>
-                <span
-                  className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
-                  data-navigation-reveal=""
-                >
-                  <CaretDownIcon strokeWidth={2.5} size={15} />
-                </span>
-              </summary>
-            </details>
-          )}
-        </NavigationSectionHeading>
-        {headerNotice}
-        <div
-          id={id}
-          className={styles.sectionContent}
-          inert={!open}
-          hidden={!open}
-        >
-          {display === "icons" ? (
-            // Tiles wrap, so a card of them shows every row and has no grip.
-            <div className={styles.cardTiles} data-card-display="icons">
-              <SidebarCardDisplayContext.Provider value="icons">
-                {children}
-              </SidebarCardDisplayContext.Provider>
-            </div>
-          ) : heightScope ? (
-            <ResizableRows
-              scope={heightScope}
-              card={sectionKey}
-              label={title}
-              seeAll={{
-                full: seeingAll,
-                hidden: !!channels?.rows.length,
-                open: () => {
-                  focusBack.current = true;
-                  setSidebarSeeAll(
-                    sectionKey,
-                    sidebarScroller(sectionKey)?.scrollTop,
+                {removeError && <p role="alert">{removeError}</p>}
+                {removing && (
+                  <p role="status" className="sr-only">
+                    Removing section and waiting for confirmation…
+                  </p>
+                )}
+              </Dialog>
+            )}
+            {createChannel && (
+              <IconButton
+                size="compact"
+                aria-label="Create channel"
+                title={
+                  createChannel.available
+                    ? "Create channel"
+                    : "Channel creation unavailable"
+                }
+                disabled={!createChannel.available}
+                onClick={(event) => createChannel.open(event.currentTarget)}
+                icon={<PlusIcon strokeWidth={2.5} size={15} />}
+              />
+            )}
+          </>
+        }
+      >
+        {rename?.editing ? (
+          <SectionNameEditor
+            title={title}
+            save={rename.save}
+            stop={rename.stop}
+          />
+        ) : (
+          <details open={open}>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: summary has native keyboard activation. */}
+            <summary
+              ref={dragHandle?.ref}
+              tabIndex={0}
+              {...dragHandle?.listeners}
+              aria-label={title}
+              aria-controls={id}
+              onClick={(event) => {
+                event.preventDefault();
+                clearTimeout(pendingToggle.current);
+                // Keyboard activation has no click count and toggles at once.
+                if (!rename || event.detail === 0) onToggle(!open);
+                else if (event.detail === 1)
+                  pendingToggle.current = setTimeout(
+                    () => onToggle(!open),
+                    DOUBLE_CLICK_MS,
                   );
-                },
               }}
+              onDoubleClick={
+                rename &&
+                ((event) => {
+                  event.preventDefault();
+                  clearTimeout(pendingToggle.current);
+                  rename.start();
+                })
+              }
             >
+              <span className={styles.sectionLabel}>
+                {sectionKey === "starred" ? (
+                  <SidebarStarIcon />
+                ) : typeof icon === "string" && session ? (
+                  <SidebarGroupIcon icon={icon} session={session} />
+                ) : (
+                  icon
+                )}
+                <FadingLabel className={styles.sectionTitle}>
+                  {title}
+                </FadingLabel>
+              </span>
+              <span
+                className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
+                aria-hidden="true"
+                data-navigation-reveal={workspace ? undefined : ""}
+              >
+                <CaretDownIcon strokeWidth={2.5} size={15} />
+              </span>
+            </summary>
+          </details>
+        )}
+      </NavigationSectionHeading>
+      {headerNotice}
+      {display === "icons" ? (
+        // Tiles wrap, so a card of them shows every row and has no grip.
+        renderBody(
+          <div className={styles.cardTiles} data-card-display="icons">
+            <SidebarCardDisplayContext.Provider value="icons">
               {children}
-            </ResizableRows>
-          ) : (
-            <div>{children}</div>
-          )}
-        </div>
-      </div>
-    </>
+            </SidebarCardDisplayContext.Provider>
+          </div>,
+        )
+      ) : workspace && heightScope ? (
+        <SidebarCardResize
+          key={heightScope}
+          label={title}
+          controls={id}
+          open={open}
+          onMinimize={minimize}
+          onExpand={() => onToggle(true)}
+          renderBody={renderBody}
+          excludedRows={excludedRows}
+          excludedCount={channels?.rows.length ?? 0}
+        >
+          {children}
+        </SidebarCardResize>
+      ) : (
+        renderBody(<div>{children}</div>)
+      )}
+    </div>
   );
 }
 
-function ResizableRows({
-  scope,
-  card,
-  label,
-  seeAll,
+function SidebarSectionBody({
+  id,
+  body,
+  open,
+  workspace,
   children,
 }: {
-  scope: string;
-  card: string;
-  label: string;
-  seeAll: { full: boolean; hidden: boolean; open(): void };
+  id: string;
+  body: RefObject<HTMLDivElement | null>;
+  open: boolean;
+  workspace: boolean;
   children: ReactNode;
 }) {
-  const [height, resize, toggle] = useSidebarCardHeight(scope, card);
+  const reducedMotion = useReducedMotion();
+  const springWorkspace = workspace && !reducedMotion;
+  const bodyContents = useRef<HTMLDivElement>(null);
+  const lastOpen = useRef<boolean>(undefined);
+  const workspaceSpring = useRef<ReturnType<typeof animate>>(undefined);
+  useLayoutEffect(() => {
+    const element = body.current;
+    const contents = bodyContents.current;
+    if (!element || !contents) return;
+    const previous = lastOpen.current;
+    lastOpen.current = springWorkspace ? open : undefined;
+    const finish = () => {
+      element.hidden = !open;
+      element.style.height = springWorkspace && !open ? "0px" : "";
+      element.style.overflow = springWorkspace && !open ? "clip" : "";
+    };
+    const from = element.getBoundingClientRect().height;
+    workspaceSpring.current?.stop();
+    if (!springWorkspace || previous === undefined || previous === open) {
+      finish();
+      return;
+    }
+    element.hidden = false;
+    const to = open ? contents.getBoundingClientRect().height : 0;
+    element.style.height = `${from}px`;
+    element.style.overflow = "clip";
+    workspaceSpring.current = animate(
+      element,
+      { height: `${to}px` },
+      { ...sidebarHeightSpring, onComplete: finish },
+    );
+  }, [open, springWorkspace, body]);
+  useEffect(() => () => workspaceSpring.current?.stop(), []);
   return (
-    <SidebarCardResize
-      label={label}
-      height={height}
-      onResize={resize}
-      onToggle={toggle}
-      seeAll={seeAll}
+    <div
+      id={id}
+      ref={body}
+      className={styles.sectionContent}
+      inert={!open}
+      hidden={!springWorkspace && !open}
     >
-      {children}
-    </SidebarCardResize>
+      <div ref={bodyContents} className={styles.sectionBody}>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -651,60 +634,4 @@ function SectionNameEditor({
       </Field>
     </form>
   );
-}
-
-function sidebarCard(sectionKey: string) {
-  return document.querySelector<HTMLElement>(
-    `[data-sidebar-section="${CSS.escape(sectionKey)}"]`,
-  );
-}
-
-function sidebarScroller(sectionKey: string) {
-  return (
-    sidebarCard(sectionKey)?.closest<HTMLElement>("[data-scroll-fade]") ?? null
-  );
-}
-
-/** How long Back waits for the card's See all row before focusing its heading. */
-const ARRIVAL_WAIT_MS = 1000;
-
-/**
- * Back on the main level: restore the scroll position from before See all,
- * then focus and mark the card's See all row. Rows and the card's edge settle
- * over the first frames, so the position is held until the row appears.
- * Returns a cancel.
- */
-function arriveFromSeeAll(
-  sectionKey: string,
-  scroller: HTMLElement | null,
-  top: number | undefined,
-) {
-  const hold = () => {
-    if (scroller && top !== undefined) scroller.scrollTop = top;
-  };
-  hold();
-  let frame = 0;
-  let clear = () => {};
-  const start = performance.now();
-  const tick = (now: number) => {
-    hold();
-    const card = sidebarCard(sectionKey);
-    const row = card?.querySelector<HTMLElement>("[data-card-see-all]");
-    if (row) {
-      row.focus({ preventScroll: true });
-      clear = markNavigationArrival(row);
-      return;
-    }
-    if (now - start < ARRIVAL_WAIT_MS) {
-      frame = requestAnimationFrame(tick);
-      return;
-    }
-    // The card no longer cuts anything short, so its heading takes focus.
-    card?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
-  };
-  frame = requestAnimationFrame(tick);
-  return () => {
-    cancelAnimationFrame(frame);
-    clear();
-  };
 }

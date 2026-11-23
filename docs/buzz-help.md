@@ -503,7 +503,7 @@ Quitting Buzz also turns it off.
   such as “Pinky and 182 others were added.” Hover or activate “182 others” to see
   the full, scrollable list of names. Messages and huddle entries split groups.
 
-- **Solo** organizes your chats with agents. Choose **New chat**, select or tag
+- **Sessions** organizes your chats with agents. Choose **New chat**, select or tag
   an agent, and send a message. Your agents become chat admins before the opening
   message is delivered, including agents added by workspace defaults; you remain
   owner. Ownership is verified from their signed profiles. Your agents added
@@ -541,7 +541,7 @@ Quitting Buzz also turns it off.
   one to remove it (the last agent stays selected). Rows stay in place while you
   toggle; reopen to refresh their order. Search ranks matching choices by
   relevance, including exact names.
-  Collapsed Solo sections and workspaces stay closed when you open or move a
+  Collapsed Sessions and workspace sections stay closed when you open or move a
   chat, click **In Solo**, or refresh. Use the heading or its chevron to open
   the group. **In Solo** scrolls to and focuses the chat row or the section heading
   that represents it.
@@ -587,7 +587,7 @@ Quitting Buzz also turns it off.
   again from the same source returns to its unsent draft. The link grants no
   access to the source; the agent you tag, and anyone you later share the chat
   with, can open it only if they can already read that conversation.
-- **Team** contains community channels and their threads. Choose **Reply** on a
+- **Channels** contains community channels and their threads. Choose **Reply** on a
   message to open or continue its thread. Use the **@** picker
   to address a channel member. A full name typed after **@** and followed by
   Space or closing punctuation, such as `,`, `.` or `'`, selects that person or
@@ -605,9 +605,10 @@ Quitting Buzz also turns it off.
   from someone with permission.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
   in a conversation’s menu or drag the row to a workspace. Unfiled items appear
-  in **Solo**, **Team** (channels and forums), or **Direct messages**. Reorder
-  any section, including **Favorites**, by dragging its heading or using **Move up** and
-  **Move down** in its **…** menu. Escape cancels a drag.
+  at the bottom of the sidebar in **Channels** (including forums), **Sessions**,
+  or **Direct messages**. Reorder workspaces and **Favorites** by dragging their
+  headings or using **Move up** and **Move down** in their **…** menus.
+  Escape cancels a drag.
   The arrow beside a workspace’s creation icon offers **New chat**, **New channel**
   and **New DM**. The last choice becomes that workspace’s icon and primary action.
   If the workspace heading shows recent activity, find these commands in its
@@ -623,6 +624,13 @@ Quitting Buzz also turns it off.
   In the standard sidebar, use **Filter → Active in the last** from the
   workspace’s **…** menu to show recent conversations. Open older conversations
   from **Filter**, or choose **All** to show them in the sidebar again.
+  In list view, workspace and Favorites cards fit all rows that match their
+  filter. Drag the grip down to reveal excluded rows or up to show fewer rows.
+  Double-click the grip or press Enter to toggle excluded rows when available.
+  A partly resized card returns to its filtered list after 15 seconds of
+  inactivity or when you reload. Click the heading or drag a card with matching
+  rows all the way up to minimize it. Drag the grip down or click the heading
+  to reopen it.
   Plugins can add tasks, Lead conversations and workspace actions.
   When starting a chat, type **#** to choose a workspace and load its settings.
   Folders are optional unless **Work in a new worktree** is on. An agent that
@@ -1131,20 +1139,20 @@ Quitting Buzz also turns it off.
   on the right. Compact avatars sit before the name on the left; Solo chats show
   the included agents.
 - **App navigation**: apps and sidebar pages such as Activity are rows in the
-  sidebar's **Plugins** card, which you can move like any other card.
+  top of the Messages sidebar's scrolling list, above the reorderable sections.
   Community and profile controls sit at the right of the top bar. Search stays
   wide in the top bar.
   Messages shows your workspaces, Favorites and unfiled conversations together.
   Other apps can provide their own sidebar. Pages listed in the Messages
   sidebar, such as the Drafts & sent plugin, keep the Messages sidebar open.
   The Messages sidebar stays open unless the page provides its own sidebar,
-  which replaces it. The Plugins card stays during Focus.
+  which replaces it. Plugin pages stay available during Focus.
   The sidebar's cards and the conversation float as separate cards on the
   window's tinted background, without dividing lines. Bestie uses your
   configured avatar.
   The floating **New options** button at the end of the sidebar list opens
   **New chat**, **New channel**, **New DM** and **New workspace**. **Cmd/Ctrl+N**
-  opens this menu in Messages, including during Focus. The **Solo** heading's
+  opens this menu in Messages, including during Focus. The **Sessions** heading's
   **+** starts a chat. A workspace heading offers creation commands from its
   **New** button or **Actions** menu.
 - **Link boundaries**: a bare http(s) or buzz link ends at whitespace and at
@@ -1211,11 +1219,9 @@ Quitting Buzz also turns it off.
   and use the Left/Right arrow keys. Double-click the handle to reset the width.
   Messages and plugin pages share the saved width within the same community
   and identity; narrow windows use a navigation drawer instead.
-- **Sidebar sections** default to **Plugins**, **Solo**, **Favorites**, your
-  workspaces, **Team**, then **Direct messages**. After an upgrade
-  from the separate Solo and Team sidebars, Buzz keeps their order: workspaces
-  from the previous Solo sidebar, **Solo**, **Favorites**, workspaces from the previous
-  Team sidebar, then **Team**. A saved section order takes precedence.
+- **Sidebar sections** in Messages start with plugin pages, then **Favorites**
+  and your workspaces in their saved order. **Channels**, **Sessions**, and
+  **Direct messages** sit at the bottom in that order.
   Sections collapse independently through their headings. Buzz
   remembers collapsed sections for each community and identity. Unread messages
   or thread replies highlight the headings of collapsed sections. Muted
@@ -1226,7 +1232,7 @@ Quitting Buzz also turns it off.
   sidebar preferences.
 - **Moving conversations** works by dragging or choosing **Move to…** from the
   row’s menu. Workspaces and **Favorites** accept any type. Unfiled conversations
-  return to the home for their type: **Solo** for chats, **Team** for channels
+  return to the home for their type: **Sessions** for chats, **Channels** for channels
   and forums, or **Direct messages**.
 - Saved workspaces, Favorites, mutes, sorting and filters update while connected in
   hosts that support saved sidebar preferences. Moving a conversation out of
@@ -1235,7 +1241,7 @@ Quitting Buzz also turns it off.
 - **Plugin channel rows**: a plugin can open a channel from its Solo row and keep
   that row selected. The sidebar then keeps its scroll position and open
   sections. When a plugin is explicitly disabled, its existing chats appear as
-  ordinary chats in **Solo**, with their saved workspace filings dormant.
+  ordinary chats in **Sessions**, with their saved workspace filings dormant.
   Enabling the plugin again returns its chats to its rows when available.
 - **Open thread marker**: while a thread is displayed in the side pane, its
   original message keeps the hover highlight in the conversation, including on
@@ -1561,7 +1567,7 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   availability, and does not prove the agent is ready or running. The settings
   below can deliberately add memory guidance, channel membership, and check-ins.
 - When the optional **Bestie** plugin is on, the saved choice also opens the
-  agent's DM from its row in the sidebar's **Plugins** card, using the agent's
+  agent's DM from its row at the top of the Messages sidebar, using the agent's
   name and avatar. The Messages sidebar omits the duplicate Bestie row. Bestie
   uses the same conversation tabs as Messages: threads open beside the chat (or
   in the main pane, following your thread placement setting), and can be moved,

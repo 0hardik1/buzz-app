@@ -864,9 +864,9 @@ A source runs once and supplies live `{ id, defaultPosition, element, title? }`
 sections through its `render` callback. Use stable component types and opaque,
 stable section ids. The shell names each slot `<pluginId>/<sectionId>`, orders
 slots by rank and then ordinal key, and drops invalid or duplicate descriptors.
-Slot ids do not replace saved collapse, sort, filter or drag keys. Team ranks
-follow the existing saved group order, with version-1 contributions trailing in
-their existing saved order; there is no new order record or migration.
+Slot ids keep their saved collapse, sort, filter and drag keys independent.
+Messages places plugin contributions before workspace cards, keeps each in its
+saved order, and puts Channels, Sessions, and Direct messages at the bottom.
 
 Sources run beside the shell and portal their content into keyed containers.
 Only structure and committed keys cross the shell's store; current content stays
@@ -974,7 +974,7 @@ ctx.reflect.get("sidebarRows")?.register({
 });
 ```
 
-Modes appear beside A–Z and Recent in each Team section's existing Sort menu.
+Modes appear beside A–Z and Recent in the Channels section's Sort menu.
 Their persisted values are `plugin:<plugin-id>/<contribution-id>/<mode-id>`;
 ids use lowercase ASCII letters, digits, dots, underscores and hyphens, starting
 with a letter or digit, with a combined value limit of 512 characters. A registration

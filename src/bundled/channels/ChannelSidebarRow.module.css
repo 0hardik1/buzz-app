@@ -107,15 +107,11 @@
   display: flex;
   width: 100%;
   margin-inline: 0;
-  padding-inline: calc(var(--space-2) + var(--space-half))
-    calc(var(--channel-row-fill-end, 0%) + var(--space-2));
+  padding-inline: var(--space-3)
+    calc(var(--channel-row-fill-end, 0%) + var(--space-2) + var(--space-half));
 }
 .row .select [data-variant="row"][data-working] {
-  padding-inline-end: calc(
-    var(--channel-row-fill-end, 0%) +
-    var(--space-2) +
-    var(--space-half)
-  );
+  padding-inline-end: calc(var(--channel-row-fill-end, 0%) + var(--space-3));
 }
 .select [class~="navigation-item-label"] {
   text-overflow: clip;
@@ -124,9 +120,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
+  width: var(--space-5);
   height: var(--space-6);
-  flex: 0 0 1.25rem;
+  flex: 0 0 var(--space-5);
 }
 .iconSpace[data-dm-cue] {
   margin-inline-end: var(--space-half);
@@ -136,7 +132,7 @@
     calc(var(--space-half) + (var(--space-1) / 4));
 }
 .iconSpace[data-dm-visual] {
-  margin-inline-end: var(--space-half);
+  margin-inline-end: var(--channel-row-dm-gap, var(--space-half));
 }
 .select [class~="navigation-item-trailing"] {
   display: flex;

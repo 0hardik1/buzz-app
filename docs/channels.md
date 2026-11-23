@@ -149,17 +149,24 @@ writer selects the admission contract by the event's `d` coordinate. The
 sidebar coordinates must match what the sidebar signer produces, and recipe
 coordinates must satisfy the recipe contract.
 
-The sidebar defaults to **Plugins** (apps and sidebar pages such as Activity),
-**Solo**, **Favorites**, personal workspaces, **Team** (channels and forums),
-and **Direct messages**. After an upgrade from the separate Solo and Team
-sidebars, the previous Solo workspaces come first, then **Solo**,
-**Favorites**, the previous Team workspaces and **Team**. Each section is its
-own card. Reorder cards by dragging
-their header or using **Move up** and **Move down**. The saved order syncs with
-workspace placement. Double-click a workspace's header to rename it in place.
-A card shows its first ten rows; drag its bottom edge to show more or fewer, or
-double-click the edge (or press Enter on it) to show every row and back. Rows
-past a card's edge are skipped by the keyboard until the card shows them.
+Plugin pages such as Activity come first, followed by **Favorites** and
+workspaces in their saved order. **Channels** (including forums), **Sessions**,
+and **Direct messages** sit at the bottom in that order. All sections share
+the sidebar scroll when the list fills. Favorites and workspaces use the
+standard panel fill and outline at every height. Plugin pages and the built-in
+conversation sections sit on the shell grid. Reorder workspace cards and
+Favorites by dragging their headings or using **Move up** and **Move down**.
+The saved order syncs with workspace placement. Double-click a workspace’s
+heading to rename it in place.
+Sessions, Channels, and Direct messages show the rows that match their filter.
+Use the heading caret to collapse or reopen the section. In list view, Favorites
+and workspaces also have a bottom grip. Drag down to reveal excluded rows or up
+to show fewer matching rows. Double-click the grip or press Enter to toggle
+excluded rows when available. A partially resized card returns to its filtered
+list after 15 seconds of inactivity or when the window reloads. Drag a card
+with matching rows to zero or click its heading to minimize it. The minimized
+state survives a reload. Reopen it from the heading or pull the grip down.
+Keyboard navigation skips clipped rows until they are revealed.
 
 Drag a chat, channel, forum or DM into any workspace, into Favorites, or back
 to its home section. The row’s **Move to…** menu offers the same destinations.
@@ -190,7 +197,7 @@ Cancel leaves the saved choice unchanged. The dialog retains its draft after a
 failed save, and the menu shows the selected window. Activity uses verified timestamps, including your own messages once the relay accepts them. Channels with unknown activity remain visible until their activity is read. Activity applies in one update when a read finishes; a read that fails partway still applies what it read, and channels it did not reach stay available alongside the activity Retry warning. These filters are encrypted account preferences on the current relay, using a
 separate kind-30078 `channel-workspace-filter` record. They leave saved sorting and section
 membership unchanged; earlier device-only filter choices are ignored, not automatically published.
-Filtered sections with no visible channels show only their header, retaining their expanded/collapsed state and menu access to hidden channels.
+Filtered sections with no matches keep their heading, saved collapse state, and menu access to hidden channels. In list view, workspace and Favorites grips can reveal channels even when no rows match.
 The currently open channel remains visible in its section regardless of its filter,
 however it was opened. Navigating away removes that exception. When a filter hides
 channels, the **Filter** submenu appends those eligible channels below its three
@@ -811,7 +818,7 @@ agents can be included in setup. Select **Copy workspace instructions to the
 shared Canvas** to share ordinary instructions. Managed folders and worktree
 settings stay local, and an unparseable workspace block remains private.
 The heading uses the selected workspace's decorative emoji. Opening from
-**Team** starts unfiled. Opening from **Starred** starts with Starred placement.
+**Channels** starts unfiled. Opening from **Favorites** starts with Starred placement.
 Group and Starred placement use the existing preference writer and normally
 apply before the new channel opens, so its first sidebar row is already in its
 destination; placement that must first re-read preferences can list the row

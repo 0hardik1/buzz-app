@@ -61,6 +61,21 @@
 .destinations::-webkit-scrollbar {
   width: 5px;
 }
+/* Page rows lead the list in their own non-reorderable group. */
+.sidebarPages {
+  height: auto;
+  flex-shrink: 0;
+  overflow: visible;
+  margin-block-end: var(--space-panel-gap);
+  padding: var(--space-1h);
+  background: var(--sidebar-home-fill, transparent);
+}
+.sidebarHomes {
+  display: flex;
+  flex-direction: column;
+  margin-block-start: auto;
+  padding-block-start: var(--space-panel-gap);
+}
 .connectionStatus {
   display: flex;
   flex-direction: column;

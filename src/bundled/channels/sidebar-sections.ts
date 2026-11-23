@@ -1,10 +1,20 @@
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
-  SIDEBAR_PAGES_SECTION,
   workspaceSectionOrder,
   type SidebarPreferences,
 } from "../../features/relay/sidebar-preferences";
 import { defaultSidebarSort } from "../../features/relay/sidebar-sort";
+
+export const sidebarResetMs = 15_000;
+export const sidebarHomeSections: readonly string[] = [
+  "channels",
+  "solo",
+  "dms",
+];
+
+export function isWorkspaceCard(key: string) {
+  return key === "starred" || key.startsWith("group:");
+}
 
 export function isChannelSectionKey(key: string) {
   return key === "channels" || key.startsWith("group:");
@@ -20,9 +30,7 @@ const homeRows: Partial<Record<string, readonly SidebarRowKind[]>> = {
 };
 
 export function sidebarDropRowKinds(key: string): readonly SidebarRowKind[] {
-  return key === "starred" || key.startsWith("group:")
-    ? anyRow
-    : (homeRows[key] ?? []);
+  return isWorkspaceCard(key) ? anyRow : (homeRows[key] ?? []);
 }
 
 export function sidebarRowKind(channel: ChannelSummary): SidebarRowKind {
@@ -89,10 +97,9 @@ export function compareRecent(a: ChannelSummary, b: ChannelSummary) {
 }
 
 const titles: Record<string, string> = {
-  pages: "Plugins",
   starred: "Favorites",
-  solo: "Solo",
-  channels: "Team",
+  solo: "Sessions",
+  channels: "Channels",
   dms: "Direct messages",
 };
 
@@ -104,8 +111,6 @@ export function sidebarSections<T extends ChannelSummary>(
   chatsOnly = false,
   draftSections: ReadonlySet<string> = new Set(),
   dormantAssignments: ReadonlySet<string> = new Set(),
-  /** Include the orderable Plugins section for sidebar-placed pages. */
-  pages = false,
 ) {
   const groups = new Map(
     preferences?.sections.map((group) => [group.id, group]),
@@ -133,19 +138,13 @@ export function sidebarSections<T extends ChannelSummary>(
     if (rows) rows.push(channel);
     else rowsBySection.set(key, [channel]);
   }
-  return workspaceSectionOrder(preferences).flatMap((key) => {
-    if (key === SIDEBAR_PAGES_SECTION && !pages) return [];
+  const workspaces = workspaceSectionOrder(preferences).filter(isWorkspaceCard);
+  return [...workspaces, ...sidebarHomeSections].flatMap((key) => {
     const group = groups.get(key.slice(6));
     const rows = rowsBySection.get(key) ?? [];
-    // The Solo heading owns New and its keyboard shortcut, even when every
-    // chat is filed in a workspace. Plugins stay reachable in Focus.
-    if (
-      chatsOnly &&
-      key !== "solo" &&
-      key !== SIDEBAR_PAGES_SECTION &&
-      !rows.length &&
-      !draftSections.has(key)
-    )
+    // The Sessions heading owns New and its keyboard shortcut, even when every
+    // chat is filed in a workspace.
+    if (chatsOnly && key !== "solo" && !rows.length && !draftSections.has(key))
       return [];
     const mode = preferences?.sort?.[group ? `section:${group.id}` : key];
     rows.sort(

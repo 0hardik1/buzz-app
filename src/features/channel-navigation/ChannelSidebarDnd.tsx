@@ -306,6 +306,7 @@ function CardDropLine() {
     ].filter(
       (element) =>
         element.getClientRects().length > 0 &&
+        !element.closest("[data-sidebar-homes]") &&
         (element.parentElement?.closest("[data-sidebar-section]") ?? null) ===
           region,
     );

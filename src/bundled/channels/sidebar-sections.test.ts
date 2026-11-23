@@ -124,10 +124,10 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
       ).toHaveLength(1);
   };
   const expectedProjection = [
-    { key: "solo", ids: [] },
     { key: "starred", ids: ["forum", "solo", "star", "starred-dm"] },
     { key: "group:channels", ids: ["grouped-dm", "grouped-forum", "work"] },
     { key: "channels", ids: ["loose-forum", "other"] },
+    { key: "solo", ids: [] },
     { key: "dms", ids: ["home-dm"] },
   ];
   expect(project(roster, new Set(["hidden-dm"]))).toEqual(expectedProjection);
@@ -155,11 +155,11 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
       new Set(["hidden-dm"]),
     ).find(({ key }) => key === "starred")?.ids,
   ).toEqual(["forum", "solo", "star"]);
-  // Forums shows only once there is a forum to list.
+  // Forums share the Channels section.
   expect(sidebarSections([])).toEqual([
-    { key: "solo", title: "Solo", icon: undefined, rows: [] },
     { key: "starred", title: "Favorites", icon: undefined, rows: [] },
-    { key: "channels", title: "Team", icon: undefined, rows: [] },
+    { key: "channels", title: "Channels", icon: undefined, rows: [] },
+    { key: "solo", title: "Sessions", icon: undefined, rows: [] },
     { key: "dms", title: "Direct messages", icon: undefined, rows: [] },
   ]);
   expect(
@@ -167,13 +167,13 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
       (section) => section.rows.map((channel) => channel.id),
     ),
   ).toEqual([
-    "solo",
     "forum",
     "grouped-forum",
     "loose-forum",
     "other",
     "star",
     "work",
+    "solo",
     "grouped-dm",
     "home-dm",
     "starred-dm",
@@ -217,10 +217,10 @@ it("sorts every section independently with deterministic inactive and tie fallba
       section.rows.map((channel) => channel.id),
     ]),
   ).toEqual([
-    ["solo", []],
     ["starred", []],
     ["group:work", ["new", "a-id", "z-id", "quiet-a", "quiet-b"]],
     ["channels", ["forum-new", "forum-old"]],
+    ["solo", []],
     ["dms", []],
   ]);
   // Unsaved, a section defaults to Recent.
@@ -283,17 +283,17 @@ it("Star projection is exclusive and retains empty saved groups", () => {
       section.rows.map((channel) => channel.id),
     ]);
   expect(placements(saved.starred)).toEqual([
-    ["solo", []],
     ["starred", ["alpha", "beta"]],
     ["group:work", []],
     ["channels", []],
+    ["solo", []],
     ["dms", []],
   ]);
   expect(placements(["alpha"])).toEqual([
-    ["solo", []],
     ["starred", ["alpha"]],
     ["group:work", ["beta"]],
     ["channels", []],
+    ["solo", []],
     ["dms", []],
   ]);
   expect(saved.assignments).toEqual({ beta: "work" });
@@ -337,16 +337,20 @@ it.each(["starred", "section:work", "channels", "dms"])(
   },
 );
 
-it("keeps the Plugins section when only Solo chats show", () => {
+it("keeps the built-in sections at the end while respecting saved workspace order", () => {
   expect(
-    sidebarSections(
-      [],
-      undefined,
-      new Set(),
-      true,
-      new Set(),
-      new Set(),
-      true,
-    ).map((section) => section.key),
-  ).toEqual([SIDEBAR_PAGES_SECTION, "solo"]);
+    sidebarSections([], {
+      sections: [{ id: "work", name: "Work", order: 0 }],
+      assignments: {},
+      starred: [],
+      muted: [],
+      sectionOrder: [
+        "dms",
+        "solo",
+        SIDEBAR_PAGES_SECTION,
+        "group:work",
+        "starred",
+      ],
+    }).map(({ key }) => key),
+  ).toEqual(["group:work", "starred", "channels", "solo", "dms"]);
 });

@@ -131,14 +131,14 @@ test("collapsed headings follow unread, confirmed mute and read changes", async 
   await move.press("ArrowRight");
   await page
     .getByRole("menu", { name: "Move Beta to workspace", exact: true })
-    .getByRole("menuitemradio", { name: "Team", exact: true })
+    .getByRole("menuitemradio", { name: "Channels", exact: true })
     .click();
   const team = page.locator('[data-sidebar-section="channels"]');
   const unfiled = team.locator('button[data-channel-id="beta"]');
   await expect(unfiled).toBeVisible();
   const teamSummary = team.locator("summary");
   await teamSummary.click();
-  await expect(teamSummary.getByText("Team", { exact: true })).toHaveCSS(
+  await expect(teamSummary.getByText("Channels", { exact: true })).toHaveCSS(
     "color",
     await ink("text-navigation-unread"),
   );

@@ -13,12 +13,15 @@ test.describe("touch headings", () => {
     await page.goto(app.origin);
     await openPage(page, "Messages");
     const actions = page.getByRole("button", {
-      name: "More actions for Team",
+      name: "More actions for Channels",
       exact: true,
     });
     await actions.tap();
     await expect(
-      page.getByRole("menu", { name: "More actions for Team", exact: true }),
+      page.getByRole("menu", {
+        name: "More actions for Channels",
+        exact: true,
+      }),
     ).toBeVisible();
   });
 });
@@ -53,7 +56,7 @@ test("sidebar headings keep readable space and compact disclosure targets at enl
   await openPage(page, "Messages");
   const sidebar = page.locator(".shell-sidebar");
   const resize = page.getByRole("separator", { name: "Resize sidebar" });
-  const summaries = ["Team", "Direct messages"].map((title) =>
+  const summaries = ["Channels", "Direct messages"].map((title) =>
     sidebar.locator("summary").filter({ hasText: title }),
   );
   for (const summary of summaries) await expect(summary).toBeVisible();
@@ -155,14 +158,14 @@ test("sidebar headings keep readable space and compact disclosure targets at enl
   await expect(channels.locator("..")).toHaveAttribute("open", "");
   await page.keyboard.press("Tab");
   const more = sidebar.getByRole("button", {
-    name: "More actions for Team",
+    name: "More actions for Channels",
     exact: true,
   });
   await expect(more).toBeFocused();
   await expect(more.locator("..")).toHaveCSS("opacity", "1");
   await more.press("Enter");
   await expect(
-    page.getByRole("menu", { name: "More actions for Team", exact: true }),
+    page.getByRole("menu", { name: "More actions for Channels", exact: true }),
   ).toBeVisible();
   await expect(channels.locator("..")).toHaveAttribute("open", "");
   await page.keyboard.press("Escape");

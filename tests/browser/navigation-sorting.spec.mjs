@@ -528,7 +528,7 @@ test("keeps a stationary selected row visible while its neighbors exchange place
   });
   const motion = await holdSidebarMotion(page);
   try {
-    await (await sortChoices(page, "Team"))
+    await (await sortChoices(page, "Channels"))
       .getByRole("menuitemradio", { name: "Recent", exact: true })
       .click();
     await closeMenus(page);
@@ -612,7 +612,7 @@ test("retargets an unfinished slide without jumping or losing focus", async ({
   await open(page, app);
   const section = page.locator('[data-sidebar-section="channels"]');
   const rows = section.locator("[data-channel-id]");
-  await (await sortChoices(page, "Team"))
+  await (await sortChoices(page, "Channels"))
     .getByRole("menuitemradio", { name: "Recent", exact: true })
     .click();
   await closeMenus(page);
@@ -842,7 +842,7 @@ test.describe("section sort persistence", () => {
     });
     const channels = sidebar.locator('[data-sidebar-section="channels"]');
     const work = sidebar.locator('[data-sidebar-section="group:work"]');
-    const trigger = moreActionsButton(channels, "Team");
+    const trigger = moreActionsButton(channels, "Channels");
     const rows = channels.locator("[data-channel-id]");
     const order = () =>
       rows.evaluateAll((elements) =>
@@ -865,10 +865,10 @@ test.describe("section sort persistence", () => {
     expect(startupActivity.length).toBeGreaterThan(2);
     expect(new Set(startupActivity).size).toBe(startupActivity.length);
     const popup = page
-      .getByRole("menu", { name: "Sort Team", exact: true })
+      .getByRole("menu", { name: "Sort Channels", exact: true })
       .and(page.locator(":not([data-closed])"));
     async function openSort() {
-      await sortChoices(page, "Team");
+      await sortChoices(page, "Channels");
       await expect(channels.locator("details")).toHaveAttribute("open", "");
     }
     await page.screenshot({
@@ -921,7 +921,7 @@ test.describe("section sort persistence", () => {
     }
     const error = page
       .getByRole("alert")
-      .filter({ hasText: "Couldn’t save the sort order for Team" });
+      .filter({ hasText: "Couldn’t save the sort order for Channels" });
     await expect(error).toContainText("Relay request failed (502)");
     await expect.poll(order).toEqual(alphaOrder);
     await page.unroute("**/sidebar-sort");
@@ -1070,7 +1070,7 @@ test.describe("activity read failures", () => {
     const alphaOrder = await order();
     let menu;
     async function openSort() {
-      menu = await sortChoices(page, "Team");
+      menu = await sortChoices(page, "Channels");
     }
     async function setSort(mode) {
       await openSort();
@@ -1316,7 +1316,7 @@ test.describe("sorting with lifecycle visibility", () => {
     await expect(composer).toHaveCount(0);
     // Opening Sort proves saved preference decoding and sidebar startup settled.
     await expect(
-      (await sortChoices(page, "Team")).getByRole("menuitemradio", {
+      (await sortChoices(page, "Channels")).getByRole("menuitemradio", {
         name: "Recent",
       }),
     ).toHaveAttribute("aria-checked", "true");

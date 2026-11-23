@@ -51,7 +51,7 @@ test.describe("section removal", () => {
     await expect(dialog).toHaveCount(0);
     await expect(group).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "More actions for Team" }),
+      page.getByRole("button", { name: "More actions for Channels" }),
     ).toBeFocused();
     await expect(
       page.locator(

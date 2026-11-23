@@ -198,6 +198,8 @@
   /* Only while a plugin registers a backdrop: its layer paints above the
      shell's own background and below every descendant. */
   .shell-background:has(> .shell-backdrop) {
+    /* Keep navigation legible over a plugin's full-window artwork. */
+    --sidebar-home-fill: var(--bg-app);
     isolation: isolate;
   }
   .shell-backdrop,
@@ -463,9 +465,10 @@
       display: none;
     }
     .shell-navigation[data-expanded="true"] {
-      @apply absolute inset-y-0 left-0 z-20 flex;
+      @apply absolute inset-y-0 left-0 z-20 flex texture-dots;
       max-width: calc(100% - 1rem);
-      /* The open drawer covers the conversation with the window's tint. */
+      /* The drawer covers the conversation with its own shell grid. */
+      --sidebar-home-fill: transparent;
       background-color: var(--bg-app);
       box-shadow: var(--shadow-panel);
     }

@@ -5,7 +5,7 @@ import {
   closeMenus,
   dateChoice,
   expectViewOption,
-  filterButton,
+  moreActionsButton,
   openFilterMenu,
   openPage,
   openSortMenu,
@@ -28,9 +28,6 @@ test.use({
   historyCounts: { alpha: 1, beta: 1, gamma: 1, delta: 1 },
 });
 
-// A card's header Filter button opens its filter menu, and the same choices sit
-// under Filter in its ••• menu, beside Sort and Layout. The button names the
-// card and says when the card is filtered.
 const viewOptions = openFilterMenu;
 const show = chooseViewOption;
 
@@ -91,10 +88,10 @@ test("section filters save activity windows from the Filter menu", async ({
       path: join(process.env.BUZZ_FILTER_CAPTURE_DIR, `${name}.png`),
     });
   };
-  const trigger = filterButton(page, "Team");
+  const trigger = moreActionsButton(page, "Channels");
   const checked = expectViewOption;
   await shot("01-all");
-  let popup = await viewOptions(page, "Team");
+  let popup = await viewOptions(page, "Channels");
   await checked(popup, "All");
   await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
   await shot("02-filter-menu");
@@ -103,10 +100,6 @@ test("section filters save activity windows from the Filter menu", async ({
     .poll(() => app.report.sidebarPublications?.at(-1)?.blob.groups.channels)
     .toBe("unreads");
   await checked(popup, "Unreads");
-  // A filtered card's button keeps the card's action color; its name says so.
-  await expect(trigger).toHaveAccessibleName("Filter Team, filtered");
-  await expect(trigger).not.toHaveAttribute("data-icon-tone");
-  await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
   await shot("03-unreads");
   // Date combines with Unreads: both are saved together.
   await chooseDate(popup, "7 days");
@@ -121,13 +114,13 @@ test("section filters save activity windows from the Filter menu", async ({
   await checked(popup, "7 days");
   await shot("04-unreads-seven-days");
   // Unreads first, under Sort, has nothing to reorder while Unreads is on.
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await expect(popup).toHaveCount(0);
-  const sort = await openSortMenu(page, "Team");
+  const sort = await openSortMenu(page, "Channels");
   await expect(unreadsFirst(sort)).toBeDisabled();
   await shot("04b-sort-menu");
   await closeMenus(page);
-  popup = await viewOptions(page, "Team");
+  popup = await viewOptions(page, "Channels");
   // Turning Unreads off keeps the date.
   await unreadsOnly(popup).click();
   await expect
@@ -137,7 +130,7 @@ test("section filters save activity windows from the Filter menu", async ({
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
   await expect(section.locator('[data-channel-id="delta"]')).toHaveCount(0);
   await shot("05-seven-days");
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await expect(popup).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.mouse.move(0, 0);
@@ -149,25 +142,16 @@ test("section filters save activity windows from the Filter menu", async ({
         getComputedStyle(button.closest("[data-navigation-reveal]")).opacity,
     );
   await expect.poll(revealed).toBe("0");
-  await page.getByLabel("Team", { exact: true }).hover();
+  await section.getByLabel("Channels", { exact: true }).hover();
   await expect.poll(revealed).toBe("1");
-  // More actions, then Filter, then new.
-  const xs = await section
-    .locator(".navigation-section-heading-actions button")
-    .evaluateAll((buttons) =>
-      buttons.map((button) => button.getAttribute("aria-label")),
-    );
-  expect(xs.indexOf("More actions for Team")).toBeLessThan(
-    xs.indexOf("Filter Team, filtered"),
-  );
-  expect(xs.indexOf("Filter Team, filtered")).toBe(
-    xs.indexOf("More actions for Team") + 1,
-  );
-  await shot("06-filtered-button");
+  await expect(
+    section.getByRole("button", { name: /^Filter Channels/ }),
+  ).toHaveCount(0);
+  await shot("06-filtered-card");
   await page.reload();
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
   await expect(section.locator('[data-channel-id="delta"]')).toHaveCount(0);
-  popup = await viewOptions(page, "Team");
+  popup = await viewOptions(page, "Channels");
   await checked(popup, "7 days");
   // A failed save offers Retry, which goes through the broker.
   const pattern = "**/sidebar-filter";
@@ -183,7 +167,7 @@ test("section filters save activity windows from the Filter menu", async ({
   await chooseDate(popup, "30 days");
   const retry = page.getByRole("button", { name: "Retry filter", exact: true });
   await expect(retry).toBeVisible();
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await shot("06b-save-error");
   await page.unroute(pattern);
   await retry.click();
@@ -195,25 +179,54 @@ test("section filters save activity windows from the Filter menu", async ({
           ?.channels,
     )
     .toBe(30 * 86400);
-  // Any time range is a filter, 30 days included.
-  await expect(trigger).toHaveAccessibleName("Filter Team, filtered");
-  popup = await viewOptions(page, "Team");
+  popup = await viewOptions(page, "Channels");
   await checked(popup, "30 days");
   await page.emulateMedia({ colorScheme: "dark" });
   await shot("07-filter-menu-dark");
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await show(page, "Work", "Today");
   const work = page.locator('[data-sidebar-section="group:work"]');
   await expect(work.locator("[data-channel-id]")).toHaveCount(0);
   await expect(work.locator("details")).toHaveAttribute("open");
+  const workGrip = work.getByRole("separator", { name: "Resize Work" });
+  await expect(workGrip).toHaveAttribute("aria-valuemin", "0");
+  await workGrip.dblclick();
+  await expect(work.locator('[data-channel-id="beta"]')).toBeVisible();
+  await workGrip.dblclick();
+  await expect(work.locator('[data-channel-id="beta"]')).toHaveCount(0);
   await expect(page.getByText("0 matches", { exact: true })).toHaveCount(0);
   await expect(
     page.getByText("No channels match this filter.", { exact: true }),
   ).toHaveCount(0);
+  const shell = page.locator(".shell-background");
+  const shellColor = await shell.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  const restingColor = await work.evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.backgroundColor = "var(--surface-panel)";
+    element.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  });
+  expect(restingColor).not.toBe(shellColor);
+  await expect(work).toHaveCSS("background-color", restingColor);
+  await expect(work).not.toHaveCSS("box-shadow", "none");
+  await expect(shell).toHaveCSS("background-image", /radial-gradient/);
+  for (const plain of [
+    page.locator('[data-sidebar-card]:has(> nav[aria-label="Pages"])'),
+    page.locator('[data-sidebar-section="solo"]'),
+    section,
+    page.locator('[data-sidebar-section="dms"]'),
+  ]) {
+    await expect(plain).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  }
+  await expect(section).toHaveCSS("box-shadow", "none");
   await shot("08-empty-header-dark");
   await page.emulateMedia({ colorScheme: "light" });
   await page.setViewportSize({ width: 800, height: 850 });
-  popup = await viewOptions(page, "Team");
+  popup = await viewOptions(page, "Channels");
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "150%";
   });
@@ -221,9 +234,20 @@ test("section filters save activity windows from the Filter menu", async ({
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "";
   });
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await page.setViewportSize({ width: 1440, height: 950 });
-  await page.getByLabel("Work", { exact: true }).click();
+  const workHeading = work.locator("summary");
+  await page.mouse.move(0, 0);
+  await expect(workHeading.locator(":scope > [aria-hidden=true]")).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  await workHeading.click();
+  await expect(work.locator("details")).not.toHaveAttribute("open");
+  await expect(workGrip).toHaveAttribute("aria-valuetext", "Minimized");
+  await workHeading.press("Enter");
+  await expect(workGrip).toBeVisible();
+  await workHeading.press("Enter");
   await expect(work.locator("details")).not.toHaveAttribute("open");
   await shot("10-collapsed-empty");
   await page.route("**/session", async (route) => {
@@ -301,7 +325,7 @@ test("failed activity reads explain the filter and recover on Retry", async ({
   await expect(
     page.getByRole("textbox", { name: "Message #General" }),
   ).toBeVisible();
-  const popup = await viewOptions(page, "Team");
+  const popup = await viewOptions(page, "Channels");
   try {
     await chooseDate(popup, "30 days");
     await requested;
@@ -309,7 +333,7 @@ test("failed activity reads explain the filter and recover on Retry", async ({
   } finally {
     release();
   }
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await expect(
     page.getByText("Activity filters and Recent sorting may be out of date.", {
       exact: true,
@@ -401,7 +425,7 @@ test.describe("filter action focus", () => {
     await expect(row).toBeVisible();
     // Unreads keeps only rows with observed unread history; wait for it first.
     await expect(row.getByRole("img", { name: /unread/ })).toBeVisible();
-    await filter(channels, "Team", "Unreads");
+    await filter(channels, "Channels", "Unreads");
     await expect(row).toBeVisible();
     await row.click({ button: "right" });
     await page
@@ -410,7 +434,7 @@ test.describe("filter action focus", () => {
     await expect(row).toHaveCount(0);
     await expect(channels.locator("details > summary")).toBeFocused();
     await filter(work, "Work", "Unreads");
-    await filter(channels, "Team", "All");
+    await filter(channels, "Channels", "All");
     await expect(row).toBeVisible();
     await row.click({ button: "right" });
     await page.getByRole("menuitem", { name: "Move to…", exact: true }).hover();
@@ -432,7 +456,7 @@ test.describe("with no saved Team filter", () => {
   }) => {
     await page.goto(app.origin);
     await openPage(page, "Messages");
-    const choose = (name) => show(page, "Team", name);
+    const choose = (name) => show(page, "Channels", name);
     const pattern = "**/sidebar-filter";
     await page.route(pattern, (route) => {
       app.report.sidebarPreferenceFailures ??= [];
@@ -453,7 +477,7 @@ test.describe("with no saved Team filter", () => {
     const published = app.report.sidebarPublications?.length ?? 0;
     await choose("All");
     await expect(retry).toHaveCount(0);
-    const popup = await viewOptions(page, "Team");
+    const popup = await viewOptions(page, "Channels");
     await expectViewOption(popup, "All");
     expect(app.report.sidebarPublications?.length ?? 0).toBe(published);
   });
@@ -509,9 +533,7 @@ test.describe("with a saved workspace filter", () => {
   });
 });
 
-// See all keeps the card's filter behind the same Filter button, so what's
-// selected always matches the list; choosing there changes the card too.
-test("See all shares the card's Filter button and filter", async ({
+test("card expansion reveals excluded rows in place and resets on reload", async ({
   page,
   app,
 }, testInfo) => {
@@ -563,13 +585,13 @@ test("See all shares the card's Filter button and filter", async ({
   // The Filter menu, then the filtered card and an unfiltered one on hover, at
   // the default and narrowest widths.
   const capture = async (name) => {
-    const popup = await viewOptions(page, "Team");
+    const popup = await viewOptions(page, "Channels");
     await settle();
     await page.screenshot({ path: testInfo.outputPath(`${name}-menu.png`) });
-    await page.keyboard.press("Escape");
+    await closeMenus(page);
     await expect(popup).toHaveCount(0);
-    await filterButton(page, "Team").blur();
-    await page.getByLabel("Team", { exact: true }).hover();
+    await moreActionsButton(page, "Channels").blur();
+    await section.getByLabel("Channels", { exact: true }).hover();
     await settle();
     await sidebar.screenshot({
       path: testInfo.outputPath(`${name}-filtered-hover.png`),
@@ -584,129 +606,93 @@ test("See all shares the card's Filter button and filter", async ({
     }
     await page.mouse.move(0, 0);
   };
-  let popup = await viewOptions(page, "Team");
+  const popup = await viewOptions(page, "Channels");
   await chooseDate(popup, "7 days");
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await expect(rowFor("delta")).toHaveCount(0);
   await capture("card-default");
   await resize.press("Home");
   await capture("card-narrow");
   await resize.press("End");
 
-  // See all has no icon, so its label sits clear of the pill's rounded edge
-  // rather than where row icons start.
-  const seeAllRow = page.getByRole("button", {
-    name: "See all in Team",
-    exact: true,
+  const homeGrips = page.getByRole("separator", {
+    name: /^Resize (Sessions|Channels|Direct messages)$/,
   });
-  const { inset, expected } = await seeAllRow.evaluate((row) => {
-    const label = row.querySelector(".navigation-item-label");
-    const probe = document.createElement("div");
-    probe.style.width = "var(--space-3)";
-    row.append(probe);
-    const expected = probe.getBoundingClientRect().width;
-    probe.remove();
-    return {
-      inset:
-        label.getBoundingClientRect().left - row.getBoundingClientRect().left,
-      expected,
-    };
-  });
-  expect(expected).toBeGreaterThan(0);
-  expect(inset).toBeCloseTo(expected, 0);
-
-  await seeAllRow.click();
-  // See all has no row of filter controls, only the same button.
-  await expect(page.getByRole("tablist", { name: "Filter Team" })).toHaveCount(
-    0,
-  );
-  await expect(filterButton(page, "Team")).toHaveAccessibleName(
-    "Filter Team, filtered",
-  );
+  const channelHeading = section.getByLabel("Channels", { exact: true });
+  await expect(homeGrips).toHaveCount(0);
+  await expect(rowFor("gamma")).toBeVisible();
+  await channelHeading.press("Enter");
+  await expect(rowFor("gamma")).toBeHidden();
+  await expect(homeGrips).toHaveCount(0);
+  await channelHeading.press("Enter");
   await expect(rowFor("gamma")).toBeVisible();
   await expect(rowFor("delta")).toHaveCount(0);
-  await capture("see-all-default");
-  await resize.press("Home");
-  await capture("see-all-narrow");
-  await resize.press("End");
 
-  popup = await viewOptions(page, "Team");
-  await chooseDate(popup, "All");
-  await page.keyboard.press("Escape");
-  await expect(rowFor("delta")).toBeVisible();
-  await expect(filterButton(page, "Team")).toHaveAccessibleName("Filter Team");
-});
-
-// Back from See all returns the reader to the scroll position they left and
-// marks the See all they opened, like arriving back at a message.
-test("Back from See all restores the sidebar scroll and marks See all", async ({
-  page,
-  app,
-}) => {
-  const now = Math.floor(Date.now() / 1000);
-  for (const [id, age] of [
-    ["alpha", 60],
-    ["beta", 2],
-    ["gamma", 0],
-    ["delta", 45],
-  ])
-    app.histories.set(`primary/${id}`, [
-      app.sign({
-        kind: 9,
-        tags: [["h", id]],
-        content: "Project update",
-        created_at: now - age * 86400,
-      }),
-    ]);
-  // Short enough that the sidebar scrolls.
-  await page.setViewportSize({ width: 1024, height: 420 });
-  await page.goto(app.origin);
+  const favorites = page.locator('[data-sidebar-section="starred"]');
+  const favorite = favorites.locator('[data-channel-id="alpha"]');
+  const favoritesGrip = favorites.getByRole("separator", {
+    name: "Resize Favorites",
+  });
+  await expect(favorite).toBeVisible();
+  await expect(favoritesGrip).toHaveAttribute("aria-valuetext", "1 of 1 rows");
+  const outline = () =>
+    favorites.evaluate((element) => {
+      const { borderColor, boxShadow } = getComputedStyle(element);
+      return { borderColor, boxShadow };
+    });
+  const restingOutline = await outline();
+  const dragFavoritesGrip = async (distance) => {
+    await favoritesGrip.scrollIntoViewIfNeeded();
+    const edge = await favoritesGrip.boundingBox();
+    if (!edge) throw new Error("Missing Favorites grip");
+    const x = edge.x + edge.width / 2;
+    const y = edge.y + edge.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + distance, { steps: 6 });
+    await page.mouse.up();
+  };
+  await dragFavoritesGrip(-60);
+  await expect(favorite).toBeHidden();
+  await page.reload();
   await openPage(page, "Messages");
-  // Filters keep the open conversation; open one the filter keeps anyway.
-  await page
-    .getByRole("navigation", { name: "Subscribed channels" })
-    .getByRole("button", { name: "Design", exact: true })
-    .click();
-  const popup = await viewOptions(page, "Team");
-  await chooseDate(popup, "7 days");
-  await page.keyboard.press("Escape");
-  const seeAll = page.getByRole("button", {
-    name: "See all in Team",
-    exact: true,
-  });
-  await expect(seeAll).toBeVisible();
-  // Leave the heading, so its hover-only actions don't change the height.
-  await page.mouse.move(600, 300);
-  await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
-      ),
+  await expect(favorite).toHaveCount(1);
+  await expect(favorite).toBeHidden();
+  await expect(favoritesGrip).toBeVisible();
+  await expect(favoritesGrip).toHaveAttribute("aria-valuetext", "Minimized");
+  await expect.poll(outline).toEqual(restingOutline);
+  await dragFavoritesGrip(60);
+  await expect(favorite).toBeVisible();
+  await show(page, "Favorites", "7 days");
+  await expect(favorite).toHaveCount(0);
+  await expect(favoritesGrip).toHaveAttribute("aria-valuetext", "0 of 1 rows");
+  const restingFill = await favorites.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
   );
-  const scroller = page
-    .getByRole("navigation", { name: "Subscribed channels" })
-    .first();
-  const left = await scroller.evaluate((list) => {
-    list.scrollTop = list.scrollHeight;
-    return list.scrollTop;
-  });
-  expect(left).toBeGreaterThan(0);
+  await favoritesGrip.dblclick();
+  await expect(favorite).toBeVisible();
+  await expect(favorites).toHaveCSS("background-color", restingFill);
+  await expect.poll(outline).toEqual(restingOutline);
+  await favorite.click({ button: "right" });
+  const favoriteMenu = page.getByRole("menu", { name: "Actions for General" });
+  await expect(favoriteMenu).toBeVisible();
+  await closeMenus(page);
+  // The toggle stays discoverable after it reveals the last excluded row.
+  await page.mouse.move(0, 0);
+  await expect(favoritesGrip.locator("[aria-hidden=true]")).toBeVisible();
+  await favoritesGrip.dblclick();
+  await expect(favorite).toHaveCount(0);
+  await expect(favoritesGrip).toHaveAttribute("aria-valuetext", "0 of 1 rows");
+  await expect(favorites).toHaveCSS("background-color", restingFill);
 
-  await seeAll.click();
-  const back = page.getByRole("button", { name: "Back to all cards" });
-  await expect(back).toBeFocused();
-  // The card starts at its top.
-  await expect.poll(() => scroller.evaluate((list) => list.scrollTop)).toBe(0);
-
-  await back.click();
-  await page.mouse.move(600, 300);
-  await expect(seeAll).toBeFocused();
-  await expect(seeAll).toHaveAttribute("data-arrived", "");
-  expect(
-    Math.abs((await scroller.evaluate((list) => list.scrollTop)) - left),
-  ).toBeLessThan(1);
-  // The mark holds about a second, then fades and is retired.
-  await expect(seeAll).not.toHaveAttribute("data-arrived", "", {
-    timeout: 5000,
-  });
+  await favoritesGrip.press("Enter");
+  await expect(favorite).toBeVisible();
+  await favoritesGrip.press("Enter");
+  await expect(favorite).toHaveCount(0);
+  await dragFavoritesGrip(60);
+  await expect(favoritesGrip).toHaveAttribute("aria-valuetext", "1 of 1 rows");
+  await page.reload();
+  await openPage(page, "Messages");
+  await expect(favoritesGrip).toHaveAttribute("aria-valuetext", "0 of 1 rows");
+  await expect(favorite).toHaveCount(0);
 });

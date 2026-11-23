@@ -71,7 +71,7 @@ test("navigation menus do not highlight labels while message text and editors re
   await expect(channelMenu).toHaveCount(0);
 
   // Section disclosures have their own style, outside NavigationItem.
-  const section = channels.locator("summary").filter({ hasText: "Team" });
+  const section = channels.locator("summary").filter({ hasText: "Channels" });
   await expectNoSelection(page, section);
   await section.click({
     button: "right",

@@ -12,7 +12,7 @@ test("picked section emoji returns focus to the ringed trigger", async ({
   await page.goto(app.origin);
   await openPage(page, "Messages");
   await page
-    .getByRole("button", { name: "More actions for Team", exact: true })
+    .getByRole("button", { name: "More actions for Channels", exact: true })
     .click();
   const create = page.getByRole("dialog", { name: "New workspace" });
   await page

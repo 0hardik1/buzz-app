@@ -553,7 +553,7 @@ test("channel navigation preserves sidebar DOM and group state", async ({
   expect(await node.evaluate((element) => element.isConnected)).toBe(true);
   const group = sidebar
     .locator("details")
-    .filter({ has: page.locator("summary", { hasText: /^Team$/ }) });
+    .filter({ has: page.locator("summary", { hasText: /^Channels$/ }) });
   await group.locator("summary").click();
   await expect(group).not.toHaveAttribute("open");
   await button(page, "Go back").click();
@@ -591,7 +591,7 @@ test("navigation reveals the current sidebar entry without moving a visible one"
     .getByRole("button", { name: "Workflows", exact: true });
   const group = sidebar
     .locator("details")
-    .filter({ has: page.locator("summary", { hasText: /^Team$/ }) });
+    .filter({ has: page.locator("summary", { hasText: /^Channels$/ }) });
   await expect(alpha).toHaveAttribute("aria-current", "page");
   expect(await toBottom()).toBeGreaterThan(100);
   await expect(alpha).not.toBeInViewport();
@@ -665,6 +665,10 @@ test("a reveal while the narrow drawer is closed runs when the drawer opens", as
   );
   await button(page, "Show navigation").click();
   await expect(sidebar).toBeVisible();
+  await expect(page.locator("#shell-navigation")).toHaveCSS(
+    "background-image",
+    /radial-gradient/,
+  );
   const bottom = await sidebar.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
     return element.scrollTop;
@@ -695,7 +699,7 @@ for (const destination of ["Workflows", "Settings", "Back/Forward"]) {
     });
     const group = sidebar
       .locator("details")
-      .filter({ has: page.locator("summary", { hasText: /^Team$/ }) });
+      .filter({ has: page.locator("summary", { hasText: /^Channels$/ }) });
     const node = await sidebar.elementHandle();
     const toBottom = () =>
       sidebar.evaluate((element) => {
@@ -818,7 +822,7 @@ test("sidebar view state does not leak across communities", async ({
   const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
   const group = sidebar
     .locator("details")
-    .filter({ has: page.locator("summary", { hasText: /^Team$/ }) });
+    .filter({ has: page.locator("summary", { hasText: /^Channels$/ }) });
   await group.locator("summary").click();
   await expect(group).not.toHaveAttribute("open");
   await selectCommunity(page, "Secondary");

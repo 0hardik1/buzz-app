@@ -12,23 +12,23 @@ const starredAlpha =
 // Input/error permutations remain in the colocated component/store tests.
 test.use({ productionBroker: true, savedSidebar: true, largeSidebar: false });
 
-test("Team offers empty-workspace creation with keyboard focus, emoji and confirmed persistence", async ({
+test("Channels offers empty-workspace creation with keyboard focus, emoji and confirmed persistence", async ({
   page,
   app,
 }, testInfo) => {
   await page.goto(app.origin);
   await openPage(page, "Messages");
   const trigger = page.getByRole("button", {
-    name: "More actions for Team",
+    name: "More actions for Channels",
     exact: true,
   });
   await trigger.focus();
   await page.keyboard.press("Enter");
   await expect(
     page
-      .getByRole("menu", { name: "More actions for Team", exact: true })
+      .getByRole("menu", { name: "More actions for Channels", exact: true })
       .getByRole("menuitem"),
-  ).toHaveText(["Create workspace", "Move up", "Move down"]);
+  ).toHaveText(["Filter", "Sort", "Create workspace", "Move up", "Move down"]);
   await page
     .getByRole("menuitem", { name: "Create workspace", exact: true })
     .click();

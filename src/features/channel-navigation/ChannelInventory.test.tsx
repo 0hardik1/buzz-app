@@ -137,29 +137,18 @@ const defaultPages = (
   </nav>
 );
 
-/** Opens a card's Filter menu from its header button. */
-async function filterMenu(
+async function viewMenu(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
-) {
-  await user.click(
-    screen.getByRole("button", {
-      name: new RegExp(`^Filter ${title}(, filtered)?$`),
-    }),
-  );
-  return screen.findByRole("menu", { name: `Filter ${title}` });
-}
-/** Opens a card's ••• menu, then its Sort submenu. */
-async function sortMenu(
-  user: ReturnType<typeof userEvent.setup>,
-  title: string,
+  name: "Filter" | "Sort",
 ) {
   await user.click(
     screen.getByRole("button", { name: `More actions for ${title}` }),
   );
-  await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
-  return screen.findByRole("menu", { name: `Sort ${title}` });
+  await user.click(await screen.findByRole("menuitem", { name }));
+  return screen.findByRole("menu", { name: `${name} ${title}` });
 }
+
 /** Picks one choice in a card's Filter menu or Sort submenu, then closes the
  * menus. */
 async function chooseView(
@@ -168,7 +157,7 @@ async function chooseView(
   name: string,
 ) {
   if (name === "Unreads" || name === "All") {
-    const menu = await filterMenu(user, title);
+    const menu = await viewMenu(user, title, "Filter");
     const unreads = within(menu).getByRole("menuitemcheckbox", {
       name: "Unreads only",
     });
@@ -177,17 +166,16 @@ async function chooseView(
         fireEvent.click(unreads);
     } else {
       // Every conversation: all time, then Unreads only off.
-      await user.click(
-        within(menu).getByRole("menuitemradio", { name: "All" }),
-      );
+      fireEvent.click(within(menu).getByRole("menuitemradio", { name: "All" }));
       if (unreads.getAttribute("aria-checked") === "true")
         fireEvent.click(unreads);
     }
     await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
     await waitFor(() => expect(menu).not.toBeInTheDocument());
     return;
   }
-  const menu = await sortMenu(user, title);
+  const menu = await viewMenu(user, title, "Sort");
   fireEvent.click(within(menu).getByRole("menuitemradio", { name }));
   await user.keyboard("{Escape}");
   await user.keyboard("{Escape}");
@@ -717,7 +705,7 @@ it("uses relay section filters across navigation and remount", async () => {
   const h = fixture(preferences.queries);
   const mounted = render(h.view("alpha"));
   await screen.findByRole("button", { name: "gamma" });
-  await chooseView(user, "Team", "Unreads");
+  await chooseView(user, "Channels", "Unreads");
   // A fading row is hidden from role queries; wait until it has left the DOM.
   await waitFor(() =>
     expect(document.querySelector('[data-channel-id="beta"]')).toBeNull(),
@@ -731,7 +719,9 @@ it("uses relay section filters across navigation and remount", async () => {
   mounted.rerender(h.view("not-in-this-section"));
   expect(screen.queryByText("0 matches")).toBeNull();
   expect(
-    screen.getByLabelText("Team", { selector: "summary" }).closest("details"),
+    screen
+      .getByLabelText("Channels", { selector: "summary" })
+      .closest("details"),
   ).toHaveAttribute("open");
   expect(screen.queryByText("No channels match this filter.")).toBeNull();
   mounted.unmount();
@@ -748,7 +738,7 @@ it("uses relay section filters across navigation and remount", async () => {
     expect(screen.getByRole("button", { name: "alpha" })).toBeVisible(),
   );
   expect(screen.queryByRole("button", { name: "gamma" })).toBeNull();
-  await chooseView(user, "Team", "All");
+  await chooseView(user, "Channels", "All");
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "beta" })).toBeVisible();
     expect(screen.getByRole("button", { name: "gamma" })).toBeVisible();
@@ -1317,7 +1307,7 @@ it.each(["ready", "error"] as const)(
   },
 );
 
-it.each(["Laptop", "Team", "Favorites"])(
+it.each(["Laptop", "Channels", "Favorites"])(
   "uses only the invoking section for placement (%s)",
   async (section) => {
     vi.stubGlobal("crypto", webcrypto);
@@ -2535,10 +2525,10 @@ it("keeps owned and unfiled shared Solo chats out of Team without removing acces
   render(h.view("alpha", undefined, true));
   await screen.findByRole("button", { name: "gamma" });
   const team = screen
-    .getByLabelText("Team", { selector: "summary" })
+    .getByLabelText("Channels", { selector: "summary" })
     .closest("[data-sidebar-section]");
   const solo = screen
-    .getByLabelText("Solo", { selector: "summary" })
+    .getByLabelText("Sessions", { selector: "summary" })
     .closest("[data-sidebar-section]");
   expect(solo).toContainElement(screen.getByRole("button", { name: "beta" }));
   expect(team).not.toContainElement(
@@ -3231,7 +3221,7 @@ it("decorates live host rows and closes menus only when their row is hidden", as
   );
   await waitFor(() =>
     expect(
-      screen.getByLabelText("Team", { selector: "summary" }),
+      screen.getByLabelText("Channels", { selector: "summary" }),
     ).toHaveFocus(),
   );
 
@@ -3274,7 +3264,7 @@ it.each([
   {
     focused: "beta",
     hidden: ["alpha", "beta", "gamma"],
-    destination: "Team",
+    destination: "Channels",
   },
   {
     focused: "beta",
@@ -3309,8 +3299,8 @@ it.each([
 
     expect(screen.queryByRole("button", { name: focused })).toBeNull();
     const target =
-      destination === "Team"
-        ? screen.getByLabelText("Team", { selector: "summary" })
+      destination === "Channels"
+        ? screen.getByLabelText("Channels", { selector: "summary" })
         : screen.getByRole("button", { name: destination });
     expect(target).toHaveFocus();
   },
@@ -3528,7 +3518,7 @@ it("composes two plugins around the preceding result", async () => {
 });
 
 it.each([
-  { sectionKey: "channels", preferenceKey: "channels", label: "Team" },
+  { sectionKey: "channels", preferenceKey: "channels", label: "Channels" },
   { sectionKey: "group:work", preferenceKey: "section:work", label: "Work" },
 ])(
   "persists a plugin sort for $sectionKey across disable and re-enable",
@@ -3592,7 +3582,7 @@ it.each([
       act(() => registry.disable());
       await waitFor(() => expect(order()).toEqual(["alpha", "beta", "gamma"]));
       expect(sort[preferenceKey]).toBe("plugin:fixture0/order/reverse");
-      const options = await sortMenu(user, label);
+      const options = await viewMenu(user, label, "Sort");
       expect(
         within(options).queryByRole("menuitemradio", { name: "Reverse name" }),
       ).toBeNull();
@@ -3649,7 +3639,7 @@ it.each(["throw", "non-finite"] as const)(
         ].map((el) => el.getAttribute("data-channel-id")),
       ).toEqual(["alpha", "beta", "gamma"]);
       const user = userEvent.setup();
-      const options = await sortMenu(user, "Team");
+      const options = await viewMenu(user, "Channels", "Sort");
       expect(
         within(options).getByRole("menuitemradio", { name: "Broken sort" }),
       ).toHaveAttribute("aria-checked", "true");
@@ -3803,7 +3793,7 @@ it("updates decorated unread data and a selected unread sort without rewriting p
     expect(renderRow.mock.calls.map(([row]) => row.id)).toEqual(["beta"]);
     expect(order()).toEqual(["alpha", "beta", "gamma"]);
     const user = userEvent.setup();
-    await chooseView(user, "Team", "Unread first");
+    await chooseView(user, "Channels", "Unread first");
     await waitFor(() => expect(order()).toEqual(["beta", "alpha", "gamma"]));
     expect(writeSort).toHaveBeenCalledOnce();
     publish(null);

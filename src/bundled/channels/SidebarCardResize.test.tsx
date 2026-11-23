@@ -8,376 +8,284 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
+import { SidebarCardResize } from "./SidebarCardResize";
+import { SidebarSection } from "./SidebarSection";
+import { useSidebarView } from "./useSidebarView";
 
 const ROW = 32;
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 beforeEach(() => {
   localStorage.clear();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-reduced-motion: reduce)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) => {
     run(0);
     return 1;
   });
+  // jsdom has no layout. Give even newly mounted rows a fixed pitch.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: HTMLElement) {
+      const index = this.hasAttribute("data-card-row")
+        ? [...document.querySelectorAll("[data-card-row]")].indexOf(this)
+        : 0;
+      return { top: index * ROW, bottom: (index + 1) * ROW } as DOMRect;
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(
+    function (this: HTMLElement) {
+      return this.querySelectorAll("[data-card-row]").length * ROW;
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+    function (this: HTMLElement) {
+      return this.style.maxHeight
+        ? Number.parseFloat(this.style.maxHeight)
+        : this.scrollHeight;
+    },
+  );
 });
 
 type Mark = "dm" | "mention" | "channel" | "muted";
 
 function Card({
   rows,
+  excluded = 0,
   marks = {},
-  seeAll,
 }: {
   rows: number;
-  seeAll?: { full: boolean; hidden: boolean; open(): void };
+  excluded?: number;
   /** Unread on a row: a DM, a mention of you, ordinary channel backlog, or a
    * mention in a muted channel. */
   marks?: Record<number, Mark>;
 }) {
-  const [height, resize, toggle] = useSidebarCardHeight("scope", "group:work");
-  return (
-    <div data-testid="card" data-height={String(height)}>
-      <SidebarCardResize
-        label="Work"
-        height={height}
-        onResize={resize}
-        onToggle={toggle}
-        seeAll={seeAll}
-      >
-        {Array.from({ length: rows }, (_, index) => `Row ${index}`).map(
-          (row) => (
-            <div key={row} data-card-row="">
-              <button
-                type="button"
-                data-channel-id={row}
-                data-channel-type={
-                  marks[Number(row.slice(4))] === "dm" ? "dm" : "stream"
+  const renderRows = (count: number, start: number) =>
+    Array.from({ length: count }, (_, index) => `Row ${start + index}`).map(
+      (row) => (
+        <div key={row} data-card-row="">
+          <button
+            type="button"
+            data-channel-id={row}
+            data-channel-type={
+              marks[Number(row.slice(4))] === "dm" ? "dm" : "stream"
+            }
+          >
+            {row}
+            {marks[Number(row.slice(4))] && (
+              <span
+                data-channel-unread=""
+                data-channel-muted={
+                  marks[Number(row.slice(4))] === "muted" ? "" : undefined
                 }
-              >
-                {row}
-                {marks[Number(row.slice(4))] && (
-                  <span
-                    data-channel-unread=""
-                    data-channel-muted={
-                      marks[Number(row.slice(4))] === "muted" ? "" : undefined
-                    }
-                  />
-                )}
-                {marks[Number(row.slice(4))] &&
-                  marks[Number(row.slice(4))] !== "channel" && (
-                    <span data-channel-waiting="" hidden />
-                  )}
-              </button>
-            </div>
-          ),
-        )}
-      </SidebarCardResize>
-    </div>
+              />
+            )}
+            {marks[Number(row.slice(4))] &&
+              marks[Number(row.slice(4))] !== "channel" && (
+                <span data-channel-waiting="" hidden />
+              )}
+          </button>
+        </div>
+      ),
+    );
+  return (
+    <SidebarCardResize
+      label="Work"
+      excludedCount={excluded}
+      excludedRows={() => renderRows(excluded, rows)}
+    >
+      {renderRows(rows, 0)}
+    </SidebarCardResize>
   );
 }
 
-/** jsdom has no layout: stack rows at a fixed pitch from the list's top. */
-function layOut(pitch = ROW) {
-  const rows = [...document.querySelectorAll<HTMLElement>("[data-card-row]")];
-  const list = rows[0]?.parentElement as HTMLElement;
-  for (const [index, row] of rows.entries())
-    row.getBoundingClientRect = () =>
-      ({ top: index * pitch, bottom: (index + 1) * pitch }) as DOMRect;
-  list.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
-  Object.defineProperty(list, "scrollHeight", {
-    value: rows.length * pitch,
-    configurable: true,
-  });
-  Object.defineProperty(list, "offsetHeight", {
-    get: () => Number.parseFloat(list.style.maxHeight) || rows.length * pitch,
-    configurable: true,
-  });
-  return list;
-}
+const grip = () => screen.getByRole("separator", { name: "Resize Work" });
+const size = () =>
+  document.querySelector<HTMLElement>("[data-card-rows]")?.style.maxHeight;
+const press = (key: string) => fireEvent.keyDown(grip(), { key });
+const drag = (start: number, end: number, release = true) => {
+  fireEvent.pointerDown(grip(), { button: 0, pointerId: 1, clientY: start });
+  fireEvent.pointerMove(window, { pointerId: 1, clientY: end });
+  if (release) fireEvent.pointerUp(window, { pointerId: 1, clientY: end });
+};
 
-it("offers a grip only when there is a row to hide", async () => {
-  const { rerender } = render(<Card rows={1} />);
-  expect(screen.queryByLabelText("Resize Work")).toBeNull();
-  rerender(<Card rows={3} />);
-  expect(await screen.findByLabelText("Resize Work")).toBeInTheDocument();
+it("shows every matching row, including when the count exceeds ten", () => {
+  const { rerender } = render(<Card rows={12} />);
+  expect(screen.getAllByRole("button")).toHaveLength(12);
+  expect(screen.queryByRole("separator")).toBeNull();
+  rerender(<Card rows={12} excluded={2} />);
+  expect(size()).toBe("");
+  expect(grip()).toHaveAttribute("aria-valuemin", "12");
+  expect(grip()).toHaveAttribute("aria-valuenow", "12");
+  expect(screen.queryByText("Row 12")).toBeNull();
 });
 
-it("follows the pointer, settles on a whole row, and remembers it", () => {
-  render(<Card rows={5} />);
-  const list = layOut();
-  const grip = screen.getByLabelText("Resize Work");
-  fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 160 });
-  fireEvent.pointerMove(window, { pointerId: 1, clientY: 110 });
-  expect(list.style.maxHeight).toBe("110px");
-  fireEvent.pointerUp(window, { pointerId: 1, clientY: 110 });
-  expect(list.style.maxHeight).toBe(`${3 * ROW}px`);
-  cleanup();
-  render(<Card rows={5} />);
-  expect(
-    document.querySelector<HTMLElement>("[data-card-row]")?.parentElement?.style
-      .maxHeight,
-  ).toBe(`${3 * ROW}px`);
+it("drags through excluded rows and cannot shrink below the filtered list", () => {
+  render(<Card rows={12} excluded={3} />);
+  drag(384, 425, false);
+  expect(size()).toBe("425px");
+  fireEvent.pointerUp(window, { pointerId: 1, clientY: 425 });
+  expect(size()).toBe("416px");
+  expect(grip()).toHaveAttribute("aria-valuetext", "13 of 15 rows");
+  expect(screen.getByText("Row 13").parentElement).toHaveProperty(
+    "inert",
+    true,
+  );
+  drag(416, 100);
+  expect(size()).toBe("");
+  expect(screen.queryByText("Row 12")).toBeNull();
+  expect(grip()).toHaveAttribute("aria-valuenow", "12");
 });
 
-it("steps a row with the keyboard, and double-click toggles full and back", () => {
-  render(<Card rows={5} />);
-  const list = layOut();
-  const grip = screen.getByLabelText("Resize Work");
-  fireEvent.keyDown(grip, { key: "ArrowUp" });
-  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
-  // A double-click's own clicks press and release without moving.
-  for (const _ of [1, 2]) {
-    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 128 });
-    fireEvent.pointerUp(window, { pointerId: 1, clientY: 128 });
-  }
-  expect(grip.style.pointerEvents).toBe("");
-  fireEvent.doubleClick(grip);
-  expect(list.style.maxHeight).toBe("");
-  fireEvent.doubleClick(grip);
-  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
+it("restores the settled count when a drag is cancelled", () => {
+  render(<Card rows={3} excluded={4} />);
+  press("ArrowDown");
+  drag(128, 184, false);
+  fireEvent.pointerCancel(window, { pointerId: 1 });
+  expect(size()).toBe("128px");
+  expect(grip()).toHaveAttribute("aria-valuenow", "4");
+  expect(document.documentElement.style.cursor).toBe("");
 });
 
-it("tells assistive technology how many rows show, and Enter toggles full", () => {
-  render(<Card rows={5} />);
-  const list = layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  fireEvent.keyDown(grip, { key: "ArrowUp" });
-  expect(grip).toHaveAttribute("aria-valuenow", "4");
-  expect(grip).toHaveAttribute("aria-valuemax", "5");
-  expect(grip).toHaveAttribute("aria-valuetext", "4 of 5 rows");
-  fireEvent.keyDown(grip, { key: "Enter" });
-  expect(list.style.maxHeight).toBe("");
-  expect(grip).toHaveAttribute("aria-valuenow", "5");
-  fireEvent.keyDown(grip, { key: "Enter" });
-  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
+it("steps with the keyboard and toggles all extras back to the filter", () => {
+  render(<Card rows={2} excluded={3} />);
+  press("ArrowUp");
+  expect(grip()).toHaveAttribute("aria-valuenow", "2");
+  press("ArrowDown");
+  expect(grip()).toHaveAttribute("aria-valuenow", "3");
+  fireEvent.doubleClick(grip());
+  expect(grip()).toHaveAttribute("aria-valuenow", "5");
+  expect(size()).toBe("");
+  press("Enter");
+  expect(grip()).toHaveAttribute("aria-valuetext", "2 of 5 rows");
+  expect(screen.queryByText("Row 2")).toBeNull();
 });
 
-it("keeps the grip showing while rows are past the card's edge", () => {
-  render(<Card rows={5} />);
-  layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  fireEvent.keyDown(grip, { key: "ArrowUp" });
-  expect(grip).toHaveAttribute("data-more");
-  fireEvent.keyDown(grip, { key: "Enter" });
-  expect(grip).not.toHaveAttribute("data-more");
+it("keeps the filter floor current and resets the expansion on remount", () => {
+  const { rerender, unmount } = render(<Card rows={2} excluded={4} />);
+  press("ArrowDown");
+  rerender(<Card rows={4} excluded={2} />);
+  expect(grip()).toHaveAttribute("aria-valuemin", "4");
+  expect(grip()).toHaveAttribute("aria-valuenow", "5");
+  expect(size()).toBe("160px");
+  unmount();
+  render(<Card rows={4} excluded={2} />);
+  expect(grip()).toHaveAttribute("aria-valuenow", "4");
+  expect(screen.queryByText("Row 4")).toBeNull();
 });
 
-it("counts unread that waits on you past the edge, and opens to the lowest", () => {
-  render(<Card rows={6} marks={{ 3: "dm", 4: "channel", 5: "mention" }} />);
-  const list = layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
-  for (const _ of [1, 2, 3]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-  expect(list.style.maxHeight).toBe(`${3 * ROW}px`);
-  // The DM and the mention count; ordinary channel backlog does not.
+it("allows disclosure even when no rows match", () => {
+  render(<Card rows={0} excluded={1} />);
+  expect(grip()).toHaveAttribute("aria-valuemin", "0");
+  press("Enter");
+  expect(screen.getByText("Row 0")).toBeVisible();
+  press("Enter");
+  expect(screen.queryByText("Row 0")).toBeNull();
+});
+
+it("routes attention cues to the lowest remaining unread and returns keyboard focus", () => {
+  render(
+    <Card
+      rows={2}
+      excluded={5}
+      marks={{ 3: "dm", 4: "channel", 5: "mention", 6: "muted" }}
+    />,
+  );
+  press("ArrowDown");
   const badge = screen.getByRole("button", {
     name: "Show 2 unread conversations below in Work",
   });
-  expect(badge).toHaveTextContent("2 unread");
-  fireEvent.click(badge);
-  // The mention is the last row, so the card opens full.
-  expect(list.style.maxHeight).toBe("");
-  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
-});
-
-it("opens only as far as the lowest unread that waits on you", () => {
-  render(<Card rows={6} marks={{ 3: "mention", 5: "channel" }} />);
-  const list = layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  for (const _ of [1, 2, 3]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Show 1 unread conversation below in Work",
-    }),
-  );
-  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
-  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
-});
-
-it("follows a marker that changes in place, and leaves muted ones out", async () => {
-  const { rerender } = render(<Card rows={5} marks={{ 4: "channel" }} />);
-  layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
-  // The same row's backlog becomes a mention of you.
-  rerender(<Card rows={5} marks={{ 4: "mention" }} />);
-  await act(async () => {});
-  expect(
-    screen.getByRole("button", {
-      name: "Show 1 unread conversation below in Work",
-    }),
-  ).toBeInTheDocument();
-  // Then its channel is muted, without the row re-rendering.
-  await act(async () => {
-    document
-      .querySelector('[data-channel-id="Row 4"] [data-channel-unread]')
-      ?.setAttribute("data-channel-muted", "");
-  });
-  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
-});
-
-it("never counts a muted conversation past the edge", () => {
-  render(<Card rows={5} marks={{ 3: "muted", 4: "dm" }} />);
-  layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-  expect(
-    screen.getByRole("button", {
-      name: "Show 1 unread conversation below in Work",
-    }),
-  ).toBeInTheDocument();
-});
-
-it("hands focus to the grip when the badge is used from the keyboard", () => {
-  render(<Card rows={5} marks={{ 3: "mention" }} />);
-  layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-  const badge = screen.getByRole("button", {
-    name: "Show 1 unread conversation below in Work",
-  });
-  badge.focus();
-  // Keyboard activation clicks with no pointer detail.
   fireEvent.click(badge, { detail: 0 });
-  expect(badge).not.toBeInTheDocument();
-  expect(grip).toHaveFocus();
+  expect(grip()).toHaveFocus();
+  expect(grip()).toHaveAttribute("aria-valuenow", "6");
+  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
 });
 
-it("remembers full, not a pixel height, when the badge opens to the last row", () => {
-  render(<Card rows={5} marks={{ 4: "dm" }} />);
-  const list = layOut();
-  const grip = screen.getByRole("separator", { name: "Resize Work" });
-  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Show 1 unread conversation below in Work",
-    }),
-  );
-  expect(list.style.maxHeight).toBe("");
-  expect(screen.getByTestId("card")).toHaveAttribute(
-    "data-height",
-    String(Number.MAX_SAFE_INTEGER),
-  );
-});
-
-it("hints at the grip until it has been dragged or double-clicked once", () => {
-  render(<Card rows={5} />);
-  layOut();
-  const grip = screen.getByLabelText("Resize Work");
-  const hinted = () => grip.hasAttribute("aria-describedby");
-  fireEvent.focus(grip);
-  expect(hinted()).toBe(true);
-  // A press without a drag teaches nothing yet.
-  fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 160 });
-  fireEvent.pointerUp(window, { pointerId: 1, clientY: 160 });
-  fireEvent.focus(grip);
-  expect(hinted()).toBe(true);
-  fireEvent.doubleClick(grip);
-  fireEvent.focus(grip);
-  expect(hinted()).toBe(false);
-  // Every card on this device stays quiet afterwards.
-  cleanup();
-  render(<Card rows={5} />);
-  const next = screen.getByLabelText("Resize Work");
-  fireEvent.focus(next);
-  expect(next.hasAttribute("aria-describedby")).toBe(false);
-});
-
-/** Lay rows out before the first render, so the default clip can measure. */
-function layOutAhead() {
-  const rect = vi
-    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-    .mockImplementation(function (this: HTMLElement) {
-      if (!this.hasAttribute("data-card-row")) return { top: 0 } as DOMRect;
-      const index = [...(this.parentElement?.children ?? [])].indexOf(this);
-      return { top: index * ROW, bottom: (index + 1) * ROW } as DOMRect;
-    });
-  const height = vi
-    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
-    .mockImplementation(function (this: HTMLElement) {
-      return this.querySelectorAll("[data-card-row]").length * ROW;
-    });
-  return () => {
-    rect.mockRestore();
-    height.mockRestore();
-  };
-}
-
-it("shows ten rows until changed, full shows every row, and full toggles back to ten", () => {
-  const restore = layOutAhead();
+it("returns to the filter after 15 seconds without activity in the card", () => {
+  vi.useFakeTimers();
   try {
-    render(<Card rows={60} />);
-    const list = document.querySelector<HTMLElement>("[data-card-row]")
-      ?.parentElement as HTMLElement;
-    expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
-    const grip = screen.getByLabelText("Resize Work");
-    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 320 });
-    fireEvent.pointerMove(window, { pointerId: 1, clientY: 9000 });
-    fireEvent.pointerUp(window, { pointerId: 1, clientY: 9000 });
-    // All sixty rows show, with no cap.
-    expect(list.style.maxHeight).toBe("");
-    // Full with nothing to go back to returns to the first ten rows.
-    fireEvent.doubleClick(grip);
-    expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
+    render(<Card rows={2} excluded={3} />);
+    press("Enter");
+    act(() => vi.advanceTimersByTime(14_000));
+    expect(grip()).toHaveAttribute("aria-valuenow", "5");
+    fireEvent.pointerMove(grip());
+    act(() => vi.advanceTimersByTime(14_999));
+    expect(grip()).toHaveAttribute("aria-valuenow", "5");
+    act(() => vi.advanceTimersByTime(1));
+    expect(grip()).toHaveAttribute("aria-valuenow", "2");
+    expect(screen.queryByText("Row 2")).toBeNull();
   } finally {
-    restore();
+    vi.useRealTimers();
   }
 });
 
-it("makes rows past the card's edge inert and lands a saved height on a whole row", () => {
-  render(<Card rows={5} />);
-  const list = layOut();
-  const grip = screen.getByLabelText("Resize Work");
-  // Release between rows two and three, then change the text size so the
-  // saved height no longer falls on a row edge.
-  fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 160 });
-  fireEvent.pointerMove(window, { pointerId: 1, clientY: 70 });
-  fireEvent.pointerUp(window, { pointerId: 1, clientY: 70 });
-  expect(list.style.maxHeight).toBe(`${2 * ROW}px`);
-  const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
-  expect(rows.map((row) => row.inert === true)).toEqual([
-    false,
-    false,
-    true,
-    true,
-    true,
-  ]);
-  expect(rows[2]).toHaveAttribute("data-card-clipped");
-  // Larger text: rows are now 40px tall, so 64px is nearest to row two's end.
-  layOut(40);
-  fireEvent.doubleClick(grip);
-  fireEvent.doubleClick(grip);
-  expect(list.style.maxHeight).toBe("80px");
-  expect(rows.map((row) => row.inert === true)).toEqual([
-    false,
-    false,
-    true,
-    true,
-    true,
-  ]);
-  // A row leaving the list is inert on its own; clipping never wakes it.
-  (rows[0] as HTMLElement).inert = true;
-  fireEvent.doubleClick(grip);
-  expect(rows.map((row) => row.inert === true)).toEqual([
-    true,
-    false,
-    false,
-    false,
-    false,
-  ]);
-});
+it.each(["heading", "keyboard", "drag"])(
+  "returns a partial contraction to the filter and persists minimization by %s",
+  (method) => {
+    function Workspace() {
+      const sectionKey = "group:work";
+      const view = useSidebarView("resize-test", true);
+      return (
+        <SidebarSection
+          sectionKey={sectionKey}
+          title="Work"
+          open={!view.collapsed.includes(sectionKey)}
+          onToggle={(open) => view.toggle(sectionKey, open)}
+          heightScope="resize-test"
+        >
+          <div data-card-row="">First match</div>
+          <div data-card-row="">Second match</div>
+        </SidebarSection>
+      );
+    }
+    const heading = () =>
+      screen.getByLabelText("Work", { selector: "summary" });
+    const expanded = () => heading().closest("details");
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(<Workspace />);
+      drag(64, 32);
+      expect(grip()).toHaveAttribute("aria-valuenow", "1");
+      act(() => vi.advanceTimersByTime(14_999));
+      expect(grip()).toHaveAttribute("aria-valuenow", "1");
+      act(() => vi.advanceTimersByTime(1));
+      expect(grip()).toHaveAttribute("aria-valuenow", "2");
 
-it("ends a card cut short with See all, and shows every row with no grip once in", () => {
-  const open = vi.fn();
-  const { rerender } = render(
-    <Card rows={3} seeAll={{ full: false, hidden: false, open }} />,
-  );
-  // Every row shows and the filter hides none: nothing more to see.
-  expect(screen.queryByRole("button", { name: "See all in Work" })).toBeNull();
-  rerender(<Card rows={3} seeAll={{ full: false, hidden: true, open }} />);
-  fireEvent.click(screen.getByRole("button", { name: "See all in Work" }));
-  expect(open).toHaveBeenCalledOnce();
-  rerender(<Card rows={3} seeAll={{ full: true, hidden: true, open }} />);
-  expect(screen.queryByRole("button", { name: "See all in Work" })).toBeNull();
-  expect(screen.queryByLabelText("Resize Work")).toBeNull();
-});
+      press("ArrowUp");
+      if (method === "keyboard") {
+        grip().focus();
+        press("ArrowUp");
+        expect(grip()).toHaveFocus();
+      } else if (method === "drag") {
+        drag(32, 0);
+      } else {
+        fireEvent.click(heading());
+      }
+      expect(expanded()).not.toHaveAttribute("open");
+      expect(grip()).toHaveAttribute("aria-valuenow", "0");
+      act(() => vi.advanceTimersByTime(15_001));
+      expect(expanded()).not.toHaveAttribute("open");
+      unmount();
+      render(<Workspace />);
+      expect(expanded()).not.toHaveAttribute("open");
+      expect(grip()).toHaveAttribute("aria-valuetext", "Minimized");
+      if (method === "keyboard") press("ArrowDown");
+      else if (method === "drag") {
+        drag(0, 32, false);
+        fireEvent.pointerCancel(window, { pointerId: 1 });
+        expect(expanded()).not.toHaveAttribute("open");
+        drag(0, 32);
+      } else fireEvent.doubleClick(grip());
+      expect(expanded()).toHaveAttribute("open");
+      expect(grip()).toHaveAttribute("aria-valuenow", "2");
+      expect(size()).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);

@@ -1,4 +1,4 @@
-import { filterButton, selectCommunity } from "./navigation.mjs";
+import { selectCommunity } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test as base, expect } from "./fixture.mjs";
 import { streamEvidence } from "./stream-evidence.mjs";
@@ -96,19 +96,6 @@ const inView = (page, id) =>
       rect.bottom <= viewport.bottom
     );
   });
-// Cards clip to their first rows; these journeys scroll the whole roster, so
-// each card with more rows shows all of them first, as its grip's Enter does.
-const showAllRows = async (page) => {
-  for (const grip of await sidebar(page)
-    .getByRole("separator", { name: /^Resize / })
-    .all()) {
-    const all = await grip.getAttribute("aria-valuemax");
-    if ((await grip.getAttribute("aria-valuenow")) === all) continue;
-    await grip.focus();
-    await grip.press("Enter");
-    await expect(grip).toHaveAttribute("aria-valuenow", all);
-  }
-};
 const heads = (app) =>
   app.report.queries.filter(
     ({ filter }) => filter.kinds?.includes(9) && filter["#h"]?.length === 1,
@@ -119,7 +106,6 @@ test("DM hide control removes a row and a new message restores it", async ({
   app,
 }, info) => {
   await open(page, app);
-  await showAllRows(page);
   const dm = row(page, "dm-030");
   await expect(dm).toBeVisible();
   const badge = dm.locator("[data-channel-unread]");
@@ -272,9 +258,6 @@ test("channel establishment preserves an in-flight unread batch and its sidebar 
     app.relay.releaseUnread();
     await expect(row(page, "dm-030").getByRole("img")).toHaveCount(1);
     await expect(row(page, "dm-090").getByRole("img")).toHaveCount(1);
-    // At default card heights the far DMs are past the card's edge, so no cue.
-    await expectCueHidden(page, "below");
-    await showAllRows(page);
     await expect(cue(page, "below")).toBeVisible();
     await expect(cue(page, "below")).toHaveCSS("border-radius", "34px");
     await expect(cue(page, "below").locator("..")).toHaveCSS(
@@ -326,7 +309,6 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
     app.relay.releaseEose("alpha");
     await opening;
   }
-  await showAllRows(page);
   // The selected channel's row is quiet: opening it saw its unread.
   const selected = row(page, "alpha");
   await expect(selected).toHaveAttribute("aria-current", "page");
@@ -460,36 +442,25 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   await expect(row(page, "dm-030")).toHaveAttribute("aria-current", "page");
 });
 
-test("at default card heights the edge cue leads to the card's badge for rows past its edge", async ({
+test("an unfiltered card shows its unread rows beyond the first ten", async ({
   page,
   app,
 }) => {
-  // Short enough that the Direct messages card's badge starts offscreen.
   await page.setViewportSize({ width: 1440, height: 500 });
   await open(page, app);
   const dm = row(page, "dm-030");
-  // Unexpanded, the Direct messages card clips dm-030 past its edge.
   await expect(dm.locator("[data-channel-unread]")).toBeAttached();
-  await expect(dm.locator("xpath=ancestor::*[@data-card-clipped]")).toHaveCount(
-    1,
-  );
-  // The card's badge stands in for it, and the edge cue leads there.
-  const badge = sidebar(page).getByRole("button", {
-    name: /^Show \d+ unread conversations? below in Direct messages$/,
-  });
-  await expect(badge).toBeAttached();
-  await scroll(page, 0);
-  await expect(badge).not.toBeInViewport();
-  await expect(cue(page, "below")).toBeVisible();
-  await cue(page, "below").click();
-  await expect(badge).toBeFocused();
-  await expect(badge).toBeInViewport();
-  // The badge opens the card to the lowest of them, then goes away.
-  await badge.click();
   await expect(dm.locator("xpath=ancestor::*[@data-card-clipped]")).toHaveCount(
     0,
   );
-  await expect(badge).toHaveCount(0);
+  await expect(
+    sidebar(page).getByRole("separator", { name: "Resize Direct messages" }),
+  ).toHaveCount(0);
+  await scroll(page, 0);
+  await expect(cue(page, "below")).toBeVisible();
+  await cue(page, "below").click();
+  await expect(dm).toBeFocused();
+  await expect.poll(() => inView(page, "dm-030")).toBe(true);
 });
 
 test("resizing, collapsed groups and new unread evidence update only the displayed roster", async ({
@@ -497,10 +468,9 @@ test("resizing, collapsed groups and new unread evidence update only the display
   app,
 }) => {
   await open(page, app);
-  await showAllRows(page);
   await expect(row(page, "dm-090").getByRole("img")).toHaveCount(1);
   await expect(cue(page, "below")).toBeVisible();
-  // Messages behind the Team heading sit above the DMs in this scrollport.
+  // Messages behind the Channels heading sit above the DMs in this scrollport.
   const team = list(page).locator('[data-sidebar-section="channels"]');
   const channelsSummary = team.locator("summary");
   await channelsSummary.click();
@@ -522,10 +492,8 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await channelsSummary.focus();
   await page.keyboard.press("Tab");
   await expect(
-    list(page).getByRole("button", { name: "More actions for Team" }),
+    list(page).getByRole("button", { name: "More actions for Channels" }),
   ).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(filterButton(list(page), "Team")).toBeFocused();
   await page.keyboard.press("Tab");
   // Disabled header actions are skipped; traversal still reaches rows only
   // after the available header controls.
@@ -605,7 +573,6 @@ test("session changes discard the previous sidebar targets and manual unread alo
   seedMention(app, "secondary", "beta");
   try {
     await open(page, app);
-    await showAllRows(page);
     await expect(cue(page, "below")).toBeVisible();
     await selectCommunity(page, "Secondary");
     await expect(
@@ -632,7 +599,6 @@ test("session changes discard the previous sidebar targets and manual unread alo
     await expect(
       page.getByText("Updating sidebar details…", { exact: true }),
     ).toHaveCount(0);
-    await showAllRows(page);
     await scroll(page, 1800);
     // Beta's mention waits on the viewer; Alpha's manual unread does not.
     await expect(cue(page, "above")).toHaveAccessibleName(
@@ -703,7 +669,7 @@ test("priority dots stay aligned and use the prominent mark color in both modes"
               row.getBoundingClientRect().right -
                 Number.parseFloat(fill.right) -
                 marker.right ===
-              12,
+              14,
             separated: marker.left - label.right >= 6,
           };
         }),

@@ -20,6 +20,7 @@ import { ChannelInventory } from "./ChannelInventory";
 import { SidebarBoundary } from "../../features/channel-navigation/SidebarBoundary";
 import { SidebarList } from "../../features/channel-navigation/SidebarList";
 import { SidebarUnread } from "./SidebarUnread";
+import { isWorkspaceCard, sidebarHomeSections } from "./sidebar-sections";
 import { Button } from "../../shared/design-system/ui/Button";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
@@ -183,7 +184,6 @@ function ScopedSidebar({
     <SidebarBoundary key={`${scope}:${connection.generation}`} header={header}>
       {session && inventory ? (
         <ChannelInventory
-          pages={props.children}
           relay={props.relay}
           navigator={props.navigator}
           agents={props.agents}
@@ -229,22 +229,21 @@ function ScopedSidebar({
                 settled: sourcesSettled,
                 onReady: slotsCommitted,
                 children: (slots, sources) => {
-                  const teamContent = (
-                    <>
-                      {slots
-                        .filter(
-                          (slot) =>
-                            slot.scope === "team" &&
-                            (!restriction ||
-                              slot.source.component ===
-                                teamSidebarSource.component),
-                        )
-                        .map((slot) => (
-                          <SidebarSectionSlotView key={slot.key} slot={slot} />
-                        ))}
-                      {content}
-                    </>
-                  );
+                  const pluginSlots = [];
+                  const workspaceSlots = [];
+                  const homeSlots = [];
+                  const soloSlots = [];
+                  for (const slot of slots) {
+                    if (slot.scope === "solo") soloSlots.push(slot);
+                    if (slot.scope !== "team") continue;
+                    const builtIn =
+                      slot.source.component === teamSidebarSource.component;
+                    if (builtIn && sidebarHomeSections.includes(slot.id))
+                      homeSlots.push(slot);
+                    else if (builtIn && isWorkspaceCard(slot.id))
+                      workspaceSlots.push(slot);
+                    else if (builtIn || !restriction) pluginSlots.push(slot);
+                  }
                   return (
                     <>
                       {sources(
@@ -299,15 +298,46 @@ function ScopedSidebar({
                           dmPreviews={dmPreviews}
                           floatingAction={footer ? floatingAction : undefined}
                         >
-                          {teamContent}
-                          {slots
-                            .filter((slot) => slot.scope === "solo")
-                            .map((slot) => (
-                              <SidebarSectionSlotView
-                                key={slot.key}
-                                slot={slot}
-                              />
-                            ))}
+                          {props.children && (
+                            <div
+                              className={styles.sidebarPages}
+                              data-sidebar-card=""
+                            >
+                              {props.children}
+                            </div>
+                          )}
+                          {pluginSlots.map((slot) => (
+                            <SidebarSectionSlotView
+                              key={slot.key}
+                              slot={slot}
+                            />
+                          ))}
+                          {workspaceSlots.map((slot) => (
+                            <SidebarSectionSlotView
+                              key={slot.key}
+                              slot={slot}
+                            />
+                          ))}
+                          {content}
+                          {soloSlots.map((slot) => (
+                            <SidebarSectionSlotView
+                              key={slot.key}
+                              slot={slot}
+                            />
+                          ))}
+                          {homeSlots.length > 0 && (
+                            <div
+                              className={styles.sidebarHomes}
+                              data-sidebar-homes=""
+                            >
+                              {homeSlots.map((slot) => (
+                                <SidebarSectionSlotView
+                                  key={slot.key}
+                                  slot={slot}
+                                />
+                              ))}
+                            </div>
+                          )}
                         </SidebarUnread>
                         {after}
                       </props.Frame>

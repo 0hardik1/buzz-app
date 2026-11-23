@@ -105,7 +105,7 @@ test("working badges align in their rows and clear the Solo actions button", asy
             };
           }),
         )
-        .toEqual({ center: 0, inset: 0.625 });
+        .toEqual({ center: 0, inset: 0.75 });
     }
     const restingWidth = await titleWidth();
     await expect.poll(labelMask).toBe("none");
@@ -291,7 +291,7 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
     await expect
       .poll(() => drafts.evaluate(columnsAgainstChannelRow))
       .toEqual({
-        inset: 0.5,
+        inset: 0.625,
         start: 0,
         icon: 0,
         label: 0,
@@ -303,10 +303,10 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
       .poll(() =>
         drafts.evaluate((row) => {
           const firstSection = document.querySelector(
-            '[aria-label="Subscribed channels"] [data-sidebar-section]:not([data-sidebar-section="pages"])',
+            '[aria-label="Subscribed channels"] [data-sidebar-section]',
           );
           if (!firstSection) return undefined;
-          // Page rows live in the Plugins card; cards sit one panel gap (0.5rem) apart.
+          // Page rows sit one panel gap ahead of the conversation sections.
           const card = row.closest("[data-sidebar-card]");
           if (!card) return undefined;
           const gap =
@@ -345,8 +345,11 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
         row.evaluate((element) => element.getBoundingClientRect().top),
       ),
     );
-  // Activity and Drafts & sent sit in the Plugins card, so they scroll away
-  // with the cards instead of staying pinned above them.
+  // The page rows lead the list and scroll with it.
+  await expect(list.getByLabel("Plugins", { exact: true })).toHaveCount(0);
+  await expect(
+    list.getByRole("button", { name: "More actions for Plugins", exact: true }),
+  ).toHaveCount(0);
   const before = await positions();
   await list.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
@@ -514,7 +517,8 @@ test("a presence badge preserves the sidebar avatar center and header insets", a
 // The sidebar is fluid, like auto layout: rows and headings fill their list,
 // a heading's label fills and its actions hug, and nothing floats over or
 // reserves space for anything else. Workspaces and built-in sections share
-// these bounds even at the narrowest sidebar width.
+// these bounds even at the narrowest sidebar width. Workspace cards use
+// a tighter side inset.
 test("the unified sidebar fills its rows and keeps heading actions in their row at any width", async ({
   page,
   app,
@@ -573,13 +577,24 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
         problems.push(
           `list scrolls sideways by ${scroller.scrollWidth - scroller.clientWidth}px`,
         );
+      // Compare the shared row geometry after accounting for the workspace
+      // side inset (space-half instead of space-1h, a difference of 0.25rem).
+      const rem = parseFloat(
+        getComputedStyle(document.documentElement).fontSize,
+      );
+      const insetDifference = (element) =>
+        element.closest("[data-sidebar-workspace]") ? rem * 0.25 : 0;
+      // Workspace headings add half a spacing step inside the card inset.
+      const headingInsetDifference = (element) => insetDifference(element) / 2;
       // Rows paint their fill on ::before, so its end is the visible edge.
       const spread = (values) => Math.max(...values) - Math.min(...values);
       const ends = rows
         .map((row) => getComputedStyle(row, "::before").right)
         .map((right, index) =>
           right.endsWith("px")
-            ? rows[index].getBoundingClientRect().right - parseFloat(right)
+            ? rows[index].getBoundingClientRect().right -
+              parseFloat(right) -
+              insetDifference(rows[index])
             : undefined,
         )
         .filter((end) => end !== undefined);
@@ -650,9 +665,10 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
             parseFloat(style.paddingInlineStart)
           )
             problems.push(`${name}: reserves trailing space`);
-          // Starred and custom workspaces can lead with an icon.
-          const leading = trigger.firstElementChild?.firstElementChild;
-          if (leading) leadingEdges.push(leading.getBoundingClientRect().left);
+          leadingEdges.push(
+            trigger.getBoundingClientRect().left +
+              headingInsetDifference(heading),
+          );
         }
         const buttons =
           actions && !collapsed ? [...actions.children].filter(shown) : [];
@@ -666,7 +682,10 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
             problems.push(`${name}: actions overlap`);
         });
         if (buttons.length)
-          actionEnds.push(buttons.at(-1).getBoundingClientRect().right);
+          actionEnds.push(
+            buttons.at(-1).getBoundingClientRect().right -
+              headingInsetDifference(heading),
+          );
       }
       if (leadingEdges.length && spread(leadingEdges) >= 1)
         problems.push(`headings start ${spread(leadingEdges)}px apart`);
@@ -793,11 +812,12 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
   expect(placed).toBe(true);
 });
 
-test("sidebar cards meet the conversation's top and sit one even gap apart", async ({
+test("sidebar cards keep an even gap above the bottom-aligned conversation sections", async ({
   page,
   app,
 }) => {
   await page.goto(app.origin);
+  const homes = page.locator("[data-sidebar-homes]");
   for (const [width, scale] of [
     [1440, 1],
     [900, 2],
@@ -808,21 +828,56 @@ test("sidebar cards meet the conversation's top and sit one even gap apart", asy
       .poll(() =>
         page.evaluate(() => {
           const main = document.getElementById("main-content");
-          const cards = [
-            ...document.querySelectorAll(
-              "[data-sidebar-cards] [data-sidebar-card]",
-            ),
-          ].map((card) => card.getBoundingClientRect());
-          if (!main || cards.length < 2) return undefined;
+          const homes = document.querySelector("[data-sidebar-homes]");
+          const list = homes?.closest("nav");
+          const content = homes?.parentElement;
+          if (!main || !homes || !list || !content) return undefined;
+          const cards = [...list.querySelectorAll("[data-sidebar-card]")]
+            .filter((card) => !homes.contains(card))
+            .map((card) => card.getBoundingClientRect());
+          if (!cards.length) return undefined;
+          const homeBounds = homes.getBoundingClientRect();
+          const bottomInset =
+            parseFloat(getComputedStyle(list).paddingBlockEnd) +
+            parseFloat(getComputedStyle(content).paddingBlockEnd);
+          const remainingScroll =
+            list.scrollHeight - list.clientHeight - list.scrollTop;
           const gaps = cards
             .slice(1)
             .map((card, index) => Math.round(card.top - cards[index].bottom));
           return {
             top: Math.round(cards[0].top - main.getBoundingClientRect().top),
             gaps: [...new Set(gaps)].length,
+            order: [...homes.querySelectorAll("[data-sidebar-section]")].map(
+              (section) => section.dataset.sidebarSection,
+            ),
+            clearOfCards: homeBounds.top >= cards.at(-1).bottom,
+            scrollable: list.scrollHeight > list.clientHeight,
+            bottom: Math.round(
+              list.getBoundingClientRect().bottom -
+                homeBounds.bottom -
+                bottomInset +
+                remainingScroll,
+            ),
           };
         }),
       )
-      .toEqual({ top: 0, gaps: 1 });
+      .toEqual({
+        top: 0,
+        gaps: 1,
+        order: ["channels", "solo", "dms"],
+        clearOfCards: true,
+        scrollable: scale > 1,
+        bottom: 0,
+      });
+    if (scale > 1) {
+      await homes.evaluate((group) => {
+        const list = group.closest("nav");
+        list.scrollTop = list.scrollHeight;
+      });
+      await expect(
+        homes.locator('[data-sidebar-section="dms"] summary'),
+      ).toBeInViewport();
+    }
   }
 });

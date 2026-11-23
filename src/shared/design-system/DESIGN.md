@@ -574,7 +574,7 @@ structure. The Typography page documents each role’s complete setting.
 
 Panel padding is 24px, control inset 16px, group gap 32px and page-section gap
 64px at the default scale. Values are rem-based. A solid shell with a quiet,
-hue-derived dot grid supports both color modes; content panels remain opaque.
+hue-derived dot grid supports both color modes. Content panels have opaque fills.
 Shell navigation uses flat fills, not glass. Dark text roles are selected for contrast on their intended surfaces.
 Host compatibility names resolve to the shared tokens.
 
@@ -676,7 +676,7 @@ Use the surface that matches the content and its position in the interface.
 
 - **Panels:** the shell joins sidebar navigation and the main content workspace into one surface beside the app dock. The sidebar resize grip sits on their shared `border-standard` seam. Both retain opaque surfaces when navigation overlays at narrow widths. Nested Panels keep their opaque fill and clipping but lose independent borders, corners, and shadows. The layout owner separates adjacent regions with `border-standard` hairlines. Standalone Panels use `radius-container` (24px) corners and `shadow-panel` for a translucent contour and subtle lift, rather than an opaque depth border.
 - **Recessed regions:** use `bg-inset` for a region pushed into its surrounding surface. Use `surface-inset-subtle` for a quieter reading pane, such as a search preview: it mixes the panel and inset surfaces equally in both modes. Use quiet fills where they communicate separation; reserve outlines for boundaries that need to be identified.
-- **Shell:** `bg-app` is a solid color, neutral-quiet-hover in light mode and neutral 2 in dark. The shell owns one continuous `texture-dots` grid beneath its header, rail and panes. Dots derive from this background: darker in light mode, lighter in dark mode, never an unrelated gray. The app root owns the background and its texture together. Do not override a descendant background and expect inherited texture colors to recompute. The pattern is decorative; do not increase its contrast to communicate state. The one exception to the solid shell is a backdrop a plugin explicitly registers ([shell backdrops](../../../docs/plugin-architecture.md#shell-backdrops)); the default shell has none. A backdrop may cover the dots and gutters only. Panes stay opaque, and the host keeps solid `bg-app` beneath each header control group and the app dock so their ink, fills and focus rings keep this background's contrast. The host shows no backdrop under reduced motion, reduced transparency or forced colors.
+- **Shell:** `bg-app` is a solid color, neutral-quiet-hover in light mode and neutral 2 in dark. The app root owns one continuous `texture-dots` grid derived from this color. Its dots are darker in light mode and lighter in dark mode. Sidebar pages, Sessions, Channels, and Direct messages sit on the grid. The narrow drawer paints its own grid over the conversation. Favorites and workspaces use the opaque panel fill and its standard outline at every height. A plugin can register a backdrop over the grid and gutters ([shell backdrops](../../../docs/plugin-architecture.md#shell-backdrops)). With a plugin backdrop present, the host keeps solid `bg-app` beneath the exposed sidebar rows, header control groups, and app dock. The host shows no plugin backdrop under reduced motion, reduced transparency or forced colors.
 - **Reading surfaces:** documentation and dense prose sit on opaque `bg-panel`. Keep the dot grid outside reading panes. Do not add gradient backgrounds to the app shell.
 - **Borders:** use `border-standard` for quiet separators, `border-prominent` for controls, and `border-focus` for keyboard-focus recipes. Errors and warnings have their own boundary roles. Measure the actual pairing in both themes.
 - **Shadows:** use the shared elevation roles and keep them subtle. Light mode relies on shadow; dark mode also raises the fill’s lightness. Do not strengthen a shadow to separate a dark floating surface.
@@ -993,8 +993,8 @@ channel is still loading, then holds about a second and fades over about a
 second. A repeat arrival restarts the cue. Reduced motion holds the tint the
 same time and removes it without fading.
 
-Coming back to a navigation row, such as Back from a sidebar card's See all,
-marks the row that opened the level you left with the same cue:
+When returning to a navigation row, use the same cue to mark the row that
+opened the level you left.
 `markNavigationArrival` sets `data-arrived` on a NavigationItem, which takes
 `surface-navigation-arrival` for about a second, then fades, replacing hover
 while it shows. Reduced motion holds and removes it without fading. Pair it

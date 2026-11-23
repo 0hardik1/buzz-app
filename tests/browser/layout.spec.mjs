@@ -325,11 +325,10 @@ test("joined sidebar and workspace surface, real link panel and compact communit
       (await box(page.locator(".shell-header"))).height +
       1,
   );
-  const background = await page
-    .locator(".shell-background")
-    .evaluate((el) => getComputedStyle(el).backgroundImage);
-  expect(background).toContain("radial-gradient");
-  // The opaque shell color and the decorative dot texture are separate.
+  await expect(page.locator(".shell-background")).toHaveCSS(
+    "background-image",
+    /radial-gradient/,
+  );
   const shellColor = await page.locator(".shell-background").evaluate((el) => {
     const probe = document.createElement("span");
     probe.style.backgroundColor = "var(--bg-app)";

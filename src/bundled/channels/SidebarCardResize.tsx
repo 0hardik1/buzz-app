@@ -1,3 +1,4 @@
+import { animate, motion, useReducedMotion, type Variants } from "motion/react";
 import {
   useCallback,
   useEffect,
@@ -7,136 +8,225 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { readView, subscribeView, writeView } from "../../shared/view-state";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
-import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
-import { CaretRightIcon } from "../../shared/design-system/icons";
 import { hasUnmutedUnread, waitsOnYou } from "./conversation-rows";
+import { sidebarResetMs } from "./sidebar-sections";
 import styles from "./Channels.module.css";
 
-const heightsKey = "sidebar:card-heights";
-/** Each full card's height from before it went full, for double-click back. */
-const restoreKey = "sidebar:card-restore";
-/** Rows a card shows until its grip is dragged. */
-const DEFAULT_ROWS = 10;
-/** The saved height of a card opened full. */
-const ALL_ROWS = Number.MAX_SAFE_INTEGER;
 /** Set once someone drags or double-clicks any grip on this device. */
 const learnedScope = "device";
 const learnedKey = "sidebar:grip-learned";
 const learn = () => writeView(learnedScope, learnedKey, true);
+const reopenDragPx = 4;
+const gripSpring = { type: "spring", stiffness: 380, damping: 20 } as const;
+const gripWidths: Variants = {
+  resting: { scaleX: 40 / 56 },
+  highlighted: { scaleX: 1 },
+  bouncing: {
+    scaleX: [0.8, 1],
+    transition: {
+      duration: 0.65,
+      ease: (progress) => (1 - Math.cos(Math.PI * progress)) / 2,
+      repeat: Infinity,
+      repeatType: "reverse",
+    },
+  },
+};
+export const sidebarHeightSpring = {
+  type: "spring",
+  stiffness: 360,
+  damping: 40,
+} as const;
 
-function savedHeights(scope: string, key: string): Record<string, number> {
-  const saved = readView<unknown>(scope, key, {});
-  return saved && typeof saved === "object" && !Array.isArray(saved)
-    ? Object.fromEntries(
-        Object.entries(saved).filter(
-          (entry): entry is [string, number] =>
-            Number.isFinite(entry[1]) && entry[1] > 0,
-        ),
-      )
-    : {};
-}
-
-/**
- * A card's height, remembered on this device: where its grip was left, or
- * full. Dragging sets it. Toggling switches between full and the height from
- * before full, which is the first ten rows when there was none.
- */
-export function useSidebarCardHeight(scope: string, card: string) {
-  const height = useSyncExternalStore(
-    (change) => subscribeView(scope, change),
-    () => savedHeights(scope, heightsKey)[card],
-  );
-  const save = (key: string, next: number | undefined) => {
-    const { [card]: _, ...rest } = savedHeights(scope, key);
-    writeView(
-      scope,
-      key,
-      next === undefined ? rest : { ...rest, [card]: next },
-    );
-  };
-  const resize = (next: number | undefined) => {
-    save(restoreKey, undefined);
-    save(heightsKey, next);
-  };
-  const toggle = () => {
-    const back = savedHeights(scope, restoreKey)[card];
-    save(restoreKey, height === ALL_ROWS ? undefined : height);
-    save(heightsKey, height === ALL_ROWS ? back : ALL_ROWS);
-  };
-  return [height, resize, toggle] as const;
-}
-
-/**
- * A card's rows and the grip on its bottom edge. The rows show the first ten
- * until the grip is dragged, then clip to wherever it is left; full shows
- * every row. The drag follows the pointer exactly, then settles onto the
- * nearest whole row on release; the bottom stop is full. Double-click or Enter toggles
- * full. Rows are the descendants marked `data-card-row`.
- */
+/** The filter owns the default height. The grip adjusts the visible row count
+ * for this mounted card without changing the filter. */
 export function SidebarCardResize({
   label,
-  height: savedHeight,
-  onResize,
-  onToggle,
-  seeAll,
+  controls,
+  excludedRows,
+  excludedCount,
+  open = true,
+  onMinimize,
+  onExpand,
+  renderBody,
   children,
 }: {
   label: string;
-  /** Pixels, ALL_ROWS for full, or undefined for the first ten. */
-  height: number | undefined;
-  /** A height the grip settled on, ALL_ROWS at its bottom stop. */
-  onResize(height: number): void;
-  /** Switch between full and the height from before full. */
-  onToggle(): void;
-  /**
-   * Going one level into the card: `full` while it is open there, which shows
-   * every row with no grip. Otherwise a card cut short, by its edge or by
-   * rows its filter leaves out (`hidden`), ends with a "See all" row.
-   */
-  seeAll?: { full: boolean; hidden: boolean; open(): void } | undefined;
+  controls?: string;
+  excludedRows?: (() => ReactNode) | undefined;
+  excludedCount: number;
+  open?: boolean;
+  onMinimize?: (() => void) | undefined;
+  onExpand?: (() => void) | undefined;
+  renderBody?: (content: ReactNode) => ReactNode;
   children: ReactNode;
 }) {
-  const full = !!seeAll?.full;
-  const height = full ? ALL_ROWS : savedHeight;
+  const [baseCount, setBaseCount] = useState(0);
+  const [rowOffset, setRowOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const canContract = onMinimize !== undefined;
+  const minOffset = canContract ? -baseCount : 0;
+  const minAdjustment = Math.min(0, minOffset + 1);
+  const offset = Math.max(minAdjustment, Math.min(rowOffset, excludedCount));
+  const resizable = minOffset < 0 || excludedCount > 0;
+  const showGrip = open ? resizable : !!onExpand;
+  const reducedMotion = useReducedMotion();
   const list = useRef<HTMLDivElement>(null);
-  const handle = useRef<HTMLHRElement>(null);
+  const handle = useRef<HTMLDivElement>(null);
   const stop = useRef<() => void>(undefined);
-  useEffect(() => () => stop.current?.(), []);
-  const [count, setCount] = useState(0);
-  // Rows the card shows now, for assistive technology.
-  const [shown, setShown] = useState(0);
+  const spring = useRef<ReturnType<typeof animate>>(undefined);
+  const fromHeight = useRef<number>(undefined);
+  const [closing, setClosing] = useState(false);
+  const resize = useCallback(
+    (next: number) => {
+      if (
+        !reducedMotion &&
+        list.current &&
+        !list.current.closest("[hidden]") &&
+        Math.max(minAdjustment, Math.min(next, excludedCount)) !== offset
+      ) {
+        fromHeight.current = list.current.getBoundingClientRect().height;
+        setClosing(next <= 0 && offset > 0);
+      }
+      setRowOffset(next);
+    },
+    [excludedCount, minAdjustment, offset, reducedMotion],
+  );
+  const settle = (next: number) => {
+    // With no matches, zero is already the normal filtered height.
+    if (minOffset < 0 && next === minOffset) onMinimize?.();
+    else resize(next);
+  };
+  const toggle = () => {
+    if (!open) onExpand?.();
+    else if (offset < 0 || (excludedCount > 0 && offset === excludedCount))
+      resize(0);
+    else settle(excludedCount > 0 ? Infinity : minOffset);
+  };
+  useEffect(() => {
+    const rows = list.current;
+    const grip = handle.current;
+    const body = rows?.parentElement;
+    if (!open || offset === 0 || dragging || !rows || !body || !grip) return;
+    let timer: number;
+    const expire = () => {
+      const focused = document.activeElement;
+      if (
+        focused &&
+        rows.contains(focused) &&
+        focused.closest("[data-card-excluded]")
+      )
+        grip.focus({ preventScroll: true });
+      resize(0);
+    };
+    const restart = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(expire, sidebarResetMs);
+    };
+    const activity = [
+      "pointermove",
+      "pointerdown",
+      "keydown",
+      "wheel",
+      "focusin",
+    ];
+    restart();
+    for (const element of [body, grip])
+      for (const event of activity) element.addEventListener(event, restart);
+    return () => {
+      window.clearTimeout(timer);
+      for (const element of [body, grip])
+        for (const event of activity)
+          element.removeEventListener(event, restart);
+    };
+  }, [open, offset, dragging, resize]);
+  useEffect(
+    () => () => {
+      stop.current?.();
+      spring.current?.stop();
+    },
+    [],
+  );
   // Conversations past the edge that wait on you, and the lowest one's row.
   const [waiting, setWaiting] = useState<Waiting>(none);
-  const apply = useCallback((rows: HTMLElement, height: number | undefined) => {
-    setShown(clip(rows, height));
-    const next = waitingPastEdge(rows);
+  const apply = useCallback((rows: HTMLElement, adjustment: number) => {
+    const extras = rows.querySelector<HTMLElement>("[data-card-excluded]");
+    const all = cardRows(rows);
+    const base = all.length - (extras ? cardRows(extras).length : 0);
+    setBaseCount(base);
+    const shown = Math.max(0, base + adjustment);
+    if (shown >= all.length || !rows.closest("[hidden]")) {
+      const focused = document.activeElement;
+      if (focused && all.slice(shown).some((row) => row.contains(focused)))
+        handle.current?.focus({ preventScroll: true });
+      clip(rows, all, shown);
+    }
+    const next = extras && adjustment > 0 ? waitingPastEdge(extras) : none;
     setWaiting((previous) =>
       previous.count === next.count && previous.lowest === next.lowest
         ? previous
         : next,
     );
   }, []);
-  const saved = useRef(height);
+  useEffect(() => {
+    if (open) return;
+    stop.current?.();
+    spring.current?.stop();
+    spring.current = undefined;
+    fromHeight.current = undefined;
+    setDragging(false);
+    setClosing(false);
+    setRowOffset(0);
+    if (list.current) apply(list.current, 0);
+  }, [open, apply]);
+  const current = useRef(offset);
   // The hint explains the grip until it has been used once.
   const learned = useSyncExternalStore(
     (change) => subscribeView(learnedScope, change),
     () => readView<unknown>(learnedScope, learnedKey, false) === true,
   );
-  // Apply the saved height before paint, and again whenever rows come, go or
-  // first get a size (a card opened after starting closed).
   useLayoutEffect(() => {
-    saved.current = height;
-    if (list.current && !stop.current) apply(list.current, height);
-  }, [height, apply]);
+    current.current = offset;
+    if (!showGrip && stop.current) {
+      stop.current();
+      setDragging(false);
+    }
+    const rows = list.current;
+    if (!rows || (dragging && showGrip)) return;
+    const from = fromHeight.current;
+    fromHeight.current = undefined;
+    if (from === undefined && spring.current && !reducedMotion && resizable)
+      return;
+    spring.current?.stop();
+    spring.current = undefined;
+    apply(rows, offset);
+    if (from === undefined || reducedMotion || !resizable) {
+      if (closing) setClosing(false);
+      return;
+    }
+    const to = rows.getBoundingClientRect().height;
+    rows.style.maxHeight = `${from}px`;
+    spring.current = animate(
+      rows,
+      { maxHeight: `${to}px` },
+      {
+        ...sidebarHeightSpring,
+        onComplete: () => {
+          spring.current = undefined;
+          apply(rows, current.current);
+          setClosing(false);
+        },
+      },
+    );
+  }, [offset, dragging, closing, resizable, showGrip, reducedMotion, apply]);
   useEffect(() => {
     const rows = list.current;
-    if (!rows) return;
+    if (!rows || (!canContract && excludedCount === 0)) return;
     const update = () => {
-      setCount(rows.querySelectorAll("[data-card-row]").length);
-      if (!stop.current) apply(rows, saved.current);
+      if (!stop.current && !spring.current) apply(rows, current.current);
     };
     update();
     const added = new MutationObserver(update);
@@ -155,104 +245,108 @@ export function SidebarCardResize({
       typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(() => {
-            if (!stop.current) apply(rows, saved.current);
+            if (!stop.current && !spring.current) apply(rows, current.current);
           });
     sized?.observe(rows);
     return () => {
       added.disconnect();
       sized?.disconnect();
     };
-  }, [apply]);
+  }, [apply, canContract, excludedCount]);
 
-  return (
-    <>
-      <div className={styles.cardBody} data-card-body="">
-        <div ref={list} className={styles.cardRows} data-card-rows="">
-          {children}
-        </div>
-        {seeAll && !full && (shown < count || seeAll.hidden) && (
-          <NavigationItem
-            data-card-see-all=""
-            label="See all"
-            aria-label={`See all in ${label}`}
-            trailing={<CaretRightIcon size={14} />}
-            onClick={seeAll.open}
-          />
-        )}
-        {waiting.count > 0 && (
-          <div className={styles.cardWaiting} data-card-waiting="">
-            <Button
-              variant="prominent"
-              size="xs"
-              shape="capsule"
-              type="button"
-              aria-label={`Show ${waiting.count} unread ${waiting.count === 1 ? "conversation" : "conversations"} below in ${label}`}
-              onClick={(event) => {
-                const rows = list.current;
-                if (!rows) return;
-                // Open just far enough to show the lowest one, like a drag.
-                const ends = stops(rows);
-                const end = ends[waiting.lowest];
-                if (end === undefined) return;
-                onResize(waiting.lowest === ends.length - 1 ? ALL_ROWS : end);
-                // From the keyboard, keep focus on the card as the badge goes.
-                if (event.detail === 0) handle.current?.focus();
-              }}
-            >
-              {waiting.count} unread
-            </Button>
-          </div>
+  const body = (
+    <div className={styles.cardBody} data-card-body="">
+      <div ref={list} className={styles.cardRows} data-card-rows="">
+        {children}
+        {(offset > 0 || (open && dragging) || closing) && excludedCount > 0 && (
+          <div data-card-excluded="">{excludedRows?.()}</div>
         )}
       </div>
-      {/* Only a card with more than one row has anything to hide. */}
-      {count > 1 && !full && (
+      {waiting.count > 0 && (
+        <div className={styles.cardWaiting} data-card-waiting="">
+          <Button
+            variant="prominent"
+            size="xs"
+            shape="capsule"
+            type="button"
+            aria-label={`Show ${waiting.count} unread ${waiting.count === 1 ? "conversation" : "conversations"} below in ${label}`}
+            onClick={(event) => {
+              resize(waiting.lowest + 1);
+              // From the keyboard, keep focus on the card as the badge goes.
+              if (event.detail === 0) handle.current?.focus();
+            }}
+          >
+            {waiting.count} unread
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+  const visibleCount = open ? baseCount + offset : 0;
+  return (
+    <>
+      {renderBody ? renderBody(body) : body}
+      {showGrip && (
         <Tooltip
           side="bottom"
           closeOnClick={false}
           {...(learned && { open: false })}
           content={
-            height === ALL_ROWS
-              ? "Drag to resize · Double-click to show less"
-              : "Drag to resize · Double-click to show all"
+            !open
+              ? "Drag down or double-click to reopen"
+              : offset < 0 || (excludedCount > 0 && offset === excludedCount)
+                ? "Drag to resize · Double-click to restore filtered rows"
+                : excludedCount > 0
+                  ? "Drag to resize · Double-click to show all"
+                  : "Drag up to show fewer rows or double-click to minimize"
           }
         >
-          <hr
+          <motion.div
             ref={handle}
+            role="separator"
             className={styles.cardResize}
+            data-pulsing={
+              (open && offset !== 0 && !dragging && !reducedMotion) || undefined
+            }
+            initial={false}
+            animate={
+              dragging || (open && offset !== 0 && reducedMotion)
+                ? "highlighted"
+                : open && offset !== 0
+                  ? "bouncing"
+                  : "resting"
+            }
+            {...((!open || offset === 0) && {
+              whileHover: "highlighted",
+              whileFocus: "highlighted",
+            })}
             aria-label={`Resize ${label}`}
+            aria-controls={controls}
             aria-orientation="horizontal"
-            aria-valuemin={1}
-            aria-valuemax={count}
-            aria-valuenow={shown}
-            aria-valuetext={`${shown} of ${count} rows`}
-            // Rows past the edge keep the handle showing, so the card reads
-            // as having more.
-            data-more={shown < count ? "" : undefined}
+            aria-valuemin={baseCount + minOffset}
+            aria-valuemax={baseCount + excludedCount}
+            aria-valuenow={visibleCount}
+            aria-valuetext={
+              open
+                ? `${visibleCount} of ${baseCount + excludedCount} rows`
+                : "Minimized"
+            }
             aria-keyshortcuts="Enter"
             tabIndex={0}
             onDoubleClick={() => {
               learn();
-              onToggle();
+              toggle();
             }}
             onKeyDown={(event) => {
-              const rows = list.current;
-              if (!rows || event.altKey || event.ctrlKey || event.metaKey)
-                return;
-              // Step one whole row from wherever the list ends now.
-              const ends = stops(rows);
-              const [first, last] = [ends[0], ends.at(-1)];
-              const current = rows.offsetHeight;
-              if (first === undefined || last === undefined) return;
+              if (event.altKey || event.ctrlKey || event.metaKey) return;
               if (event.key === "Enter") {
                 learn();
-                onToggle();
-              } else if (event.key === "ArrowUp")
-                onResize(
-                  ends.filter((end) => end < current - 1).at(-1) ?? first,
-                );
-              else if (event.key === "ArrowDown") {
-                const next = ends.find((end) => end > current + 1) ?? last;
-                onResize(next === last ? ALL_ROWS : next);
+                toggle();
+              } else if (event.key === "ArrowUp") {
+                if (open) settle(Math.max(minOffset, offset - 1));
+              } else if (event.key === "ArrowDown") {
+                if (open) resize(Math.min(excludedCount, offset + 1));
+                else onExpand?.();
               } else return;
               event.preventDefault();
             }}
@@ -261,17 +355,30 @@ export function SidebarCardResize({
               if (event.button !== 0 || stop.current || !rows) return;
               event.preventDefault();
               const { pointerId, clientY: startY } = event;
-              const start = rows.offsetHeight;
-              const ends = stops(rows);
-              const [min = 0] = ends;
-              const max = ends.at(-1) ?? start;
+              const start = open ? rows.offsetHeight : 0;
+              spring.current?.stop();
+              spring.current = undefined;
+              // Measure the real rows only when the grip is used. A filtered
+              // card at rest does not mount excluded conversations.
+              flushSync(() => {
+                setClosing(false);
+                setDragging(true);
+              });
+              let ends: number[] = [];
+              if (open) {
+                const all = cardRows(rows);
+                clip(rows, all, baseCount + offset);
+                ends = stops(rows, all).slice(baseCount + minOffset);
+              }
+              const [min = start] = ends;
+              const max = ends.at(-1) ?? (open ? start : Infinity);
               // Rows sliding under the pointer must not take hover mid-drag. The
               // grip stays hit-testable, so a double-click still lands on it.
               const surface = rows.closest("nav") ?? rows;
               const grip = event.currentTarget;
               let next = start;
               let frame: number | undefined;
-              // Preview on the element; the saved height changes on release.
+              // Preview on the element; the row count changes on release.
               const move = (event: PointerEvent) => {
                 if (event.pointerId !== pointerId) return;
                 event.preventDefault();
@@ -279,6 +386,7 @@ export function SidebarCardResize({
                   max,
                   Math.max(min, start + event.clientY - startY),
                 );
+                if (!open) return;
                 frame ??= requestAnimationFrame(() => {
                   frame = undefined;
                   rows.style.maxHeight = `${next}px`;
@@ -288,16 +396,25 @@ export function SidebarCardResize({
                 if ("pointerId" in event && event.pointerId !== pointerId)
                   return;
                 stop.current?.();
-                // Released, the list glides onto the nearest whole row. Dragged
-                // to the bottom, it keeps showing every row as new ones arrive.
-                // A click without a drag (half of a double-click) changes nothing.
-                if (event.type !== "pointerup" || next === start)
-                  return apply(rows, height);
+                setDragging(false);
+                if (!open) {
+                  if (event.type === "pointerup" && next >= reopenDragPx) {
+                    learn();
+                    onExpand?.();
+                  }
+                  return;
+                }
+                if (event.type !== "pointerup" || next === start) {
+                  apply(rows, current.current);
+                  return;
+                }
                 learn();
-                const settled = nearest(stops(rows), next);
-                const target = settled >= max ? ALL_ROWS : settled;
-                if (target === height) apply(rows, height);
-                else onResize(target);
+                const settled = ends.indexOf(nearest(ends, next)) + minOffset;
+                settle(
+                  excludedCount > 0 && settled === excludedCount
+                    ? Infinity
+                    : settled,
+                );
               };
               stop.current = () => {
                 stop.current = undefined;
@@ -319,55 +436,44 @@ export function SidebarCardResize({
               window.addEventListener("blur", finish);
               event.currentTarget.setAttribute("data-resizing", "");
               rows.setAttribute("data-resizing", "");
-              rows.style.maxHeight = `${start}px`;
+              if (open) rows.style.maxHeight = `${start}px`;
               document.documentElement.style.cursor = "grabbing";
               document.body.style.userSelect = "none";
               surface.style.pointerEvents = "none";
               grip.style.pointerEvents = "auto";
             }}
-          />
+          >
+            <motion.span
+              aria-hidden="true"
+              className={styles.cardGrip}
+              variants={gripWidths}
+              transition={reducedMotion ? { duration: 0 } : gripSpring}
+            />
+          </motion.div>
         </Tooltip>
       )}
     </>
   );
 }
 
-/**
- * Clip the list to a saved height: ten rows when unset, none when full. A
- * saved height lands on a whole row even after text size changes. Rows past
- * the clip are inert, so focus and the keyboard skip what the card hides.
- * Returns how many rows show.
- */
-function clip(list: HTMLElement, height: number | undefined): number {
-  const ends = stops(list);
-  const full = ends.at(-1) ?? 0;
-  // A hidden card has no layout, so every stop is zero: keep the saved
-  // height as it is until the card is shown and can be measured.
-  if (!full) {
-    list.style.maxHeight =
-      height !== undefined && height !== ALL_ROWS ? `${height}px` : "";
-    return ends.length;
-  }
-  const limit =
-    height === ALL_ROWS
-      ? undefined
-      : height === undefined
-        ? ends[DEFAULT_ROWS - 1]
-        : nearest(ends, height);
-  const clipped = limit !== undefined && limit < full;
-  list.style.maxHeight = clipped ? `${limit}px` : "";
-  let shown = 0;
-  list
-    .querySelectorAll<HTMLElement>("[data-card-row]")
-    .forEach((row, index) => {
-      const hidden = clipped && (ends[index - 1] ?? 0) >= limit;
-      // Only undo inertness this clip gave: a row leaving the list keeps its own.
-      if (hidden) row.inert = true;
-      else if (row.hasAttribute("data-card-clipped")) row.inert = false;
-      row.toggleAttribute("data-card-clipped", hidden);
-      if (!hidden) shown++;
-    });
-  return shown;
+/** Inert rows stay out of the tab order and sidebar keyboard navigation. */
+function clip(list: HTMLElement, rows: readonly HTMLElement[], shown: number) {
+  const firstClipped = rows[shown];
+  list.style.maxHeight = firstClipped
+    ? `${Math.round(firstClipped.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop)}px`
+    : "";
+  rows.forEach((row, index) => {
+    row.inert = index >= shown;
+    row.toggleAttribute("data-card-clipped", row.inert);
+  });
+}
+
+function cardRows(list: HTMLElement) {
+  return [
+    ...list.querySelectorAll<HTMLElement>(
+      '[data-card-row]:not([aria-hidden="true"])',
+    ),
+  ];
 }
 
 type Waiting = { count: number; lowest: number };
@@ -380,30 +486,25 @@ const none: Waiting = { count: 0, lowest: -1 };
 function waitingPastEdge(list: HTMLElement): Waiting {
   const seen = new Set<string>();
   let lowest = -1;
-  list
-    .querySelectorAll<HTMLElement>("[data-card-row]")
-    .forEach((row, index) => {
-      if (!row.hasAttribute("data-card-clipped")) return;
-      const button = row.querySelector<HTMLElement>(
-        "button[data-channel-id], button[data-solo-channel-id]",
-      );
-      if (!button || !hasUnmutedUnread(button) || !waitsOnYou(button)) return;
-      seen.add(button.dataset.channelId ?? button.dataset.soloChannelId ?? "");
-      lowest = index;
-    });
+  cardRows(list).forEach((row, index) => {
+    if (!row.hasAttribute("data-card-clipped")) return;
+    const button = row.querySelector<HTMLElement>(
+      "button[data-channel-id], button[data-solo-channel-id]",
+    );
+    if (!button || !hasUnmutedUnread(button) || !waitsOnYou(button)) return;
+    seen.add(button.dataset.channelId ?? button.dataset.soloChannelId ?? "");
+    lowest = index;
+  });
   return seen.size ? { count: seen.size, lowest } : none;
 }
 
-/** Where the list ends after each of its rows. */
-function stops(list: HTMLElement) {
+/** Pixel stops at each row boundary and at the full list height. */
+function stops(list: HTMLElement, rows: readonly HTMLElement[]) {
   const top = list.getBoundingClientRect().top - list.scrollTop;
-  const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
-  return rows.map((_, index) => {
-    const after = rows[index + 1];
-    return Math.round(
-      after ? after.getBoundingClientRect().top - top : list.scrollHeight,
-    );
-  });
+  return [
+    ...rows.map((row) => Math.round(row.getBoundingClientRect().top - top)),
+    list.scrollHeight,
+  ];
 }
 
 /** The whole-row height closest to a dragged one. */

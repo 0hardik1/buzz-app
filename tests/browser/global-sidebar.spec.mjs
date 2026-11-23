@@ -104,7 +104,7 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
   await expectViewOption(workOptions, "Unreads");
   await closeMenus(page);
   await expect(workOptions).toHaveCount(0);
-  const team = await openSortMenu(page, "Team");
+  const team = await openSortMenu(page, "Channels");
   await expect(
     team.getByRole("menuitemradio", { name: "Recent", exact: true }),
   ).toHaveAttribute("aria-checked", "true");

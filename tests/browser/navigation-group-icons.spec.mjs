@@ -75,10 +75,8 @@ test("group icons resolve custom media without overlapping labels, and the move 
     )
     .toBe(true);
   await expect(section.locator("summary [data-loading]")).toHaveCount(0);
-  for (const key of ["work", "laptop"]) {
-    const summary = page.locator(
-      `[data-sidebar-section="group:${key}"] summary`,
-    );
+  for (const key of ["group:work", "group:laptop", "starred"]) {
+    const summary = page.locator(`[data-sidebar-section="${key}"] summary`);
     const layout = await summary.evaluate((element) => {
       const icon = element.querySelector("[data-sidebar-group-icon]");
       const title = document.createRange();
@@ -97,11 +95,29 @@ test("group icons resolve custom media without overlapping labels, and the move 
       };
     });
     expect(layout.width).toBe(20);
-    expect(layout.gap).toBe(4);
-    expect(layout.labelOffset).toBe(24);
+    expect(layout.gap).toBe(6);
+    expect(layout.labelOffset).toBe(26);
     expect(layout.height).toBe(32);
     expect(layout.iconTop).toBeGreaterThanOrEqual(layout.summaryTop);
     expect(layout.iconBottom).toBeLessThanOrEqual(layout.summaryBottom);
+    if (key === "group:laptop") continue;
+    const alignment = await summary.evaluate((element) => {
+      const icon = element.querySelector("[data-sidebar-group-icon]");
+      const item = element
+        .closest("[data-sidebar-section]")
+        .querySelector("button[data-channel-id]");
+      const label = item.querySelector(".navigation-item-label");
+      const center = ({ left, width }) => left + width / 2;
+      return {
+        icon:
+          center(icon.getBoundingClientRect()) -
+          center(item.firstElementChild.getBoundingClientRect()),
+        label:
+          icon.nextElementSibling.getBoundingClientRect().left -
+          label.getBoundingClientRect().left,
+      };
+    });
+    expect(alignment).toEqual({ icon: 0, label: 0 });
   }
   await page
     .locator('[data-sidebar-section="group:laptop"] summary')

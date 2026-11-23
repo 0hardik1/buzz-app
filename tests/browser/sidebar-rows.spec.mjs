@@ -46,7 +46,7 @@ appTest(
     await expect(
       section.locator('[data-plugin-row="decorated"] [data-channel-id="beta"]'),
     ).toBeVisible();
-    const options = await openSortMenu(page, "Team");
+    const options = await openSortMenu(page, "Channels");
     await expect(
       options.getByRole("menuitemradio", { name: "Reverse name" }),
     ).toBeVisible();

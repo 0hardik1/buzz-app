@@ -271,14 +271,38 @@
   border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);
 }
-/* On the tint, a section is its own card (its surface is Panel's). Cards keep
-   their content height, let drop lines into the gap, and sit a panel gap apart. */
+/* Sidebar sections share their insets, drop targets and spacing. */
 [data-sidebar-cards] .channelSection[data-sidebar-card] {
   height: auto;
   overflow: visible;
-  /* Titles and rows start 16px in, clear of the card's round corners. */
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1h);
   --affordance-panel-hover: var(--affordance-sidebar-hover);
+}
+/* Built-in sections sit directly on the shell grid. */
+[data-sidebar-cards]
+.channelSection[data-sidebar-card]:is(
+  [data-sidebar-section="solo"],
+  [data-sidebar-section="channels"],
+  [data-sidebar-section="dms"]
+):not([data-drop-target]) {
+  background: var(--sidebar-home-fill, transparent);
+}
+[data-sidebar-cards] .channelSection[data-sidebar-workspace] {
+  padding-inline: var(--space-half);
+  /* The last row already contributes a half-step of bottom spacing. */
+  padding-block-end: var(--space-1);
+  --channel-row-dm-gap: 0px;
+}
+[data-sidebar-cards]
+  .channelSection[data-sidebar-workspace]
+  > [class~="navigation-section-heading"] {
+  padding-inline: var(--space-half);
+}
+[data-sidebar-cards]
+  .channelSection[data-sidebar-workspace]
+  summary:has(.sectionLabel > [data-sidebar-group-icon]) {
+  /* The heading already has half a step of padding around its trigger. */
+  padding-inline-start: calc(var(--space-3) - var(--space-half));
 }
 /* Every card, Favorites included, sits the same gap from the one before it. */
 [data-sidebar-cards] .channelSection {
@@ -395,6 +419,9 @@
   overflow: hidden;
   white-space: nowrap;
 }
+.sectionBody {
+  display: flow-root;
+}
 /* Collapsed headings stand in for their hidden rows, using the same unread
    evidence as the sidebar edge cues. Muted destinations stay quiet. */
 .channelSection:has(
@@ -418,7 +445,7 @@
 }
 .sectionLabel [data-sidebar-group-icon] {
   width: var(--space-5);
-  margin-inline-end: var(--space-1);
+  margin-inline-end: var(--sidebar-row-icon-gap, var(--space-1));
 }
 .sectionChevron {
   display: inline-grid;
@@ -1065,9 +1092,8 @@ html[data-keyboard-navigation]
   min-width: 0;
 }
 
-/* A card shows every row until its grip is moved, and clips the rest; dragging
-   down reveals them. Its own formatting context keeps the last row's margin
-   inside the full height. */
+/* A card fits its filtered rows; dragging down reveals excluded rows. Its
+   formatting context keeps the last row's margin inside the full height. */
 .cardRows {
   display: flow-root;
   /* Clip, not hidden: rows past the edge can never be scrolled into view
@@ -1090,14 +1116,10 @@ html[data-keyboard-navigation]
   justify-content: center;
   padding-block-start: var(--space-half);
 }
-/* Releases and key steps settle onto a whole row; the drag itself follows the
-   pointer exactly. */
-.cardRows:not([data-resizing]) {
-  transition: max-height var(--duration-fast) var(--easing-enter);
-}
-/* The grip sits in the card's bottom edge and appears on hover. */
+/* The grip stays visible at the card edge while the filter excludes rows. */
 .cardResize {
-  position: relative;
+  display: grid;
+  place-items: center;
   height: var(--space-2);
   margin: 0 0 calc(-1 * var(--space-1));
   padding: 0;
@@ -1110,79 +1132,32 @@ html[data-keyboard-navigation]
 .cardResize[data-resizing] {
   cursor: grabbing;
 }
-.cardResize::after {
-  position: absolute;
-  top: 50%;
-  left: 50%;
+.cardGrip {
   width: 3.5rem;
   height: 0.1875rem;
   border-radius: var(--radius-pill);
-  background: var(--border-focus);
-  content: "";
-  opacity: 0;
+  background: var(--text-metadata);
   pointer-events: none;
-  transform: translate(-50%, -50%) scaleX(calc(40 / 56));
   transition:
     background-color var(--duration-fast) var(--easing-state),
-    opacity var(--duration-fast) var(--easing-state),
-    transform var(--duration-fast) var(--easing-enter);
-}
-/* A card with rows past its edge keeps a quiet handle at rest; hover, focus or
-   a drag darken it. A card showing every row hides it until then. */
-.cardResize[data-more]::after {
-  background: var(--border-standard);
-  opacity: 1;
+    opacity var(--duration-fast) var(--easing-state);
 }
 @media (hover: hover) and (pointer: fine) {
-  .cardResize:hover::after {
+  .cardResize:hover .cardGrip {
     background: var(--border-focus);
-    opacity: 1;
-    transform: translate(-50%, -50%) scaleX(1);
   }
 }
-.cardResize:focus-visible::after,
-.cardResize[data-resizing]::after {
+.cardResize:is(:focus-visible, [data-resizing]) .cardGrip {
   background: var(--border-focus);
-  opacity: 1;
-  transform: translate(-50%, -50%) scaleX(1);
+}
+.cardResize[data-pulsing]:not(:hover, :focus-visible) .cardGrip {
+  opacity: 0.65;
 }
 .cardResize:focus-visible {
   outline: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .cardRows:not([data-resizing]),
-  .cardResize::after {
+  .cardGrip {
     transition: none;
-  }
-}
-
-/* "See all" goes one level into a card: the sidebar shows only that card,
-   which slides in from the end; Back slides the main level in from the start. */
-[data-sidebar-cards]:has([data-see-all])
-[data-sidebar-card]:not([data-see-all]) {
-  display: none;
-}
-[data-sidebar-cards] .channelSection[data-see-all] {
-  animation: see-all-in var(--duration-panel-enter) var(--easing-enter);
-}
-[data-sidebar-cards] .channelSection[data-see-all-returning] {
-  animation: see-all-back var(--duration-panel-enter) var(--easing-enter);
-}
-@keyframes see-all-in {
-  from {
-    opacity: 0;
-    translate: var(--space-6) 0;
-  }
-}
-@keyframes see-all-back {
-  from {
-    opacity: 0;
-    translate: calc(-1 * var(--space-6)) 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-sidebar-cards] .channelSection[data-see-all],
-  [data-sidebar-cards] .channelSection[data-see-all-returning] {
-    animation: none;
   }
 }

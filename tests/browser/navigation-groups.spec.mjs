@@ -121,7 +121,9 @@ test("an existing unified layout remains writable during a legacy read failure",
 }) => {
   await open(page, app);
   await openMove(page, rowIn(page, "group:work"));
-  await page.getByRole("menuitemradio", { name: "Team", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Channels", exact: true })
+    .click();
   await saved(page, app, 1);
   let rejected = 0;
   await page.route("**/api/relay/primary/query", (route) => {
@@ -177,7 +179,7 @@ test("a failed first legacy read keeps verified preferences and disables only wo
   await expect(rowIn(page, "group:work")).toBeVisible();
   const move = await openMove(page, rowIn(page, "group:work"));
   await expect(
-    move.getByRole("menuitemradio", { name: "Team", exact: true }),
+    move.getByRole("menuitemradio", { name: "Channels", exact: true }),
   ).toBeDisabled();
   await move
     .getByRole("menuitemradio", { name: "Favorites", exact: true })
@@ -197,7 +199,9 @@ test("a failed first legacy read keeps verified preferences and disables only wo
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByText("Some workspaces couldn’t load")).toHaveCount(0);
   await openMove(page, rowIn(page, "group:work"));
-  await page.getByRole("menuitemradio", { name: "Team", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Channels", exact: true })
+    .click();
   await saved(page, app, 3);
   await expect(rowIn(page, "channels")).toBeVisible();
 });
@@ -255,7 +259,7 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   await expect(menu.getByRole("menuitemradio", { name: "Work" })).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(
-    menu.getByRole("menuitemradio", { name: "Team", exact: true }),
+    menu.getByRole("menuitemradio", { name: "Channels", exact: true }),
   ).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(
@@ -336,12 +340,12 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   // notices (Loading conversations…) that shift the sidebar after a reload.
   // Pointer opening is covered by navigation-sorting.
   const openSort = async () => {
-    await moreActionsButton(page, "Team").focus();
+    await moreActionsButton(page, "Channels").focus();
     await page.keyboard.press("Enter");
-    await expect(openMenu(page, "More actions for Team")).toBeVisible();
+    await expect(openMenu(page, "More actions for Channels")).toBeVisible();
     await page.getByRole("menuitem", { name: "Sort", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
-    const options = openMenu(page, "Sort Team");
+    const options = openMenu(page, "Sort Channels");
     await expect(options).toBeVisible();
     return options;
   };

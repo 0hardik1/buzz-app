@@ -309,7 +309,7 @@ it("shows only chats and the Plugins card under a plugin restriction and restore
   expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
   expect(screen.getByRole("button", { name: /^Planning/ })).toBeVisible();
   expect(
-    screen.queryByRole("button", { name: "More actions for Team" }),
+    screen.queryByRole("button", { name: "More actions for Channels" }),
   ).toBeNull();
   expect(screen.queryByText("Plugin heading")).toBeNull();
   expect(screen.queryByText("Team plugin slot")).toBeNull();
@@ -388,10 +388,11 @@ it("mounts one action menu for each home section", async () => {
     fixture(true);
     await act(() => vi.advanceTimersByTimeAsync(SIDEBAR_REVEAL_BUDGET_MS));
     const more = (title: string) =>
-      document.querySelector(`button[aria-label="More actions for ${title}"]`);
-    expect(more("Solo")).not.toBeNull();
-    expect(more("Team")).not.toBeNull();
-    expect(more("Channels")).toBeNull();
+      document.querySelectorAll(
+        `button[aria-label="More actions for ${title}"]`,
+      );
+    expect(more("Sessions")).toHaveLength(1);
+    expect(more("Channels")).toHaveLength(1);
   } finally {
     vi.useRealTimers();
   }
@@ -758,7 +759,7 @@ it.each(["empty", "chats", "projects", "both"])(
     });
     f.connection({});
     expect(
-      await screen.findByLabelText("Solo", { selector: "summary" }),
+      await screen.findByLabelText("Sessions", { selector: "summary" }),
     ).toBeVisible();
     const trigger = screen.getByRole("button", { name: "New options" });
     await user.click(trigger);

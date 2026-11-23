@@ -1028,7 +1028,7 @@
     background: var(--status-offline);
   }
 
-  /* A panel is the default opaque reading surface over the dotted
+  /* A panel is the default opaque reading surface over the shell
      backdrop. A transparent border reserves its geometry; shadow-panel supplies
      the shared translucent contour and elevation above the shell. */
   /* One set of declarations, two selectors.
@@ -1068,10 +1068,12 @@
     border-radius: var(--radius-pill);
   }
 
-  /* A flat panel has no edge; its fill separates it from the tint. Sidebar
-     cards on the tint are always flat. */
+  /* A flat panel has no edge. Sidebar workspaces use the standard panel
+     outline, including Favorites. The other sidebar sections sit flat. */
   .panel[data-flat],
-  :where([data-sidebar-cards] [data-sidebar-card]) {
+  :where(
+    [data-sidebar-cards] [data-sidebar-card]:not([data-sidebar-workspace])
+  ) {
     border-color: transparent;
     box-shadow: none;
   }
@@ -2457,6 +2459,7 @@
      applying nested shared selectors inside CSS Modules would rename their targets. */
   .buzz-sidebar-navigation {
     display: contents;
+    --sidebar-row-icon-gap: calc(var(--space-1) + var(--space-half));
     --affordance-navigation-quiet: var(--affordance-sidebar-hover);
     --affordance-navigation-selected: var(--surface-sidebar-selected);
     --text-row: var(--text-sidebar-hover);
@@ -2475,7 +2478,7 @@
     --interaction-row-hover: var(--affordance-navigation-quiet);
   }
   .buzz-sidebar-navigation .navigation-item[data-variant="row"] {
-    --space-row-gap: calc(var(--space-1) + var(--space-half));
+    --space-row-gap: var(--sidebar-row-icon-gap);
     --navigation-item-text: var(--text-navigation);
     @apply text-body-sm;
     min-height: calc(var(--space-6) + var(--space-1));

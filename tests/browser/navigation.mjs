@@ -278,13 +278,6 @@ export function moreActionsButton(scope, title) {
   });
 }
 
-/** A card's filter icon button. Its name says when the card is filtered. */
-export function filterButton(scope, title) {
-  return scope.getByRole("button", {
-    name: new RegExp(`^Filter ${title}(, filtered)?$`),
-  });
-}
-
 /** A menu by name, skipping one still closing. */
 export function openMenu(page, name) {
   return page
@@ -292,31 +285,24 @@ export function openMenu(page, name) {
     .and(page.locator(":not([data-closed])"));
 }
 
-/** Opens a card's Filter menu from its header icon. Focus reveals its
- * hover-only button. Choosing in it keeps the menu open. */
-export async function openFilterMenu(page, title, scope = page) {
-  const button = filterButton(scope, title);
+async function openCardSubmenu(page, title, name, scope) {
+  const button = moreActionsButton(scope, title);
+  const root = openMenu(page, `More actions for ${title}`);
   await button.focus();
   await button.click();
-  const menu = openMenu(page, `Filter ${title}`);
+  await expect(root).toBeVisible();
+  await root.getByRole("menuitem", { name, exact: true }).click();
+  const menu = openMenu(page, `${name} ${title}`);
   await expect(menu).toBeVisible();
   return menu;
 }
 
-/** Opens a card's ••• menu, then its Sort submenu, which holds the sort
- * choices and Unreads first. Choosing in it keeps the menus open. */
-export async function openSortMenu(page, title, scope = page) {
-  const button = moreActionsButton(scope, title);
-  await button.focus();
-  await button.click();
-  await expect(openMenu(page, `More actions for ${title}`)).toBeVisible();
-  await page
-    .getByRole("menuitem", { name: "Sort", exact: true })
-    .and(page.locator(":not([data-closed])"))
-    .click();
-  const menu = openMenu(page, `Sort ${title}`);
-  await expect(menu).toBeVisible();
-  return menu;
+export function openFilterMenu(page, title, scope = page) {
+  return openCardSubmenu(page, title, "Filter", scope);
+}
+
+export function openSortMenu(page, title, scope = page) {
+  return openCardSubmenu(page, title, "Sort", scope);
 }
 
 /** Escapes until no menu or submenu is open. Each Escape gets time to finish

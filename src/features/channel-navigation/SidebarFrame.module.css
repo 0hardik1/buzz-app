@@ -82,7 +82,7 @@
 /* Wrapped channel rows paint on the wrapper; direct destination and Solo chat
    rows paint on the navigation item itself, so shorten them to the fill and
    measure their padding from that painted edge. As in ChannelSidebarRow, icons
-   start 6px and trailing content ends 8px inside the pill. */
+   start 8px and trailing content ends 10px inside the pill. */
 .channelList [data-variant="row"],
 .sidebarFilter [data-variant="row"] {
   width: calc(
@@ -91,14 +91,10 @@
     var(--channel-row-fill-end)
   );
   margin-inline: var(--channel-row-fill-start) var(--channel-row-fill-end);
-  padding-inline: calc(
-      var(--space-2) +
-      var(--space-half) -
-      var(--channel-row-fill-start)
-    )
-    var(--space-2);
+  padding-inline: calc(var(--space-3) - var(--channel-row-fill-start))
+    calc(var(--space-2) + var(--space-half));
 }
-/* Text-only rows such as See all keep their label clear of the pill's rounded
+/* Text-only rows keep their label clear of the pill's rounded
    edge. The label's design-system class is matched by attribute so the module
    doesn't scope it. */
 .channelList
@@ -110,8 +106,7 @@
 .channelList [data-variant="row"][data-inset],
 .sidebarFilter [data-variant="row"][data-inset] {
   padding-inline-start: calc(
-    var(--space-2) +
-    var(--space-half) +
+    var(--space-3) +
     var(--space-6) -
     var(--channel-row-fill-start)
   );
@@ -216,9 +211,8 @@
     var(--space-3)
   );
 }
-/* Cards: the sidebar has no surface of its own. Its sections are Panels (see
-   `.panel` in components.css) on the window's tint, and the controls around
-   them use the tint's quiet fills, as the header's do. */
+/* Sections paint their surfaces over the shell. The controls around them
+   use the same quiet fills as the shell header. */
 .cards {
   height: 100%;
   min-height: 0;
@@ -236,6 +230,9 @@
 .cards .sidebar .channelListContent {
   gap: 0;
 }
+.cards .sidebar .channelListContent:has(> [data-sidebar-homes]) {
+  min-block-size: 100%;
+}
 /* The shell already keeps a panel gap on both sides of the sidebar. */
 .cards .sidebar {
   --sidebar-padding-inline: 0px;
@@ -244,6 +241,8 @@
 /* Cards scroll without a visible scrollbar. */
 .cards .sidebar .channelList {
   padding-block-start: 0;
+  /* Reserve space inside the scrollport for the panel's shadow outline. */
+  padding-inline: var(--space-half);
   scrollbar-gutter: auto;
   scrollbar-width: none;
 }
