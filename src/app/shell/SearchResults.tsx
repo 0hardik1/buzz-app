@@ -22,6 +22,7 @@ import {
   useProfileGeneration,
 } from "../../features/relay/react";
 import { useSavedHiddenDmIds } from "../../bundled/channels/useHiddenDms";
+import { isSoloConversation } from "../../bundled/channels/ConversationIdentity";
 import {
   useUnreadChannelIds,
   useUnreadReasons,
@@ -1373,10 +1374,14 @@ export function SearchResults({
           exactName: false,
         };
   };
+  // Solo chats have no people besides you; once someone joins, a named
+  // conversation lists with Channels, as its sidebar icon changes.
+  const solo = (channel: ChannelSummary) =>
+    isSoloConversation(channel, session.viewer, profiles);
   const chatResults = channels
     .filter(
       (channel) =>
-        channel.channelType === "solo" &&
+        solo(channel) &&
         (!!newChatAmong(channel.members) || matchingAll.includes(channel)),
     )
     .map((channel) => ({
@@ -1396,7 +1401,7 @@ export function SearchResults({
     .slice(0, 8);
 
   const joinedAll = matchingAll.filter(
-    (channel) => channel.channelType !== "dm" && channel.channelType !== "solo",
+    (channel) => channel.channelType !== "dm" && !solo(channel),
   );
   // Joined and public channels share one ranking before the limit, so the row
   // that gives the group its best rank, such as a remembered public channel,
@@ -1405,7 +1410,8 @@ export function SearchResults({
     [
       ...joinedAll,
       ...publicChannels.channels.filter(
-        (channel) => !joinedAll.some(({ id }) => id === channel.id),
+        (channel) =>
+          !solo(channel) && !joinedAll.some(({ id }) => id === channel.id),
       ),
     ],
     channelRank,
@@ -1432,25 +1438,25 @@ export function SearchResults({
       label,
       ...(matches ? { matches } : {}),
       detail: channel.archived
-        ? channel.channelType === "solo"
+        ? solo(channel)
           ? "Archived chat"
           : "Archived channel"
         : channel.readOnly && !channel.cached && channel.viewerRole !== "guest"
-          ? channel.channelType === "solo"
+          ? solo(channel)
             ? channel.joinRole === "guest"
               ? "View-only chat"
               : "Public chat · not joined"
             : "Public channel · not joined"
           : channel.channelType === "dm"
             ? "Direct message"
-            : channel.channelType === "solo"
+            : solo(channel)
               ? soloDetail(channel)
               : "Conversation",
-      icon: channelIcon(channel),
+      icon: solo(channel) ? ChatCircleIcon : channelIcon(channel),
       kind:
         channel.channelType === "dm"
           ? "person"
-          : channel.channelType === "solo"
+          : solo(channel)
             ? "chat"
             : "channel",
       peek: {
@@ -2135,7 +2141,7 @@ export function SearchResults({
       best: Math.min(...agentResults.map(({ score }) => score)),
     },
     {
-      label: "Chats",
+      label: "Solo chats",
       tone: "chat" as const,
       icon: ChatsCircleIcon,
       destinations: chatResults.map(({ channel }) =>
@@ -2161,7 +2167,7 @@ export function SearchResults({
       best: Math.min(...personResults.map(({ score }) => score)),
     },
     {
-      label: "Direct messages",
+      label: "DMs",
       tone: "person" as const,
       icon: UsersIcon,
       destinations: dmResults.map(conversationDestination),
@@ -2191,7 +2197,7 @@ export function SearchResults({
         lead:
           named ||
           (newChats.size > 0 &&
-            (group.label === "Agents" || group.label === "Chats")),
+            (group.label === "Agents" || group.label === "Solo chats")),
       };
     })
     .sort(
@@ -2401,20 +2407,13 @@ export function SearchResults({
                   ...(
                     [
                       ["Channels", "channel", HashIcon],
-                      ["Direct messages", "person", UsersIcon],
-                      ["Chats", "chat", ChatsCircleIcon],
+                      ["DMs", "person", UsersIcon],
+                      ["Solo chats", "chat", ChatsCircleIcon],
                     ] as const
                   ).flatMap(([label, tone, icon]) => {
                     const rows = suggestions
-                      .filter(
-                        ({ channelType }) =>
-                          (channelType === "dm"
-                            ? "person"
-                            : channelType === "solo"
-                              ? "chat"
-                              : "channel") === tone,
-                      )
                       .map(channelDestination)
+                      .filter((row) => row.kind === tone)
                       .map((row) => ({ ...row, key: `browse:${row.key}` }));
                     return rows.length
                       ? [
