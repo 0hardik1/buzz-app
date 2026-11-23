@@ -37,6 +37,7 @@ import { TeamUpdateReview } from "../bundled/agents/TeamUpdateReview";
 import { AppOverlays } from "../features/pages/AppOverlays";
 import { InterruptedNotice } from "../features/agents/InterruptedNotice";
 import { ShellNotices } from "../features/notices/ShellNotices";
+import { UnsentChangesNotice } from "../features/messages/UnsentChangesNotice";
 import {
   useCallback,
   useEffect,
@@ -842,6 +843,14 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
           />
           <InterruptedNotice agents={services.agents} />
           <ShellNotices notices={services.notices} plugins={plugins} />
+          <UnsentChangesNotice
+            outbox={connection.session?.outbox}
+            channelName={(id) =>
+              connection.session?.channels
+                .list()
+                .channels.find((channel) => channel.id === id)?.name
+            }
+          />
           <MediaMenuDownloadNotice />
           <CreationReview agents={services.agents} />
           <UpdateReview agents={services.agents} />

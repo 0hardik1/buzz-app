@@ -131,9 +131,21 @@ export interface Outbox {
   ): void;
   /** owner: the recovery its caller owns and releases with an unconfirmed send. */
   dismiss(id: string, owner?: OutboxRecovery): Promise<void>;
+  /** Writes nothing here can send or retry: restored held writes, and, once
+   * a send was refused for lack of room, every write not being sent.
+   * Optional, like `discard`, so outbox stand-ins need not implement it. */
+  stuck?(): StuckWrites;
+  /** Removes a write from this device without publishing it, even when a
+   * caller owns its recovery. A write being sent is left alone. */
+  discard?(id: string): Promise<void>;
   /** Durable explicit dismissal, with delivery evidence at removal. */
   observeDismiss(listener: (item: OutgoingEvent) => void): () => void;
 }
+export type StuckWrites = Readonly<{
+  /** New sends are refused until some of these are sent or discarded. */
+  full: boolean;
+  items: readonly OutgoingEvent[];
+}>;
 type SendObserver = (
   event: EventData,
   signal: AbortSignal,
@@ -170,7 +182,10 @@ export class PublishNotSent extends PublishRejected {}
 
 export { browserOutboxStorage } from "./outbox-storage";
 /** Why a held entry restored after reload cannot take a plain retry. */
-export const HELD_RETRY_REFUSED = "Retry this from the plugin that sent it.";
+export const HELD_RETRY_REFUSED =
+  "Retry this from the plugin that sent it, or discard it in Unsent changes.";
+export const PENDING_FULL =
+  "Too many changes are waiting to send. Discard some in Unsent changes to send more.";
 const abortError = () => new DOMException("Relay session closed", "AbortError");
 const MAX_PENDING = 256;
 const MAX_CONFIRMED = 2048;
@@ -374,7 +389,18 @@ export function createOutbox(
     });
     return work;
   }
+  let full = false;
+  let stuck: StuckWrites = Object.freeze({ full, items: Object.freeze([]) });
+  let stuckFrom: readonly OutgoingEvent[] | undefined;
+  function refuseFull(): never {
+    if (!full) {
+      full = true;
+      notify();
+    }
+    throw new Error(PENDING_FULL);
+  }
   const notify = () => {
+    if (snapshot.length < MAX_PENDING) full = false;
     visible = Object.freeze([
       ...completed.entries().map(([, item]) => item),
       ...snapshot,
@@ -849,10 +875,7 @@ export function createOutbox(
           : byteSize(input) > OUTBOX_INPUT_MAX_BYTES)
     )
       throw new Error("Message is empty or too large");
-    if (snapshot.length >= MAX_PENDING)
-      throw new Error(
-        "Too many outstanding operations; resolve a pending operation",
-      );
+    if (snapshot.length >= MAX_PENDING) refuseFull();
     // Rendered messages carry send order within their second; the optimistic
     // row and the signed event share this exact ms and created_at.
     const channelId = channelRowKind(input.kind)
@@ -990,6 +1013,41 @@ export function createOutbox(
       await run();
     });
   }
+  /** `force` skips the recovery owner's confirmation; the user chose it. */
+  function remove(
+    id: string,
+    owner: OutboxRecovery | undefined,
+    force: boolean,
+  ) {
+    const pending = dismissing.get(id);
+    if (pending) return pending;
+    if (closed || attempts.has(id)) return Promise.resolve();
+    const item = visible.find((item) => item.event.id === id);
+    if (
+      !force &&
+      item?.recovery &&
+      item.delivery !== "failed" &&
+      (item.recovery.key !== owner?.key || item.recovery.value !== owner.value)
+    )
+      return Promise.reject(
+        new Error(
+          item.event.kind === 9000
+            ? "Confirm this addition in Members before removing it"
+            : "Confirm this message in New message before removing it",
+        ),
+      );
+    const dismiss = () => persist(id, "dismiss");
+    const work = (
+      owner ? withRecovery(id, owner, dismiss, true) : locked(id, dismiss)
+    )
+      .then(() => {
+        admissionGates.delete(id);
+        sendHolds.delete(id);
+      })
+      .finally(() => dismissing.delete(id));
+    dismissing.set(id, work);
+    return work;
+  }
   const outbox: Outbox = Object.freeze({
     snapshot: () => finalSnapshot ?? snapshot,
     subscribe: (listener: () => void) => subscribe(listeners, listener),
@@ -1123,10 +1181,7 @@ export function createOutbox(
           )
         )
           throw new Error("Recover the earlier message before sending another");
-        if (!find(id) && snapshot.length >= MAX_PENDING)
-          throw new Error(
-            "Too many outstanding operations; resolve a pending operation",
-          );
+        if (!find(id) && snapshot.length >= MAX_PENDING) refuseFull();
         // Protect immediately against dismissal/echo eviction. On save failure keep
         // that protection; a later recovery attempt must persist it again before use.
         if (!item.recovery) restoredReceipts.delete(id);
@@ -1272,36 +1327,25 @@ export function createOutbox(
         dismissListeners.delete(listener);
       };
     },
-    dismiss(id: string, owner?: OutboxRecovery) {
-      const pending = dismissing.get(id);
-      if (pending) return pending;
-      if (closed || attempts.has(id)) return Promise.resolve();
-      const item = visible.find((item) => item.event.id === id);
-      if (
-        item?.recovery &&
-        item.delivery !== "failed" &&
-        (item.recovery.key !== owner?.key ||
-          item.recovery.value !== owner.value)
-      )
-        return Promise.reject(
-          new Error(
-            item.event.kind === 9000
-              ? "Confirm this addition in Members before removing it"
-              : "Confirm this message in New message before removing it",
+    dismiss: (id: string, owner?: OutboxRecovery) => remove(id, owner, false),
+    stuck() {
+      if (stuckFrom === snapshot && stuck.full === full) return stuck;
+      stuckFrom = snapshot;
+      stuck = Object.freeze({
+        full,
+        items: Object.freeze(
+          snapshot.filter((item) =>
+            full
+              ? item.delivery !== "sending"
+              : item.held &&
+                !sendHolds.has(item.event.id) &&
+                (item.delivery === "failed" || item.delivery === "unknown"),
           ),
-        );
-      const remove = () => persist(id, "dismiss");
-      const work = (
-        owner ? withRecovery(id, owner, remove, true) : locked(id, remove)
-      )
-        .then(() => {
-          admissionGates.delete(id);
-          sendHolds.delete(id);
-        })
-        .finally(() => dismissing.delete(id));
-      dismissing.set(id, work);
-      return work;
+        ),
+      });
+      return stuck;
     },
+    discard: (id: string) => remove(id, undefined, true),
   });
   return {
     outbox,

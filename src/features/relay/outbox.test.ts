@@ -2,13 +2,14 @@ import { assert, afterEach, expect, it, vi } from "vitest";
 import { createRelaySession } from "./session";
 import {
   HELD_RETRY_REFUSED,
+  PENDING_FULL,
   PublishNotSent,
   PublishRejected,
   createOutbox,
   type OutboxStorage,
   type OutgoingEvent,
 } from "./outbox";
-import type { EventTemplate } from "nostr-tools";
+import { getEventHash, type EventTemplate } from "nostr-tools";
 import type { RelayEvent } from "./events";
 import { byteSize } from "./budget";
 import { LIVE_CANVAS_BYTES } from "../channel-templates/canvas-limits.ts";
@@ -1508,13 +1509,47 @@ async function restoredHeld() {
   });
   return { id, second };
 }
-it("refuses a plain retry of a held entry restored after reload", async () => {
+it("refuses a plain retry of a held entry restored after reload, but lets it be discarded", async () => {
   const { id, second } = await restoredHeld();
   expect(() => second.outbox.retry(id)).toThrow(HELD_RETRY_REFUSED);
   await flush();
   expect(second.outbox.snapshot()[0]?.delivery).toBe("failed");
   expect(second.sign).not.toHaveBeenCalled();
   expect(second.publish).not.toHaveBeenCalled();
+  expect(second.outbox.stuck?.().items).toMatchObject([{ event: { id } }]);
+  await second.outbox.discard?.(id);
+  expect(second.outbox.snapshot()).toEqual([]);
+});
+it("lists a send that fails while the queue is full", async () => {
+  const waiting = Array.from({ length: 255 }, (_, index) => {
+    const template = {
+      kind: 9,
+      pubkey: viewer.pubkey,
+      created_at: 1_700_000_000,
+      content: `waiting ${index}`,
+      tags: [["h", "c"]],
+    };
+    return {
+      event: { ...template, id: getEventHash(template) },
+      delivery: "unknown" as const,
+    };
+  });
+  const storage = memoryStorage();
+  storage.save(waiting);
+  const h = setup(storage);
+  await h.open();
+  const id = h.send();
+  expect(() => h.send()).toThrow(PENDING_FULL);
+  // Read on every change, as the notice does.
+  h.outbox.subscribe(() => h.outbox.stuck?.());
+  await h.signNext();
+  h.publications.shift()?.reject(new PublishRejected("blocked: test"));
+  await flush();
+  expect(h.outbox.snapshot().at(-1)).toMatchObject({
+    event: { id },
+    delivery: "failed",
+  });
+  expect(h.outbox.stuck?.().items.map((item) => item.event.id)).toContain(id);
 });
 it("publishes a restored held entry only after the hold its retry passes", async () => {
   const { id, second } = await restoredHeld();

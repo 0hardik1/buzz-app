@@ -229,6 +229,10 @@ mentions still work.
   opening message or **Abandon admin setup** in the notice above the composer.
   Abandon keeps the chat and its current roles; then retry the opening message,
   or send a new one if it expired.
+- An **Unsent changes** notice lists changes Buzz can't send on its own, such
+  as a plugin's change after a restart, or everything waiting once the queue is
+  full. **Discard** removes a change from this device without sending it.
+  Closing the notice leaves a **Review** button until nothing is left.
 
 Diagnostics and Outbox are developer tools, not available in release builds.
 
