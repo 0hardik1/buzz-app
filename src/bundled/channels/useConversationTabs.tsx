@@ -695,7 +695,7 @@ export function useConversationTabs({
         )
     )
       return openLink(url);
-    const next = panelOpening(panels, channelId, url, origin?.rootId);
+    const next = panelOpening(panels, channelId, url, origin?.rootId, scope);
     if (next) {
       panelTrigger.current =
         document.activeElement instanceof HTMLElement

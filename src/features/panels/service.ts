@@ -11,7 +11,11 @@ import { usePluginPanelSplit } from "./usePanelSplit";
 import type { Attachment, ChannelSummary } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 import { parseBuzzLink } from "../navigation/buzz-links";
-import { conversationDetailTargetPattern } from "../navigation/targets";
+import {
+  conversationDetailTargetPattern,
+  parseOpenTarget,
+} from "../navigation/targets";
+import { splitPartition } from "../relay/partition";
 import {
   createContributions,
   resolveMatch,
@@ -125,12 +129,26 @@ export const panelOpening = (
   channelId: string,
   target: string,
   rootId?: string,
+  scope?: string,
 ): PanelOpening | undefined => {
   const link = parseBuzzLink(target);
   let panel: RegisteredPanel | undefined;
   if (link?.format === "plugin") {
     // The same choice must be available to conversation history on restoration.
     if (!conversationDetailTargetPattern.test(target)) return;
+    if (scope) {
+      try {
+        parseOpenTarget({
+          version: 1,
+          kind: "conversation",
+          scope: splitPartition(scope),
+          channelId,
+          detail: { target, ...(rootId && { rootId }) },
+        });
+      } catch {
+        return;
+      }
+    }
     panel = resolveMatch(
       panels
         .snapshot()

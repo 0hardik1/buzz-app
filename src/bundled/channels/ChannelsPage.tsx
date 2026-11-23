@@ -1518,7 +1518,9 @@ function ChannelWorkspace({
     continuingVisit,
     navigationSignal: navigation?.signal,
     isLive: () => !destination.current.navigation?.signal.aborted,
-    openLink: (url) => openLink(url, { fromThread: true }),
+    // The tab already tried the panel using its conversation and thread.
+    openLink: (url) =>
+      openLink(url, { fromThread: true, preferPluginPanel: false }),
     // A Solo conversation has no channel menu; its history takes focus instead.
     fallbackFocus: solo ? historyContainer : settingsTrigger,
     openMembers: () => setMembersOpen(true),
@@ -1918,10 +1920,12 @@ function ChannelWorkspace({
       url: string,
       {
         fromThread = false,
+        preferPluginPanel = true,
         returnFocus,
         rootId,
       }: {
         fromThread?: boolean;
+        preferPluginPanel?: boolean;
         returnFocus?: HTMLElement | undefined;
         rootId?: string;
       } = {},
@@ -1964,8 +1968,8 @@ function ChannelWorkspace({
       const { channelId, routedThread } = linkContext.current;
       const pluginLink = parsed?.format === "plugin";
       const pluginPanel =
-        pluginLink && channelId
-          ? panelOpening(panels, channelId, url, rootId)
+        pluginLink && channelId && preferPluginPanel
+          ? panelOpening(panels, channelId, url, rootId, scope)
           : undefined;
       if (!pluginPanel && isBuzzLink(url) && navigator && viewer) {
         const target = buzzLinkTarget(url, {
@@ -2001,7 +2005,7 @@ function ChannelWorkspace({
             : null);
         // Thread-origin details cover the live thread instead of retiring it.
         if (!fromThread && routedThread && !historyPanel(next))
-          select(channelId);
+          select(next.channelId);
         open(next, fromThread);
         return true;
       }
