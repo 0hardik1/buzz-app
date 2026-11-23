@@ -211,6 +211,7 @@ import {
   routeOf,
   routesFor,
   routeTurn,
+  noteRoutedTurn,
   setModelRouters,
   type TurnPick,
   turnRoute,
@@ -4036,8 +4037,8 @@ export class AgentsService extends Service implements Agents {
       })
     )
       return undefined;
-    return (selection) =>
-      routeTurn({
+    return async (selection) => {
+      const chosen = await routeTurn({
         harness: type.id,
         pick,
         current: offered.current,
@@ -4050,6 +4051,9 @@ export class AgentsService extends Service implements Agents {
         },
         signal: selection,
       });
+      if (chosen.routed) noteRoutedTurn(agent.pubkey, chosen.routed);
+      return chosen;
+    };
   }
   /** Whether `event` directs the agent as its owner's, as every harness
    * checks before it acts on a mention. */
