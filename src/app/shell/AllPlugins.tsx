@@ -17,6 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  ArrowsDownUpIcon,
   GripVerticalIcon,
   PinFilledIcon,
   PinIcon,
@@ -194,11 +195,12 @@ export function AllPlugins({
       >
         <div className={styles.frame}>
           <div className={styles.header}>
-            <PopoverTitle>Your plugins</PopoverTitle>
+            <PopoverTitle size="sm">Your plugins</PopoverTitle>
             <Select
               variant="compact"
               size="xs"
               align="end"
+              leading={<ArrowsDownUpIcon size={16} />}
               label="Sort pinned plugins"
               value={sort}
               groups={[
