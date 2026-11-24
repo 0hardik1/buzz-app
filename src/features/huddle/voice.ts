@@ -134,7 +134,8 @@ export function createHuddleVoices(
             if (
               event.type === "audio" &&
               event.peer === agent.owner &&
-              !stopLocalMicrophone
+              (!stopLocalMicrophone ||
+                huddles.snapshot().routing?.directAudio === false)
             )
               input(event.samples);
           },

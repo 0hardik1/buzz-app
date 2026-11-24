@@ -20,9 +20,17 @@ pub(crate) struct View {
     #[serde(default)]
     audio_settings: Option<AudioSettings>,
     #[serde(default)]
+    routing: Option<AudioRouting>,
+    #[serde(default)]
     discussion: Option<Discussion>,
     #[serde(default)]
     discussion_open: bool,
+}
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioRouting {
+    direct_audio: bool,
+    agent_cross_talk: bool,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -146,6 +154,8 @@ pub(crate) enum Action {
     RefreshAudio,
     InputDevice,
     OutputDevice,
+    DirectAudio,
+    AgentCrossTalk,
     Mute,
     Leave,
     Minimize,
@@ -480,6 +490,10 @@ pub(crate) fn huddle_window_action<R: tauri::Runtime>(
         if text.as_ref().is_none_or(|id| id.len() > 4096) {
             return Err("Invalid audio device".into());
         }
+    } else if matches!(action, Action::DirectAudio | Action::AgentCrossTalk) {
+        if !matches!(text.as_deref(), Some("on" | "off")) {
+            return Err("Invalid Huddle routing setting".into());
+        }
     } else if text.is_some() {
         return Err("Unexpected Huddle message".into());
     }
@@ -556,6 +570,7 @@ mod tests {
             discussion: None,
             discussion_open: false,
             audio_settings: None,
+            routing: None,
         }
     }
     #[test]

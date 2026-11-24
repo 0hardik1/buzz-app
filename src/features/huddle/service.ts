@@ -11,10 +11,14 @@ import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import type { HuddleAudio, OpenHuddleAudio } from "./audio";
 import type { Context } from "@deepseek-ai/cordis";
 
+export type HuddleRoutingOption = "directAudio" | "agentCrossTalk";
+type HuddleRouting = Record<HuddleRoutingOption, boolean>;
+
 export type HuddleSnapshot = Readonly<{
   id?: string;
   level?: number;
   audioSettings?: AudioSettingsState;
+  routing?: HuddleRouting;
   speakers?: Readonly<Record<string, number>>;
   requester?: string;
   phase: "idle" | "incoming" | "connecting" | "connected" | "leaving" | "error";
@@ -56,6 +60,17 @@ export function createHuddles(
     destination: HuddleDestination,
   ) => string | readonly string[] | undefined,
 ) {
+  const routing: HuddleRouting = {
+    directAudio: true,
+    agentCrossTalk: true,
+  };
+  for (const option of Object.keys(routing) as HuddleRoutingOption[]) {
+    try {
+      routing[option] = localStorage.getItem(`buzz.huddle.${option}`) !== "off";
+    } catch {
+      // A call can still run when browser storage is unavailable.
+    }
+  }
   let snapshot = idle;
   let requests: ReturnType<typeof createHuddleRequests> | undefined;
   let current: Attempt | undefined;
@@ -72,7 +87,7 @@ export function createHuddles(
   >();
   const unavailable = new Set<string>();
   const update = (next: HuddleSnapshot) => {
-    snapshot = next;
+    snapshot = { ...next, routing: { ...routing } };
     if (next.phase !== "incoming") requests?.resetSelection();
     for (const listener of listeners) listener();
     requests?.refresh();
@@ -393,11 +408,15 @@ export function createHuddles(
         return;
       }
       if (event.type === "audio") {
-        if (!attempt.localPlayout.get(event.peer)?.playing) {
+        if (
+          !routing.directAudio ||
+          !attempt.localPlayout.get(event.peer)?.playing
+        ) {
           activity(event.peer, event.samples);
           attempt.audio?.play(event.peer, event.samples);
         }
         if (
+          routing.agentCrossTalk &&
           snapshot.transcriptDestination &&
           snapshot.participants.includes(event.peer)
         )
@@ -501,7 +520,9 @@ export function createHuddles(
           activity(destination.viewer, samples);
           attempt.transcript?.input(samples);
           void attempt.sender.send(samples);
-          for (const listener of attempt.microphoneListeners) listener(samples);
+          if (routing.directAudio)
+            for (const listener of attempt.microphoneListeners)
+              listener(samples);
         },
         () => {
           if (valid(attempt))
@@ -577,6 +598,19 @@ export function createHuddles(
     };
   return {
     snapshot: () => snapshot,
+    setRouting(option: HuddleRoutingOption, enabled: boolean) {
+      if (routing[option] === enabled) return;
+      routing[option] = enabled;
+      if (option === "directAudio")
+        for (const route of current?.localPlayout.values() ?? [])
+          route.playing = false;
+      try {
+        localStorage.setItem(`buzz.huddle.${option}`, enabled ? "on" : "off");
+      } catch {
+        // The change still applies for this app session.
+      }
+      update(snapshot);
+    },
     openLocalPlayout(call: string, peer: string) {
       const attempt = current;
       // Remote owner calls cannot take over this device's speaker.
@@ -588,7 +622,12 @@ export function createHuddles(
         valid(attempt) && attempt.localPlayout.get(peer) === route;
       return {
         play(samples: readonly number[]) {
-          if (!active() || !snapshot.participants.includes(peer)) return;
+          if (
+            !routing.directAudio ||
+            !active() ||
+            !snapshot.participants.includes(peer)
+          )
+            return;
           route.playing = true;
           activity(peer, samples);
           attempt.audio?.play(peer, samples);

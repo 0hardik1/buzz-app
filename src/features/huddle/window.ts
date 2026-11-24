@@ -5,7 +5,7 @@ import { createHuddleComposerOwner } from "./composer-owner";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { RelayData } from "../relay/service";
 import { formatPublicKey } from "../../shared/identity/public-key";
-import type { Huddles } from "./service";
+import type { Huddles, HuddleRoutingOption, HuddleSnapshot } from "./service";
 import { createHuddleDiscussion, type HuddleDiscussion } from "./discussion";
 
 export type HuddleView = {
@@ -18,6 +18,7 @@ export type HuddleView = {
   dark: boolean;
   discussion?: HuddleDiscussion | undefined;
   audioSettings?: AudioSettingsState | undefined;
+  routing?: HuddleSnapshot["routing"];
   participants: {
     key: string;
     name: string;
@@ -35,6 +36,7 @@ export type HuddleAction =
   | "refreshAudio"
   | "inputDevice"
   | "outputDevice"
+  | HuddleRoutingOption
   | "mute"
   | "leave"
   | "minimize"
@@ -151,6 +153,7 @@ export function createHuddleWindow(
         : undefined,
       audioSettings:
         call.audioSettings && projectAudioSettings(call.audioSettings),
+      routing: call.routing,
       level: call.level ?? 0,
       dark: document.documentElement.classList.contains("dark"),
       discussion: discussion
@@ -327,6 +330,11 @@ export function createHuddleWindow(
               action === "inputDevice" ? "input" : "output",
               text,
             );
+          else if (
+            (action === "directAudio" || action === "agentCrossTalk") &&
+            (text === "on" || text === "off")
+          )
+            huddles.setRouting(action, text === "on");
           else if (action === "thread") {
             publish(true);
             try {

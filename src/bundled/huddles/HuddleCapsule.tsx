@@ -251,6 +251,8 @@ function HuddleCapsuleContent({
         <HuddleAudioSettings
           compact
           state={call.audioSettings}
+          routing={call.routing}
+          setRouting={huddles.setRouting}
           refresh={huddles.refreshAudioSettings}
           select={huddles.selectAudioDevice}
         />

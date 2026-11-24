@@ -49,6 +49,7 @@ function harness() {
     start: async () => {},
     mute: vi.fn(),
     refreshAudioSettings: vi.fn(),
+    setRouting: vi.fn(),
     selectAudioDevice: vi.fn(),
     leave: vi.fn(async () => {}),
     dispose: async () => {},
@@ -454,6 +455,14 @@ it("routes audio settings only from the current companion call", async () => {
     h.action(id, "refreshAudio");
     h.action(id, "inputDevice", "microphone");
     h.action(id, "outputDevice", "speakers");
+    h.action(id, "directAudio", "off");
+    h.action(id, "agentCrossTalk", "on");
+    h.action(id, "directAudio", "invalid");
+    h.action("previous-call", "agentCrossTalk", "off");
+    expect(vi.mocked(h.call.setRouting).mock.calls).toEqual([
+      ["directAudio", false],
+      ["agentCrossTalk", true],
+    ]);
     expect(h.call.refreshAudioSettings).toHaveBeenCalledOnce();
     expect(h.call.selectAudioDevice).toHaveBeenCalledWith(
       "input",

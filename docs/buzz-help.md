@@ -186,6 +186,9 @@ during the Huddle.
 Your running Codex agents in a Solo chat can join when you start the Huddle.
 In other channels, use the Huddle member controls to add an agent already
 in the conversation. Each agent's **Huddle voice** setting picks its voice.
+In **Audio settings**, **Direct audio with local agents** lets your microphone
+and speakers bypass the relay for agents running on the same device.
+**Let agents hear each other** controls audio between those agents independently.
 Work continuing in the Huddle uses the same Codex session. When you leave,
 unfinished Codex work in this conversation can continue in text. Use **Stop**
 on the work to cancel it.

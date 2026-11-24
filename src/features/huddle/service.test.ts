@@ -193,12 +193,20 @@ describe("Huddle lifetime", () => {
         ["agent", [0.1]],
         ["guest", [0.3]],
       ]);
+      h.service.setRouting("directAudio", false);
+      local?.play([0.4]);
+      h.receive({ type: "audio", peer: "agent", samples: [0.45] });
+      expect(h.audio.play).toHaveBeenLastCalledWith("agent", [0.45]);
+      h.service.setRouting("directAudio", true);
+      local?.play([0.46]);
+      expect(h.audio.play).toHaveBeenLastCalledWith("agent", [0.46]);
       local?.close();
       local?.play([0.4]);
       h.receive({ type: "audio", peer: "agent", samples: [0.5] });
-      expect(h.audio.play).toHaveBeenCalledTimes(3);
+      expect(h.audio.play).toHaveBeenCalledTimes(5);
       expect(h.audio.play).toHaveBeenLastCalledWith("agent", [0.5]);
     } finally {
+      h.service.setRouting("directAudio", true);
       await h.dispose();
     }
   });
@@ -1277,7 +1285,15 @@ it.each([undefined, "a".repeat(64)])(
       const speech = new Array<number>(960).fill(0.05);
       const silence = new Array<number>(960).fill(0);
       for (let i = 0; i < 10; i++) h.send(speech);
+      const peerAudio = vi.fn();
+      h.service.subscribePeerAudio(peerAudio);
+      h.service.setRouting("agentCrossTalk", false);
       h.receive({ type: "audio", peer: botKey.pubkey, samples: speech });
+      expect(peerAudio).not.toHaveBeenCalled();
+      expect(h.audio.play).toHaveBeenLastCalledWith(botKey.pubkey, speech);
+      h.service.setRouting("agentCrossTalk", true);
+      h.receive({ type: "audio", peer: botKey.pubkey, samples: speech });
+      expect(peerAudio).toHaveBeenCalledOnce();
       for (let i = 0; i < 35; i++) h.send(silence);
       await vi.waitFor(() =>
         expect(h.transcribe).toHaveBeenCalledWith(
@@ -1292,6 +1308,7 @@ it.each([undefined, "a".repeat(64)])(
       for (let i = 0; i < 35; i++) h.send(silence);
       expect(h.bridge.recognize).toHaveBeenCalledTimes(1);
     } finally {
+      h.service.setRouting("agentCrossTalk", true);
       await h.dispose();
     }
   },
