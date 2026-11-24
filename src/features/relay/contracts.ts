@@ -116,6 +116,7 @@ export type Attachment = Readonly<{
 }>;
 /** Signed URL binding a timecoded reply to one attachment in a media gallery. */
 export const MEDIA_TARGET_TAG = "buzz:media";
+export const MESSAGE_SOURCE_TAG = "buzz:message-source";
 export const INVOCATION_INTENT_TAG = "buzz:invocation-intent";
 export const INVOCATION_INTENT_VERSION = 1;
 /** Relay-authored membership activity, not a membership grant or user message. */

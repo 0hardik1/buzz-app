@@ -1,3 +1,4 @@
+import { MESSAGE_SOURCE_TAG } from "../relay/contracts";
 import { unconfirmedAgentEvent, type AgentEventTemplate } from "./native";
 
 type Draft = {
@@ -26,6 +27,7 @@ export function streamVoiceTranscript(
       content: text,
       tags: [
         channelTag,
+        [MESSAGE_SOURCE_TAG, "huddle-transcript"],
         ...(destination.root ? [["e", destination.root, "", "reply"]] : []),
       ],
     });

@@ -12,6 +12,7 @@ export async function openVoice(
   instructions: string,
   thinking?: (active: boolean) => void,
   voice?: string,
+  briefing?: string,
 ) {
   signal.throwIfAborted();
   const peer = new RTCPeerConnection();
@@ -163,6 +164,9 @@ export async function openVoice(
       outputModality: "audio",
       clientManagedHandoffs: false,
       realtimeStartInstructions: instructions,
+      ...(briefing && {
+        initialItems: [{ role: "developer", text: briefing }],
+      }),
       ...(voice ? { voice } : {}),
     });
     await wait(starting);

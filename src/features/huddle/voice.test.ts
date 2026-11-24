@@ -5,7 +5,9 @@ import type {
   AgentVoicePipe,
   RegisteredAgentType,
 } from "../agents/service";
-import type { ChannelSummary } from "../relay/contracts";
+import { MESSAGE_SOURCE_TAG, type ChannelSummary } from "../relay/contracts";
+import type { LiveListener } from "../relay/incoming";
+import { keypair, signed } from "../relay/testing";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import type { HuddleSnapshot } from "./service";
 import type { HuddleBridge, HuddleUpdate } from "./bridge";
@@ -26,6 +28,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const origin = "https://relay.example.com";
+const typedSender = keypair();
 const agent = (pubkey: string): Agent => ({
   key: pubkey,
   pubkey,
@@ -89,6 +92,7 @@ function setup() {
     { input: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }
   >();
   const seatArgs = new Map<string, AgentVoicePipe>();
+  const liveListeners = new Set<LiveListener>();
   const voice = vi.fn(async (seat: AgentVoicePipe) => {
     seatArgs.set(seat.agent.pubkey, seat);
     const connection = { input: vi.fn(), close: vi.fn() };
@@ -116,6 +120,21 @@ function setup() {
     scope: "scope",
     viewer: "owner",
     session: {
+      subscribeLive(listener: LiveListener) {
+        liveListeners.add(listener);
+        return () => {
+          liveListeners.delete(listener);
+        };
+      },
+      profiles: {
+        snapshot: () =>
+          new Map([
+            ["owner", { name: "John" }],
+            [typedSender.pubkey, { name: "John" }],
+          ]),
+        subscribe: () => () => {},
+        ensure: async () => {},
+      },
       channels: {
         get: (id: string) =>
           id === "room" ? room : { id: "parent", members: ["a", "b", "owner"] },
@@ -173,6 +192,9 @@ function setup() {
     voice,
     connections,
     seatArgs,
+    live(batch: Parameters<LiveListener>[0]) {
+      for (const listener of liveListeners) listener(batch);
+    },
     callbacks,
     report,
     listening,
@@ -663,4 +685,48 @@ it("mixes other admitted local Codex seats and excludes self and unknown speaker
     samples,
     "a",
   );
+});
+
+it("forwards only typed messages in the active Huddle conversation", async () => {
+  const h = setup();
+  const root = "ab".repeat(32);
+  h.registerCodex();
+  h.room({
+    huddle: true,
+    parentChannelId: "parent",
+    huddleTranscript: { channelId: "parent", root },
+  });
+  h.start();
+  await vi.waitFor(() => expect(h.connections.size).toBe(2));
+  const receive = vi.fn();
+  const stop = required(required(h.seatArgs.get("a")).subscribeTypedMessages)(
+    receive,
+  );
+  const event = (content: string, source: string, thread: string) =>
+    signed(typedSender, {
+      kind: 9,
+      created_at: 10,
+      content,
+      tags: [
+        ["h", "parent"],
+        ["e", thread, "", "reply"],
+        [MESSAGE_SOURCE_TAG, source],
+      ],
+    });
+  const typed = event("Typed in the Huddle thread", "typed", root);
+  h.live({
+    events: [
+      typed,
+      typed,
+      event("Already spoken", "huddle-transcript", root),
+      event("Another thread", "typed", "ce".repeat(32)),
+    ],
+  });
+  expect(receive).toHaveBeenCalledExactlyOnceWith({
+    speaker: "John",
+    text: typed.content,
+  });
+  stop();
+  h.live({ events: [event("After stop", "typed", root)] });
+  expect(receive).toHaveBeenCalledTimes(1);
 });

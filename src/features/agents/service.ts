@@ -1084,6 +1084,15 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
     agent: Agent<Config>;
     /** The conversation that owns the work and its transcript. */
     conversation: Readonly<{ channelId: string; root?: string }>;
+    /** Display names of other live participants, scoped to this voice seat. */
+    participants?: {
+      snapshot(): readonly string[];
+      subscribe(listener: () => void): () => void;
+    };
+    /** Newly typed messages in the conversation while this seat is live. */
+    subscribeTypedMessages?(
+      listener: (message: Readonly<{ speaker: string; text: string }>) => void,
+    ): () => void;
     /** Continue in text when the host ends a conversation's Huddle. */
     resumeOnClose?(): boolean;
     signal: AbortSignal;

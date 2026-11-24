@@ -1,3 +1,6 @@
+import { MESSAGE_SOURCE_TAG } from "../relay/contracts";
+import { tag } from "../relay/events";
+import { threadReference } from "../relay/thread-reference";
 import { createPcmSender } from "./sender";
 import type {
   Agent,
@@ -145,9 +148,76 @@ export function createHuddleVoices(
         heartbeat = setInterval(() => {
           void bridge.touch(id).catch(fail);
         }, 5000);
+        const participantKeys = () => {
+          const current = huddles.snapshot();
+          return current.id === call
+            ? current.participants.filter((key) => key !== agent.pubkey)
+            : [];
+        };
+        const profiles = callSession.profiles;
+        const requested = new Set<string>();
+        const loadNames = () => {
+          const missing = participantKeys().filter(
+            (key) => !profiles.snapshot().has(key) && !requested.has(key),
+          );
+          for (const key of missing) requested.add(key);
+          if (missing.length)
+            void profiles.ensure(missing, "background").catch(() => {});
+        };
+        loadNames();
+        const conversation = transcriptDestination ?? { channelId: room };
         const opened = await voice({
           agent,
-          conversation: transcriptDestination ?? { channelId: room },
+          conversation,
+          subscribeTypedMessages(listener) {
+            const seen = new Set<string>();
+            return callSession.subscribeLive(({ events }) => {
+              for (const event of events) {
+                if (
+                  abort.signal.aborted ||
+                  huddles.snapshot().id !== call ||
+                  event.kind !== 9 ||
+                  event.pubkey === agent.pubkey ||
+                  tag(event, "h") !== conversation.channelId ||
+                  threadReference(event)?.rootId !== conversation.root ||
+                  tag(event, MESSAGE_SOURCE_TAG) !== "typed" ||
+                  !event.content.trim() ||
+                  seen.has(event.id)
+                )
+                  continue;
+                seen.add(event.id);
+                listener({
+                  speaker:
+                    profiles.snapshot().get(event.pubkey)?.name ||
+                    "Unnamed speaker",
+                  text: event.content,
+                });
+              }
+            });
+          },
+          participants: {
+            snapshot: () => {
+              const people = profiles.snapshot();
+              const running = agents.snapshot().running;
+              return participantKeys().map(
+                (key) =>
+                  running.find((other) => other.pubkey === key)?.name ||
+                  people.get(key)?.name ||
+                  "Unnamed participant",
+              );
+            },
+            subscribe: (listener) => {
+              const stopProfiles = profiles.subscribe(listener);
+              const stopHuddle = huddles.subscribe(() => {
+                loadNames();
+                listener();
+              });
+              return () => {
+                stopProfiles();
+                stopHuddle();
+              };
+            },
+          },
           ...(transcriptDestination && {
             transcriptDestination,
             streamTranscript: () =>

@@ -1,3 +1,4 @@
+import { MESSAGE_SOURCE_TAG } from "../relay/contracts";
 import { interestPaused } from "./attention";
 import {
   hasInvocationIntent,
@@ -1203,6 +1204,7 @@ export class AgentRunners {
               : `${name} (transcribed by ${agent.name}): ${text}`,
             tags: [
               ["h", destination?.channelId ?? seat.conversation.channelId],
+              [MESSAGE_SOURCE_TAG, "huddle-transcript"],
               ...(destination?.root
                 ? [["e", destination.root, "", "reply"]]
                 : []),

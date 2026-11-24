@@ -16,6 +16,7 @@ import {
   INVOCATION_INTENT_TAG,
   INVOCATION_INTENT_VERSION,
   MEDIA_TARGET_TAG,
+  MESSAGE_SOURCE_TAG,
   type ChannelMessage,
 } from "./contracts";
 import { messageAuthor } from "./fold";
@@ -498,6 +499,7 @@ export function createMessages(
           content: text(message.content),
           tags: [
             ["h", channelId],
+            [MESSAGE_SOURCE_TAG, "typed"],
             ...mentionTags(channelId, withDmAgents(channelId, mentions)),
             ...referenceTags(references),
             ...pickTags(channelId, mentions, picks),
@@ -516,7 +518,11 @@ export function createMessages(
       return writer(9, channelId).send({
         kind: 9,
         content: text(content),
-        tags: [["h", channelId], ...(root ? [["e", root, "", "reply"]] : [])],
+        tags: [
+          ["h", channelId],
+          [MESSAGE_SOURCE_TAG, "huddle-transcript"],
+          ...(root ? [["e", root, "", "reply"]] : []),
+        ],
       });
     },
     /** Forward only the reconciled row supplied by an authorized source reader. */
@@ -705,6 +711,7 @@ export function createMessages(
         content: text(message.content),
         tags: [
           ["h", channelId],
+          [MESSAGE_SOURCE_TAG, "typed"],
           ...(parentId === rootId ? [] : [["e", rootId, "", "root"]]),
           ["e", parentId, "", "reply"],
           ...recipients,

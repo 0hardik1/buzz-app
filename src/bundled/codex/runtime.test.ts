@@ -40,7 +40,7 @@ import {
   type AgentProtection,
 } from "../../features/agent-protection/service";
 import type { RelayData } from "../../features/relay/service";
-import type { EventData } from "../../features/relay/events";
+import type { EventData, ReadFilter } from "../../features/relay/events";
 import type { Profile } from "../../features/relay/contracts";
 import { eventDto } from "../../features/relay/events";
 import { keypair, signed } from "../../features/relay/testing";
@@ -378,7 +378,9 @@ function fixture(
     ...(event as object),
     id: "d".repeat(64),
   }));
-  const read = vi.fn(async () => [] as EventData[]);
+  const read = vi.fn(
+    async (_filters?: readonly ReadFilter[]) => [] as EventData[],
+  );
   const memories: { slug: string; body: string; createdAt: number }[] = [];
   const memoryRead = vi.fn(async () => ({ entries: memories, partial: false }));
   const memoryView = {
@@ -9853,6 +9855,109 @@ describe("a thread that keeps the base sections it started with", () => {
       shown: composeBase({ scope: "thread", place: "conversation" }).key,
     });
     await connection.close();
+  });
+
+  it("briefs the Realtime voice model at startup and when the Huddle roster changes", async () => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const f = fixture();
+    f.huddleChannels.add("channel");
+    const d = f.delivery("unused");
+    f.events.push(
+      ...Array.from({ length: 21 }, (_, index) => ({
+        id: (index + 100).toString(16).padStart(64, "0"),
+        pubkey: owner,
+        kind: 9,
+        content: `Recent message number ${index}.`,
+        created_at: 20 + index,
+        tags: [["h", "channel"]],
+      })),
+      {
+        id: "ef".repeat(32),
+        pubkey: owner,
+        kind: 9,
+        content: "Unrelated conversation message.",
+        created_at: 42,
+        tags: [["h", "unrelated"]],
+      },
+    );
+    f.read.mockImplementation((filters) => f.query(filters ?? []));
+    let typedMessage:
+      | ((message: { speaker: string; text: string }) => void)
+      | undefined;
+    let names = ["John"];
+    let notify = () => {};
+    const unsubscribe = vi.fn();
+    const controller = new AbortController();
+    const connection = await f.runtime.voice(
+      {
+        config: d.config,
+        agent: { ...d.agent, config: d.config } as unknown as Agent,
+        conversation: { channelId: "channel" },
+        participants: {
+          snapshot: () => names,
+          subscribe: (listener: () => void) => {
+            notify = listener;
+            return unsubscribe;
+          },
+        },
+        subscribeTypedMessages(listener) {
+          typedMessage = listener;
+          return () => {
+            typedMessage = undefined;
+          };
+        },
+        signal: controller.signal,
+        async output() {},
+        async transcript() {},
+        ended() {},
+      },
+      d.agent,
+    );
+    try {
+      const briefing = vi.mocked(openVoice).mock.calls.at(-1)?.[8];
+      expect(briefing).toContain("live Buzz Huddle");
+      expect(briefing).toContain(JSON.stringify(d.agent.name));
+      expect(briefing).toContain('"John"');
+      expect(briefing).toContain("Recent message number 1.");
+      expect(briefing).toContain("Recent message number 20.");
+      expect(briefing).not.toContain("Recent message number 0.");
+      expect(briefing).not.toContain("Unrelated conversation message.");
+      notify();
+      expect(
+        f.sent.filter((wire) => wire.method === "thread/realtime/appendText"),
+      ).toHaveLength(0);
+      names = ["John", "Gigi"];
+      notify();
+      notify();
+      await vi.waitFor(() => {
+        expect(
+          f.sent.filter((wire) => wire.method === "thread/realtime/appendText"),
+        ).toEqual([
+          expect.objectContaining({
+            params: expect.objectContaining({
+              role: "developer",
+              text: expect.stringContaining('["John","Gigi"]'),
+            }),
+          }),
+        ]);
+      });
+      typedMessage?.({ speaker: "John", text: "The deployment is paused." });
+      await vi.waitFor(() => {
+        expect(
+          f.sent
+            .filter((wire) => wire.method === "thread/realtime/appendText")
+            .at(-1)?.params,
+        ).toEqual(
+          expect.objectContaining({
+            role: "developer",
+            text: expect.stringContaining("The deployment is paused."),
+          }),
+        );
+      });
+    } finally {
+      await connection.close();
+    }
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
   it("does not carry what an old thread's saved prompt showed to its fresh replacement", async () => {
