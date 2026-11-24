@@ -138,6 +138,7 @@ import {
 import { isApplePlatform } from "../shortcuts/format";
 import { macWebKit, webKit } from "./mac-webkit";
 import { useMessageAutocorrectPreference } from "./autocorrect-preference";
+import { useMarkdownAsTypedPreference } from "./markdown-input-preference";
 import { composerLinkUrl } from "./composer-link";
 import { messageLinkParts } from "./message-link-parts";
 import { updatePlainLinks, type PlainLink } from "./composer-link-edit";
@@ -527,6 +528,7 @@ export function EditableInput({
   const mount = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const { enabled: autocorrect } = useMessageAutocorrectPreference();
+  const { enabled: markdownAsTyped } = useMarkdownAsTypedPreference();
   const current = useRef({
     draft,
     decorationsFor,
@@ -545,6 +547,7 @@ export function EditableInput({
     disabled,
     placeholder,
     autocorrect,
+    markdownAsTyped,
   });
   current.current = {
     draft,
@@ -564,6 +567,7 @@ export function EditableInput({
     disabled,
     placeholder,
     autocorrect,
+    markdownAsTyped,
   };
   const tokenClassName = styles.token ?? "";
   const tokenClass = useRef(tokenClassName);
@@ -2464,8 +2468,13 @@ export function EditableInput({
           // itself can be filtered out; then nothing converts. Completions
           // claim Space on keydown when a result has a spaceId, so that Space
           // never reaches this rule; a marker line has no completion trigger.
+          // A chat composer whose device keeps Markdown as typed never converts.
           if (
             from === to &&
+            !(
+              current.current.markdownAsTyped &&
+              current.current.markdownMode === "chat"
+            ) &&
             (composerFenceDelimiters.has(text) ||
               composerPrefixDelimiters.has(text) ||
               composerInlineDelimiters.has(text)) &&
