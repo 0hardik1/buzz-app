@@ -95,7 +95,9 @@ if that desktop app is up and running.
   Mentioning a team mentions each member.
 - **Messages.** Hover or right-click a message to react, **Reply**, copy a link,
   forward it, or start a chat about it. On an agent's reply, **View activity**
-  shows what it did.
+  shows what it did. Shift+F10 or the Menu key opens the same menu from the
+  keyboard. Right-click an author's avatar for **View profile**, **Send
+  message** and **Copy public key**.
 - **Pins.** **Pin to channel** (**Pin to DM** in a DM) in a message's More
   menu adds it to the pin list, up to 250; the pin button in the header lists
   them. Solo chats have no pins.

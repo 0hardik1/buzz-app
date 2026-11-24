@@ -5,6 +5,7 @@ import type { Appearance } from "../shared/theme/service";
 import { statusShortcut } from "../features/user-status/status-shortcut";
 import {
   activeMessageList,
+  openReactionPicker,
   reactionTrigger,
   replyTrigger,
   selectedMessage,
@@ -226,23 +227,6 @@ export function registerAppShortcuts(
   };
 }
 
-const nextFrame = () =>
-  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-/** Selecting a message mounts its action bar; give the picker a few frames. */
-async function openReactionPicker() {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const selected = selectedMessage();
-    if (!selected) return;
-    const trigger = reactionTrigger(selected.element);
-    if (trigger) {
-      trigger.click();
-      return;
-    }
-    await nextFrame();
-  }
-}
-
 /** Slack's message keys: Up from an empty composer selects, these act on it. */
 function registerMessageShortcuts(shortcuts: ShortcutsService) {
   return [
@@ -270,7 +254,7 @@ function registerMessageShortcuts(shortcuts: ShortcutsService) {
         const selected = selectedMessage();
         return !!selected && !!reactionTrigger(selected.element);
       },
-      run: openReactionPicker,
+      run: () => openReactionPicker(selectedMessage()?.element),
     }),
     shortcuts.registerHost({
       id: "reply-to-message",
@@ -341,7 +325,7 @@ function registerMessageShortcuts(shortcuts: ShortcutsService) {
       run: async () => {
         // Always the latest, even from another selected message; R reacts to that.
         if (!selectNewestMessage(activeMessageList())) return;
-        await openReactionPicker();
+        await openReactionPicker(selectedMessage()?.element);
       },
     }),
   ];
