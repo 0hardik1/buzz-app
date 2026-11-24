@@ -1322,15 +1322,32 @@ export function createRelaySession(
   // The people rule names a conversation's kind: one only you and your agents
   // can post in is a chat ("solo"); once anyone else can, it is a channel.
   // The older Solo tag counts only while a chat's roster is unknown.
+  // This device's own agents count as agents before their profiles load.
+  let agentSource: unknown;
+  let localAgents: ReadonlySet<string> = new Set();
+  const ownAgents = () => {
+    const snapshot = agentChoices.snapshot();
+    if (snapshot !== agentSource) {
+      agentSource = snapshot;
+      localAgents = new Set(snapshot.identities.map((agent) => agent.pubkey));
+    }
+    return localAgents;
+  };
   const peopleKinds = new WeakMap<
     ChannelSummary,
-    { profiles: ReadonlyMap<string, Profile>; channel: ChannelSummary }
+    {
+      profiles: ReadonlyMap<string, Profile>;
+      agents: ReadonlySet<string>;
+      channel: ChannelSummary;
+    }
   >();
   const byPeople = (channel: ChannelSummary): ChannelSummary => {
     const known = profiles.queries.snapshot();
+    const agents = ownAgents();
     const cached = peopleKinds.get(channel);
-    if (cached?.profiles === known) return cached.channel;
-    const found = peopleKind(channel, transport?.viewer, known);
+    if (cached?.profiles === known && cached.agents === agents)
+      return cached.channel;
+    const found = peopleKind(channel, transport?.viewer, known, agents);
     // While a member's profile loads, keep the kind last worked out, or the
     // relay's own until then.
     const kind =
@@ -1342,13 +1359,14 @@ export function createRelaySession(
       kind === channel.channelType
         ? channel
         : Object.freeze({ ...channel, channelType: kind } as ChannelSummary);
-    peopleKinds.set(channel, { profiles: known, channel: next });
+    peopleKinds.set(channel, { profiles: known, agents, channel: next });
     return next;
   };
   const lastKinds = new Map<string, ChannelSummary["channelType"]>();
   let peopleSource: ChannelList | undefined;
   let peopleProfiles: ReadonlyMap<string, Profile> | undefined;
   let peopleList: ChannelList | undefined;
+  let peopleAgents: ReadonlySet<string> | undefined;
   const channelQueries = Object.freeze({
     ...channels.queries,
     ...(channels.queries.get && {
@@ -1376,7 +1394,13 @@ export function createRelaySession(
     list() {
       const source = channels.queries.list();
       const known = profiles.queries.snapshot();
-      if (source !== peopleSource || known !== peopleProfiles || !peopleList) {
+      const agents = ownAgents();
+      if (
+        source !== peopleSource ||
+        known !== peopleProfiles ||
+        agents !== peopleAgents ||
+        !peopleList
+      ) {
         const classified = source.channels.map(byPeople);
         peopleList = classified.every(
           (channel, index) => channel === source.channels[index],
@@ -1385,6 +1409,7 @@ export function createRelaySession(
           : Object.freeze({ ...source, channels: Object.freeze(classified) });
         peopleSource = source;
         peopleProfiles = known;
+        peopleAgents = agents;
       }
       const snapshot = peopleList;
       const activityRevision = channelActivity.revision();
@@ -1440,10 +1465,12 @@ export function createRelaySession(
       const offChannels = channels.queries.subscribeList(listener);
       const offActivity = channelActivity.subscribe(listener);
       const offProfiles = profiles.queries.subscribe(listener);
+      const offAgents = agentChoices.subscribe(listener);
       return () => {
         offChannels();
         offActivity();
         offProfiles();
+        offAgents();
       };
     },
   });
