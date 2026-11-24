@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { act, waitFor, renderHook } from "@testing-library/react";
+import { act, cleanup, waitFor, renderHook } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import {
   type HarnessRoutes,
@@ -11,7 +11,12 @@ import {
 import { useAgent, useMentionModels, AgentsContext } from "./react";
 import type { Agent, Agents, Models } from "./service";
 
-afterEach(() => resetModelRoutesForTests());
+// Unmount first: a mounted hook would render again, after its test, when the
+// routers are cleared.
+afterEach(() => {
+  cleanup();
+  resetModelRoutesForTests();
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
