@@ -98,6 +98,11 @@ function fixture() {
       viewer: owner,
       relayAuthor: authority,
       observe: vi.fn(() => view),
+      profiles: {
+        snapshot: () => new Map(),
+        subscribe: subscribe(channels),
+        ensure: async () => {},
+      },
       channels: {
         list: vi.fn(() => ({ channels: [dm, backing, ...others] })),
         get: (id: string) => (id === room ? backing : dm),

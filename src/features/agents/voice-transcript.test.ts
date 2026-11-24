@@ -28,7 +28,15 @@ it("updates one transcript during speech and gives the final edit a newer relay 
     await done;
 
     expect(events).toEqual([
-      { kind: 9, tags: [["h", "conversation"]], content: "One", created_at: 1 },
+      {
+        kind: 9,
+        tags: [
+          ["h", "conversation"],
+          ["buzz:message-source", "huddle-transcript"],
+        ],
+        content: "One",
+        created_at: 1,
+      },
       ...["One two", "One two three four", "One two three four."].map(
         (content, index) => ({
           kind: 40003,

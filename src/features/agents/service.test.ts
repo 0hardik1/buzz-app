@@ -5208,7 +5208,7 @@ describe("voice launch and transcripts", () => {
       await f.ctx.fiber.dispose();
     }
   });
-  it("publishes final h-only transcripts without triggering its own agent", async () => {
+  it("publishes final transcripts without recipients without triggering its own agent", async () => {
     const voice = vi.fn(async (_seat: AgentVoiceSeat<Config>) => ({
       input: vi.fn(),
       close: vi.fn(),
@@ -5241,7 +5241,10 @@ describe("voice launch and transcripts", () => {
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatchObject({
         pubkey: bot,
-        tags: [["h", channel]],
+        tags: [
+          ["h", channel],
+          ["buzz:message-source", "huddle-transcript"],
+        ],
         content: "Echo (transcribed by Echo): Spoken answer",
       });
       await seat.transcript("owner", "  ");
@@ -5309,7 +5312,11 @@ describe("voice launch and transcripts", () => {
         expect(lines).toHaveLength(2);
         expect(lines[0]).toMatchObject({
           pubkey: bot,
-          tags: [["h", channel], ...(root ? [["e", root, "", "reply"]] : [])],
+          tags: [
+            ["h", channel],
+            ["buzz:message-source", "huddle-transcript"],
+            ...(root ? [["e", root, "", "reply"]] : []),
+          ],
           content: "Spoken",
         });
         expect(lines[1]?.content).toBe("Finished line");
@@ -7616,6 +7623,11 @@ describe("an agent in several communities", () => {
       scope: "scope",
       viewer: owner,
       session: {
+        profiles: {
+          snapshot: () => new Map(),
+          subscribe: quiet,
+          ensure: async () => {},
+        },
         channels: {
           get: () => ({
             id: "room",

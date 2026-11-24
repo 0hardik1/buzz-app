@@ -5269,6 +5269,7 @@ it.each([
     expect(publish.mock.calls[0]?.[0]).toMatchObject({
       tags: [
         ["h", "channel"],
+        ["buzz:message-source", "typed"],
         ["p", first.pubkey],
       ],
     });
