@@ -179,10 +179,14 @@ if that desktop app is up and running.
 Huddles need the desktop app. Use the headphone button in a channel or DM,
 **Start a huddle** in the Solo chat menu, or **Start huddle in thread** on a
 message. In a channel, speech appears in replies to the Huddle card. If you start
-inside a thread, those replies appear inline in that thread. In Solo chats and
-DMs, speech appears in the main timeline. On macOS, Buzz uses on-device speech recognition to transcribe your
-microphone. People can keep reading and typing in the same conversation
-during the Huddle. The Huddle card provides a way to join the call.
+inside a thread, the card has its own replies there. In Solo chats and DMs,
+speech appears in the main timeline. The Huddle's **Messages** panel shows
+that same conversation. Use the Huddle card to join, and the reply summary
+below it to open its replies. The Huddle ends when the last person leaves.
+
+When live microphone transcription is configured, Buzz sends microphone audio
+to OpenAI Realtime and updates the same message as you speak. Other macOS setups
+use on-device speech recognition.
 
 Your running Codex agents in a Solo chat can join when you start the Huddle.
 Use the Huddle member controls to add people or agents already in the
@@ -190,8 +194,8 @@ conversation. Each agent's **Huddle voice** setting picks its voice.
 In **Audio settings**, **Direct audio with local agents** lets your microphone
 and speakers bypass the relay for agents running on the same device.
 **Let agents hear each other** controls audio between those agents independently.
-**Live agent transcripts** shows the agent's speech in the conversation as it
-arrives. Turn it off to receive only finished transcripts.
+**Live transcripts** updates agent speech and configured live microphone
+transcription as it arrives. Turn it off to receive only finished transcripts.
 Work continuing in the Huddle uses the same Codex session. The voice model sees
 the current participants, recent chat messages, and new messages typed in that
 conversation. Codex Realtime provides agent audio, and replies from ordinary text turns appear in the chat. When you leave,

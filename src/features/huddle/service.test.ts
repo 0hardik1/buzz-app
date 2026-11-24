@@ -15,6 +15,7 @@ import type { HuddleAudio, OpenHuddleAudio } from "./audio";
 import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import { createHuddles, provideHuddleStatus } from "./service";
 import { createHuddleVoices } from "./voice";
+import { receiveHuddleTranscription } from "./realtime-transcription";
 
 const viewerKey = keypair();
 const relayKey = keypair();
@@ -53,7 +54,11 @@ function harness(
   );
   const archive = vi.fn(async () => {});
   const transcribe = vi.fn(() => "outbox-id");
-  const publish = vi.fn(async () => {});
+  const publish = vi.fn(
+    async (
+      _event: Parameters<Parameters<typeof createOutbox>[1]["publish"]>[0],
+    ) => {},
+  );
   const writes = createOutbox(
     viewerKey.pubkey,
     {
@@ -1335,3 +1340,60 @@ it.each([
     }
   },
 );
+
+it("updates one human message per Realtime utterance, even if the provider repeats completion", async () => {
+  const h = harness();
+  const controller = new AbortController();
+  const report = vi.fn();
+  const root = "a".repeat(64);
+  try {
+    const receive = receiveHuddleTranscription(
+      h.relay.snapshot().session,
+      { channelId: destination.channelId, root },
+      controller.signal,
+      () => true,
+      () => true,
+      report,
+    );
+    const partial = {
+      type: "conversation.item.input_audio_transcription.delta",
+      item_id: "utterance",
+      delta: "Will",
+    };
+    receive(partial);
+    await vi.waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
+    const original = h.publish.mock.calls[0]?.[0];
+    expect(original).toMatchObject({
+      kind: 9,
+      pubkey: destination.viewer,
+      content: "Will",
+      tags: expect.arrayContaining([
+        ["h", destination.channelId],
+        ["buzz:message-source", "huddle-transcript"],
+        ["e", root, "", "reply"],
+      ]),
+    });
+
+    const final = {
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: partial.item_id,
+      transcript: "We'll ship it.",
+    };
+    receive(final);
+    receive(final);
+    receive(partial);
+    await vi.waitFor(() => expect(h.publish).toHaveBeenCalledTimes(2));
+    expect(h.publish.mock.calls[1]?.[0]).toMatchObject({
+      kind: 40003,
+      content: final.transcript,
+      tags: expect.arrayContaining([
+        ["h", destination.channelId],
+        ["e", original?.id],
+      ]),
+    });
+    expect(report).not.toHaveBeenCalled();
+  } finally {
+    controller.abort();
+    await h.dispose();
+  }
+});

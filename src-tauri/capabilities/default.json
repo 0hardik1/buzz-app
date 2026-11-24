@@ -9,6 +9,8 @@
     "allow-huddle-open",
     "allow-huddle-close",
     "allow-huddle-pcm",
+    "allow-huddle-realtime-transcription-available",
+    "allow-huddle-realtime-transcription-connect",
     "allow-huddle-recognize",
     "allow-huddle-touch",
     "allow-pairing-account",

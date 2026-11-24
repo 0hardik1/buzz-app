@@ -12,7 +12,7 @@ pub(crate) use agent::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 pub(crate) use huddle::{
-    huddle_close, huddle_open, huddle_pcm, huddle_recognize, huddle_touch, Huddles,
+    huddle_close, huddle_open, huddle_pcm, huddle_realtime_transcription_available, huddle_realtime_transcription_connect, huddle_recognize, huddle_touch, Huddles,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};

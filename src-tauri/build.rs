@@ -33,6 +33,7 @@ fn main() {
     // `plugins.updater` config comes from the same values via `tauri build --config`.
     println!("cargo:rerun-if-env-changed=BUZZ_UPDATER_PUBLIC_KEY");
     println!("cargo:rerun-if-env-changed=BUZZ_UPDATER_ENDPOINT");
+    println!("cargo:rerun-if-env-changed=BUZZ_VOICE_TRANSCRIPTION_URL");
     println!("cargo:rustc-check-cfg=cfg(buzz_updater_enabled)");
     let configured = |name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty());
     if configured("BUZZ_UPDATER_PUBLIC_KEY") && configured("BUZZ_UPDATER_ENDPOINT") {
@@ -74,6 +75,8 @@ fn main() {
             "huddle_open",
             "huddle_close",
             "huddle_pcm",
+            "huddle_realtime_transcription_available",
+            "huddle_realtime_transcription_connect",
             "huddle_recognize",
             "huddle_touch",
             "pairing_account",

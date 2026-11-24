@@ -27,6 +27,8 @@ export type HuddleBridge = {
   close(id: string): Promise<void>;
   touch(id: string): Promise<void>;
   send(id: string, samples: number[]): Promise<void>;
+  realtimeTranscriptionAvailable?(): Promise<boolean>;
+  realtimeTranscriptionConnect?(id: string, offer: string): Promise<string>;
   recognize?(id: string, samples: number[]): Promise<string>;
 };
 export const nativeHuddles: HuddleBridge = {
@@ -55,5 +57,9 @@ export const nativeHuddles: HuddleBridge = {
   close: (id) => invoke("huddle_close", { id }),
   touch: (id) => invoke("huddle_touch", { id }),
   send: (id, samples) => invoke("huddle_pcm", { id, samples }),
+  realtimeTranscriptionAvailable: () =>
+    invoke("huddle_realtime_transcription_available"),
+  realtimeTranscriptionConnect: (id, offer) =>
+    invoke("huddle_realtime_transcription_connect", { id, offer }),
   recognize: (id, samples) => invoke("huddle_recognize", { id, samples }),
 };

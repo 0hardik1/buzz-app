@@ -1,3 +1,7 @@
+import {
+  openRealtimeHuddleTranscription,
+  receiveHuddleTranscription,
+} from "./realtime-transcription";
 import { addChannelMember } from "../channel-members/members";
 import { endLastHumanHuddle } from "./ending";
 import { createMicrophoneTranscript } from "./transcript";
@@ -476,27 +480,69 @@ export function createHuddles(
               },
               transcriptDestination,
             });
-            const recognize = bridge.recognize;
-            if (parentAdmission && recognize)
-              attempt.transcript = createMicrophoneTranscript(
-                attempt.abort.signal,
-                (text) => {
-                  if (valid(attempt) && accessible() === "allowed")
-                    connection.session.messages.transcribe(
-                      transcriptDestination.channelId,
-                      transcriptDestination.root,
-                      text,
-                      ...(transcriptDestination.parentId
-                        ? ([transcriptDestination.parentId] as const)
-                        : []),
+            if (parentAdmission) {
+              const canWrite = () =>
+                valid(attempt) && accessible() === "allowed";
+              const report = (error: unknown) => {
+                if (valid(attempt))
+                  update({ ...snapshot, transcriptError: message(error) });
+              };
+              const recognize = bridge.recognize;
+              const fallback = () => {
+                if (!recognize || !canWrite()) return;
+                attempt.transcript = createMicrophoneTranscript(
+                  attempt.abort.signal,
+                  (text) => {
+                    if (canWrite())
+                      connection.session.messages.transcribe(
+                        transcriptDestination.channelId,
+                        transcriptDestination.root,
+                        text,
+                        ...(transcriptDestination.parentId
+                          ? ([transcriptDestination.parentId] as const)
+                          : []),
+                      );
+                  },
+                  report,
+                  (samples) => recognize(attempt.id, samples),
+                );
+              };
+              const connect = bridge.realtimeTranscriptionConnect;
+              if (
+                connect &&
+                attempt.audio?.transcriptionTrack &&
+                (await bridge
+                  .realtimeTranscriptionAvailable?.()
+                  .catch(() => false))
+              ) {
+                if (!canWrite()) return;
+                try {
+                  const track = attempt.audio.transcriptionTrack();
+                  if (track && connection.session.outbox)
+                    openRealtimeHuddleTranscription(
+                      track,
+                      attempt.abort.signal,
+                      (offer) => connect(attempt.id, offer),
+                      receiveHuddleTranscription(
+                        connection.session,
+                        transcriptDestination,
+                        attempt.abort.signal,
+                        canWrite,
+                        () => routing.liveTranscript,
+                        report,
+                      ),
+                      (error) => {
+                        report(error);
+                        fallback();
+                      },
                     );
-                },
-                (error) => {
-                  if (valid(attempt))
-                    update({ ...snapshot, transcriptError: message(error) });
-                },
-                (samples) => recognize(attempt.id, samples),
-              );
+                  else fallback();
+                } catch (error) {
+                  report(error);
+                  fallback();
+                }
+              } else fallback();
+            }
           }
           void inviteAgent(roomId);
         })().catch(() => {
