@@ -107,11 +107,7 @@ import { useReferenceDirectory } from "./ReferenceText";
 import { withoutRelayNotice } from "../relay/relayed-from";
 import { EditedMarker, MessageMarkdown } from "./MessageMarkdown";
 import { DetailsMessage } from "./DetailsMessage";
-import {
-  composerHost,
-  type MediaReviewOrigin,
-  useComposerScope,
-} from "./composer-overlay";
+import { useComposerScope } from "./composer-overlay";
 import {
   safeMessageUrl,
   projectMarkdownAttachments,
@@ -184,6 +180,8 @@ export type MessageRowProps = {
   retry: ((id: string) => void) | undefined;
   /** Pins this row in a virtualized list; returns the release. */
   keepMounted?: ((messageId: string) => () => void) | undefined;
+  /** A details message in this row expanded or folded in place. */
+  onExpandDetails?: (() => void) | undefined;
   onOpenThread?:
     | ((messageId: string, threadRootId: string, intent?: "reply") => void)
     | undefined;
@@ -211,7 +209,6 @@ export type MessageRowProps = {
     seconds: number,
     hasComments?: boolean,
     attachments?: ChannelMessage["attachments"],
-    opening?: MediaReviewOrigin,
   ) => void;
 };
 
@@ -294,6 +291,7 @@ function MessageRowContent({
   day,
   retry,
   keepMounted,
+  onExpandDetails,
   onOpenThread,
   onReply,
   startsThreads = true,
@@ -352,11 +350,6 @@ function MessageRowContent({
   const composerView = useComposerScope();
   const inView = !!composerView;
   const viewRoot = composerView?.rootId;
-  // Media opens over the view this row reads in, while its composer shows.
-  const mediaOpening = () => {
-    const host = composerHost(composerView?.handle);
-    return host ? { host, rootId } : undefined;
-  };
   const openLink = useCallback(
     (url: string) =>
       onOpenLink(url, {
@@ -949,7 +942,6 @@ function MessageRowContent({
                                 (!!row.threadRootId &&
                                   row.threadRootId !== row.id),
                               row.attachments,
-                              mediaOpening(),
                             ),
                         }
                       : {})}
@@ -1010,7 +1002,6 @@ function MessageRowContent({
                               (!!row.threadRootId &&
                                 row.threadRootId !== row.id),
                             row.attachments,
-                            mediaOpening(),
                           ),
                       }
                     : {})}
@@ -1039,7 +1030,9 @@ function MessageRowContent({
             }
             return files ? (
               <div className={styles.fileGroup} key={first?.url}>
-                {items}
+                {/* A block each, so a copied selection puts every
+                    card on its own line. */}
+                {items.map((item) => item && <div key={item.key}>{item}</div>)}
               </div>
             ) : (
               items
@@ -1137,6 +1130,7 @@ function MessageRowContent({
         author={name}
         createdAt={row.createdAt}
         keepMounted={keepMounted}
+        onExpand={onExpandDetails}
         preview={
           <MessageMarkdown
             directory={directory}

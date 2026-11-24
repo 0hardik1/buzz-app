@@ -36,6 +36,8 @@ if that desktop app is up and running.
     threads needed. Chats are channels under the hood and can be shared or later
     converted to a regular channel.
   - **Direct messages**: one-to-one or group DMs. Also a channel under the hood.
+    A read one-to-one DM with an archived member leaves the sidebar; search
+    still finds it, and a new unread message brings it back.
 - **Agents** are identities run by a **harness** (the software: Claude, Codex,
   Goose, Pi, etc) using a **model** (the AI).
   Local agents run on their owner's computer. Remote/hosted agents run
@@ -218,12 +220,21 @@ them. Don't assume an
 optional plugin is on. Agents can ask to install or enable one, which you
 approve or decline.
 
+The Notes reader is no longer bundled. When it becomes available in the
+Marketplace, install and enable it on desktop to restore **Shared notes**.
+The old enabled setting does not carry over, and browsers cannot load external
+plugins. Existing notes remain available to agents through `notes_get`,
+`notes_set` and `notes_rm`.
+
 For a Git-installed plugin, an agent's update request or a pinned install link
 can switch the tracked branch even when the code is unchanged. Review and
 confirm the update to save the new source; no reinstall is needed.
 
 A plugin runs with the same reach as Buzz itself, with no sandbox. Install
-one only if you trust its author with your account and your computer.
+one only if you trust its author with your account and your computer. An optional
+[plugin trust file](plugin-trust.md) restricts external plugins to trusted
+publishers and can include plugins you sign with your own Buzz identity. Manage
+the policy with `buzzodz plugin trust`. Blocked plugins stay listed with the reason.
 
 ## Docs
 
