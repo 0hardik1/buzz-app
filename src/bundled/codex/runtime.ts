@@ -4817,7 +4817,10 @@ export class CodexRuntime {
               .filter(Boolean)
               .join("\n\n") + "\n\n";
         active.threadId = threadId;
+        // Attention and plugin wakes report through their own explicit sends.
+        // Realtime can hand speech into their running turn.
         postHuddleReply =
+          !request.wake &&
           seat?.origin?.channelId === request.conversation.channelId &&
           seat.origin.root === request.replyRoot &&
           !seat.signal.aborted;

@@ -14558,3 +14558,62 @@ it("publishes a completed typed Huddle answer once without injecting speech", as
     f.runtime.dispose();
   }
 });
+
+it("does not auto-post final text when speech joins an Attention turn in a Huddle", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  f.soloChannels.add("channel");
+  const d = f.delivery("check this");
+  const { config } = scoped(d, "channel");
+  const signal = new AbortController();
+  const transcript = vi.fn(async () => {});
+  try {
+    const connected = await join(f, d, {
+      config,
+      conversation: { channelId: "channel" },
+      signal: signal.signal,
+      resumeOnClose: () => true,
+      transcript,
+    });
+    await f.runtime.run({
+      ...d,
+      config,
+      trigger: {
+        type: "attention",
+        id: "huddle-timer",
+        at: Date.now(),
+        channel: "channel",
+        topLevel: true,
+        text: "Resume background work.",
+      },
+    });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    f.emit({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          phase: "final_answer",
+          text: "Only for the spoken request.",
+        },
+      },
+    });
+    f.emit({
+      method: "thread/realtime/transcript/done",
+      params: {
+        threadId: "thread-1",
+        role: "assistant",
+        text: "The spoken answer.",
+      },
+    });
+    await f.complete(0, "");
+    await connected.close();
+    expect(f.publish).not.toHaveBeenCalled();
+    expect(transcript.mock.calls).toEqual([["agent", "The spoken answer."]]);
+  } finally {
+    signal.abort();
+    f.runtime.dispose();
+  }
+});
