@@ -95,10 +95,14 @@ const admit = (gate: Gate) =>
       clearTimeout(timer);
       resolve(value);
     };
-    gate.check().then(
-      (reason) => done(reason === undefined ? OPEN : { state: "held", reason }),
-      () => done({ state: "unknown" }),
-    );
+    // A throw before it returns a promise is an unknown answer too.
+    Promise.resolve()
+      .then(() => gate.check())
+      .then(
+        (reason) =>
+          done(reason === undefined ? OPEN : { state: "held", reason }),
+        () => done({ state: "unknown" }),
+      );
   });
 
 /** Whether `gate` lets a new agent be made now, asked again when it says
@@ -949,8 +953,13 @@ export function AgentCreateDialog({
               <SettingsGroup>{localRows}</SettingsGroup>
             )}
             {admission.state === "held" && (
-              <p role="status" className="m-0 text-body-sm">
-                {admission.reason}
+              <p className="m-0 flex items-center gap-2 text-body-sm">
+                <span role="status">{admission.reason}</span>
+                {openSettings && (
+                  <Button size="sm" onClick={() => openSettings("agents")}>
+                    Set up
+                  </Button>
+                )}
               </p>
             )}
             {admission.state === "unknown" && type && (

@@ -1730,7 +1730,11 @@ it("tells a protected agent a device-list key isn't enough, and refuses new prot
   const NEEDS =
     "Protected Claude agents need your own Claude sign-in or a saved API key. Keys on the device list don't count.";
   nativeKey.device = true;
-  const { type } = installed({ keySaved: false, startsProtected: true });
+  const { type } = installed({
+    keySaved: false,
+    startsProtected: true,
+    own: { status: { loggedIn: false } },
+  });
   const Settings = tab(type, 0);
   // Ordinary agents still run on the device list, so they say nothing.
   render(<Settings agent={agent()} save={vi.fn()} />);

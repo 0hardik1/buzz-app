@@ -480,7 +480,7 @@ export class ClaudeSetup {
     return this.hold(
       (async () => {
         const status = await checkClaude(spawn, this.auth);
-        this.set({ status });
+        this.set({ status, protectedReady: this.auth.protectedEligible });
         if (!needed && status.state === "missing") return;
         await this.run("install", false);
       })(),

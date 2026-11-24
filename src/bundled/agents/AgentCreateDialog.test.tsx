@@ -2566,6 +2566,27 @@ describe("Recommended setup", () => {
       await waitFor(() => expect(agents.create).toHaveBeenCalledOnce());
     });
 
+    it("offers Retry when a creation gate throws before answering", async () => {
+      const gated = {
+        ...claude,
+        admitsCreation: {
+          check: () => {
+            throw new Error("broken");
+          },
+          subscribe: () => () => undefined,
+        },
+      } as RegisteredAgentType;
+      const { agents, dialog, user } = setup([gated]);
+      await inspectModel(user, dialog, "Model C · High");
+      await user.type(within(dialog).getByLabelText("Name"), "Agent A");
+      expect(
+        await within(dialog).findByRole("button", { name: "Retry" }),
+      ).toBeVisible();
+      expect(createButton()).toBeDisabled();
+      submitForm(dialog);
+      expect(agents.create).not.toHaveBeenCalled();
+    });
+
     it("creates nothing when Automatic's pick was signed out since it was found", async () => {
       const { agents, dialog, user } = setup([claude]);
       await inspectModel(user, dialog, "Model C · High");

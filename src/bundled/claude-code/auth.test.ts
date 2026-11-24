@@ -528,3 +528,22 @@ it("keeps protected eligibility to the person's own setup or a saved key, from t
     true,
   );
 });
+
+it("stops admitting protected agents on the person's own setup once a fresh check of it fails", async () => {
+  store(false);
+  state.agentEnv.set("", ["ANTHROPIC_API_KEY"]);
+  const own = host({ loggedIn: true });
+  const auth = new ClaudeAuth(own.spawn);
+  await auth.check();
+  expect(auth.protectedEligible).toBe(true);
+  // Claude can't say this time: ordinary agents keep the device key...
+  own.status.own = null as never;
+  await expect(auth.check()).resolves.toEqual({});
+  // ...and the last answer, but protected admission is unknown, not yes.
+  expect(auth.usesOwnSetup).toBe(true);
+  expect(auth.protectedEligible).toBeUndefined();
+  await expect(auth.protectedReady()).rejects.toThrow();
+  // A saved key still admits it.
+  await auth.save(KEY);
+  expect(auth.protectedEligible).toBe(true);
+});

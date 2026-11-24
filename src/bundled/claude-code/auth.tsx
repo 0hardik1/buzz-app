@@ -177,6 +177,11 @@ export class ClaudeAuth {
   /** Whether a key was saved, as last asked: protected launches use it even
    * beside the person's own setup. */
   private keySaved = false;
+  /** Whether `owned` is the latest probe's answer, not one before a probe
+   * that failed. */
+  private ownCurrent = false;
+  /** Probes Claude answered, rather than ones that failed. */
+  private readonly answered = new WeakSet<Promise<unknown>>();
   /** Whether `keySaved` is an answer yet, not its starting value. */
   private keyKnown = false;
 
@@ -215,15 +220,22 @@ export class ClaudeAuth {
     if (this.own) return this.own;
     const asking = ownConnection(spawn).then(
       (own) => {
+        this.answered.add(asking);
         if (this.own === asking) {
           const changed = this.owned !== undefined && this.owned !== !!own;
           this.owned = !!own;
+          this.ownCurrent = true;
           if (changed) for (const listener of this.listeners) listener();
         }
         return own;
       },
       (error: unknown) => {
-        if (this.own === asking) this.own = undefined;
+        if (this.own === asking) {
+          this.own = undefined;
+          // `owned` keeps the last answer for ordinary agents, but it is no
+          // longer current, so it can't admit a protected one.
+          this.ownCurrent = false;
+        }
         // A full host is not a missing setup: the turn makes room and asks
         // again.
         if (error === PROCESS_LIMIT) throw error;
@@ -257,8 +269,10 @@ export class ClaudeAuth {
    * setup or a saved key. Protected launches never get the device list, so
    * it never counts. Undefined while either answer is unknown. */
   get protectedEligible(): boolean | undefined {
-    if (this.owned === true || (this.keyKnown && this.keySaved)) return true;
-    return this.owned === false && this.keyKnown ? false : undefined;
+    if (this.keyKnown && this.keySaved) return true;
+    if (!this.ownCurrent) return undefined;
+    if (this.owned) return true;
+    return this.keyKnown ? false : undefined;
   }
 
   /** `protectedEligible`, asked only for answers not yet sampled, so it
@@ -266,8 +280,16 @@ export class ClaudeAuth {
   async protectedReady() {
     const known = this.protectedEligible;
     if (known !== undefined) return known;
-    const [own, key] = await Promise.all([this.settled(), this.has()]);
-    return !!own || key;
+    const asking = this.connection();
+    const [own, key] = await Promise.all([
+      asking.catch(() => undefined),
+      this.has(),
+    ]);
+    if (key) return true;
+    // An answer Claude couldn't give is unknown, never a no.
+    if (!this.answered.has(asking))
+      throw new Error("Claude couldn't say whether it is set up");
+    return !!own;
   }
 
   /** What Settings needs, asked again: whether the person has a setup of
