@@ -203,7 +203,7 @@ pub(super) async fn prepare_file(
     cancelled: &mut oneshot::Receiver<()>,
 ) -> Result<(std::path::PathBuf, &'static str), PreparationError> {
     let path = crate::host_command::effective_path();
-    let program = crate::host_command::resolve_program("ffmpeg", &path);
+    let program = crate::ffmpeg_install::program(&path);
     prepare_file_with_program(source, size, directory, mode, cancelled, &program).await
 }
 

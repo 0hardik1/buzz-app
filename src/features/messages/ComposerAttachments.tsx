@@ -6,6 +6,7 @@ import { AttachmentView } from "../conversation/AttachmentView";
 import { AttachmentDownloadContext } from "./AttachmentDownloadContext";
 import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { useRef, useState } from "react";
+import { FfmpegInstall } from "./FfmpegInstall";
 import { FileTypeIcon } from "./FileTypeIcon";
 import fileIconStyles from "./FileTypeIcon.module.css";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -265,6 +266,9 @@ function AttachmentItem({
       ? `${Math.max(1, Math.round(bytes / 1024))} KB`
       : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   const uploadFailed = item.status === "error";
+  const encoderInstall = uploadFailed && item.missingEncoder
+    ? <FfmpegInstall file={item.file} disabled={disabled} retry={() => retry(item.id)} />
+    : undefined;
   const status = {
     queued: "Queued",
     preparing: "Preparing…",
@@ -308,7 +312,7 @@ function AttachmentItem({
             }
           />
         </AttachmentDownloadContext>
-        {item.error && (
+        {encoderInstall ?? (item.error && (
           <>
             <span role="alert">
               {item.error}
@@ -324,7 +328,7 @@ function AttachmentItem({
               </button>
             )}
           </>
-        )}
+        ))}
       </motion.li>
     );
   return (
@@ -422,18 +426,18 @@ function AttachmentItem({
         </span>
         {failed && <span className="sr-only">Preview unavailable</span>}
       </div>
-      {uploadFailed && (
+      {encoderInstall ?? (uploadFailed && (
         <p className={styles.error} role="alert">
           <span className="sr-only">{item.file.name}: </span>
           {item.error || "Upload failed. Retry or remove it to send."}
           {item.unsupported && UNSUPPORTED_GUIDANCE}
         </p>
-      )}
+      ))}
       <div
         className={styles.actions}
         data-remove={!busy && !uploadFailed ? "" : undefined}
       >
-        {uploadFailed ? (
+        {uploadFailed && !encoderInstall ? (
           <>
             {/* The relay would refuse the same bytes again. */}
             {!item.unsupported && (

@@ -103,6 +103,7 @@ mod relay_admin;
 mod saved_downloads;
 mod sign_out;
 mod system_clock;
+mod ffmpeg_install;
 use identity::{
     identity_create, identity_export, identity_import, identity_import_legacy,
     identity_legacy_available, identity_prepare_remote_agent_authorization, identity_restore,
@@ -847,6 +848,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         relay::media_cache_clear,
         relay::media_cache_forget,
         relay::media_cache_usage,
+        ffmpeg_install::install_ffmpeg,
         saved_downloads::media_download_status,
         saved_downloads::media_download_open,
         media_copy_image,
