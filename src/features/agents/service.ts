@@ -1140,6 +1140,10 @@ export type AgentType<Config = unknown> = {
   /** The host supplies a local running agent owned by the current viewer.
    * Full-duplex voice on the existing conversation; abort closes the pipe. */
   voice?(seat: AgentVoiceSeat<Config>): Promise<AgentVoiceConnection>;
+  /** Whether saved local conversations may restart when base instructions are customized. */
+  mayRestartForBaseInstructions?(
+    agent: Pick<Agent, "key" | "owner" | "relay">,
+  ): boolean;
   /** Native callback events this harness exposes to plugins. */
   hooks?: Readonly<{ events: readonly string[] }>;
   id: string;

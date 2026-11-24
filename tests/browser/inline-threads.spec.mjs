@@ -57,6 +57,25 @@ const showMore = (scope, text) =>
     .getByRole("button", { name: "Show more", exact: true });
 const close = (scope) =>
   scope.getByRole("button", { name: "Close", exact: true }).first();
+/** In a thread, Show more expands the details in place: no sheet or dialog
+ * opens over the view, so its reply box stays in reach, and Show less folds
+ * them back. `dialogs` counts the dialogs the view itself is drawn in. */
+const expandsInPlace = async (page, scope, text, dialogs = 0) => {
+  const row = scope.locator("[data-message-id]").filter({ hasText: text });
+  const whole = () =>
+    row
+      .getByText(filler.trim())
+      .evaluate((element) => element.scrollHeight <= element.clientHeight + 1);
+  await expect.poll(whole).toBe(false);
+  await row.getByRole("button", { name: "Show more", exact: true }).click();
+  const less = row.getByRole("button", { name: "Show less", exact: true });
+  await expect(less).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(whole).toBe(true);
+  await expect(detailsSheet(page)).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(dialogs);
+  await less.click();
+  await expect.poll(whole).toBe(false);
+};
 
 test.describe("Side panel", () => {
   test.use({ threadPlacement: "side" });
@@ -70,81 +89,17 @@ test.describe("Side panel", () => {
     await expect(sheet(page)).toHaveCount(0);
   });
 
-  test("details in a thread tab read over that tab's reply box", async ({
-    page,
-    app,
-  }) => {
-    await open(page, app);
-    const [root, other] = roots(app);
-    await clickRow(page, viewThread(page, root));
-    await expect(threadTab(page, root)).toBeVisible();
-    details(app, "Tab findings", root);
-    await showMore(side(page), "Tab findings").click();
-    const reader = detailsSheet(page);
-    await expect(reader).toBeVisible();
-    await expect(reader.getByText(filler.trim())).toBeVisible();
-    // It is the tab's dialog: drawn inside the side pane, around its composer.
-    await expect(
-      side(page).locator("[data-details-sheet-surface]"),
-    ).toHaveCount(1);
-    const [outer, inner] = [
-      await reader.boundingBox(),
-      await reply(side(page)).locator("xpath=ancestor::form[1]").boundingBox(),
-    ];
-    expect(outer.x).toBeLessThan(inner.x);
-    expect(outer.y + outer.height).toBeGreaterThan(inner.y + inner.height);
-    await page.goBack();
-    await expect(reader).toHaveCount(0);
-    await expect(threadTab(page, root)).toBeVisible();
-    await page.goForward();
-    await expect(detailsSheet(page)).toBeVisible();
-    await close(detailsSheet(page)).click();
-    await expect(detailsSheet(page)).toHaveCount(0);
-    await expect(threadTab(page, root)).toBeVisible();
-    // The visit now names another thread, and the first tab is chosen
-    // again without a visit. Its details still read over it.
-    const selected = (tab) =>
-      expect(tab).toHaveAttribute("aria-selected", "true");
-    await clickRow(page, viewThread(page, other));
-    await selected(threadTab(page, other));
-    await threadTab(page, root).click();
-    await showMore(side(page), "Tab findings").click();
-    await expect(detailsSheet(page)).toBeVisible();
-    await selected(threadTab(page, root));
-    await page.reload();
-    await expect(detailsSheet(page)).toBeVisible();
-    await selected(threadTab(page, root));
-    await expect(threadTab(page, other)).toBeVisible();
-  });
-});
-
-test.describe("Main pane", () => {
-  test.use({ threadPlacement: "main" });
-
-  test("details from a thread tab chosen in a plain visit read over that tab", async ({
+  test("details in a thread tab expand in place beside its reply box", async ({
     page,
     app,
   }) => {
     await open(page, app);
     const [root] = roots(app);
     await clickRow(page, viewThread(page, root));
-    // Back to the plain channel visit, then choose the tab there.
-    await page.goBack();
-    await threadTab(page, root).click();
-    details(app, "Main findings", root);
-    const main = page.locator("[data-main-workspace]");
-    await showMore(main, "Main findings").click();
-    await expect(detailsSheet(page)).toBeVisible();
-    await expect(threadTab(page, root)).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    await page.reload();
-    await expect(detailsSheet(page)).toBeVisible();
-    await expect(threadTab(page, root)).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await expect(threadTab(page, root)).toBeVisible();
+    details(app, "Tab findings", root);
+    await expandsInPlace(page, side(page), "Tab findings");
+    await expect(reply(side(page))).toBeVisible();
   });
 });
 
@@ -201,7 +156,30 @@ test.describe("Inline", () => {
     await expect(sheet(page)).toHaveCount(0);
   });
 
-  test("details nest over the inline thread: Back closes them first", async ({
+  test("the conversation's jump control hides under the sheet, not the sheet's own", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    const display = (locator) =>
+      locator.evaluate(
+        (button) => getComputedStyle(button.closest("[data-visible]")).display,
+      );
+    const conversationJump = page.locator(
+      "[data-channel-timeline] button[data-jump-to-latest]",
+    );
+    await expect.poll(() => display(conversationJump)).not.toBe("none");
+    await clickRow(page, viewThread(page, roots(app)[0]));
+    await expect(sheet(page)).toBeVisible();
+    await expect.poll(() => display(conversationJump)).toBe("none");
+    const sheetJump = sheet(page).locator("button[data-jump-to-latest]");
+    await expect.poll(() => display(sheetJump)).not.toBe("none");
+    await page.keyboard.press("Escape");
+    await expect(sheet(page)).toHaveCount(0);
+    await expect.poll(() => display(conversationJump)).not.toBe("none");
+  });
+
+  test("details in the inline thread expand in place: Back closes the thread", async ({
     page,
     app,
   }) => {
@@ -210,36 +188,23 @@ test.describe("Inline", () => {
     await clickRow(page, viewThread(page, root));
     await expect(sheet(page)).toBeVisible();
     details(app, "Nested findings", root);
-    await showMore(sheet(page), "Nested findings").click();
-    await expect(detailsSheet(page)).toBeVisible();
-    await expect(detailsSheet(page).getByText(filler.trim())).toBeVisible();
+    await expandsInPlace(page, sheet(page), "Nested findings", 1);
+    await expect(reply(sheet(page))).toBeVisible();
+    // Opening long details at the latest reply keeps their start in view,
+    // rather than following the latest reply past it.
+    app.append(
+      "primary",
+      "alpha",
+      `Long findings\n\n${`${filler}\n\n`.repeat(6)}`,
+      true,
+      false,
+      root.id,
+      undefined,
+      [["audience", "details"]],
+    );
+    await showMore(sheet(page), "Long findings").click();
+    await expect(sheet(page).getByText("Long findings")).toBeInViewport();
     await page.goBack();
-    await expect(detailsSheet(page)).toHaveCount(0);
-    await expect(sheet(page)).toBeVisible();
-    await page.goBack();
-    await expect(sheet(page)).toHaveCount(0);
-    await page.goForward();
-    await expect(sheet(page)).toBeVisible();
-    await expect(detailsSheet(page)).toHaveCount(0);
-    await page.goForward();
-    await expect(detailsSheet(page)).toBeVisible();
-    // Reload restores the thread and the details over it.
-    await page.reload();
-    await expect(sheet(page)).toBeVisible();
-    await expect(detailsSheet(page)).toBeVisible();
-    // Escape closes only the details; X on the thread closes both for good.
-    await page.keyboard.press("Escape");
-    await expect(detailsSheet(page)).toHaveCount(0);
-    await expect(sheet(page)).toBeVisible();
-    await showMore(sheet(page), "Nested findings").click();
-    await expect(detailsSheet(page)).toBeVisible();
-    await sheet(page)
-      .getByRole("button", { name: "Close", exact: true })
-      .first()
-      .click();
-    await expect(sheet(page)).toHaveCount(0);
-    await expect(detailsSheet(page)).toHaveCount(0);
-    await page.goForward();
     await expect(sheet(page)).toHaveCount(0);
   });
 
@@ -408,11 +373,17 @@ test.describe("Inline", () => {
       // on it would be refused at once, so settled geometry is past that.
       await expect(sheet(page)).toBeVisible();
       await settle(page);
-      await expect(sheet(page).locator("[data-message-loading]")).toBeVisible();
+      await expect(sheet(page).locator("[data-message-waiting]")).toHaveCount(
+        1,
+      );
+      // The waiting sheet draws no placeholders.
+      await expect(sheet(page).locator("[data-message-loading]")).toHaveCount(
+        0,
+      );
       await expect(sheet(page).getByRole("alert")).toHaveCount(0);
       release();
       await expect(sheet(page).getByText("Unread reply 0")).toBeVisible();
-      await expect(sheet(page).locator("[data-message-loading]")).toHaveCount(
+      await expect(sheet(page).locator("[data-message-waiting]")).toHaveCount(
         0,
       );
     } finally {

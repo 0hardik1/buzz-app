@@ -83,7 +83,13 @@ In a Solo region, check `ui.headerMenuActions === true` before passing
 `headerMenuActions` to `ui.Workspace` or `ui.ChannelGroup`. Each **Actions**
 entry has a unique `id`, a `label`, and an `onSelect` callback.
 `onSelect` can return a promise. The host reports callback failures in the
-heading. With `placement: "team-row"`, the channel group uses the native
+heading.
+
+In a Solo channel group, entries follow **View channel details**. An optional
+`icon` supplies decorative artwork and `hint` adds short help on focus or hover.
+The host rechecks the row’s channel membership before calling `onSelect`.
+
+With `placement: "team-row"`, the channel group uses the native
 Team menu and ignores these entries.
 
 Check `ctx.conversation.workspaceSlots?.headerActions === true` when you
@@ -95,6 +101,16 @@ then. Use compact icon buttons with an `aria-label` and `title`, and set
 `aria-pressed` or `aria-expanded` on a toggle. A plugin that replaces the
 workspace with `registerWorkspace(component, { slots })` names the optional
 props its component renders.
+
+Check `ctx.conversation.workspaceSlots?.trailing === true` in the same way
+before passing `trailing` to `ui.Workspace`. The Channels workspace shows that
+content as a card over the
+bottom of the channel timeline, in its own scroll layer: scrolling over the
+card grows it, then slides it up. Render the whole card at rest too, since
+growing scrolls it into view: let `expanded` change labels, not what the card
+holds. Keep its controls in view with `position: sticky; bottom: 0` and an
+opaque background, and draw its outline with a box shadow rather than a bottom
+border.
 
 A desktop plugin can open audio on an owned local agent with `ctx.agents.openSessionVoice?.(agent.key, place, options)`. The provider must support session voice. Buzz uses the conversation selected by session controls, waits for any interrupted turn to end, and publishes final agent transcripts there. The plugin owns the microphone and the human transcript. Give it 48 kHz mono audio, use the optional provider speaking callback to track reply audio, and abort the supplied signal when the conversation closes. Inline excerpts are bounded and passed to the voice model as reference dialogue.
 
@@ -151,6 +167,7 @@ Other grants (`mcp`, `managedFiles`, `publicImages`, `publicPages`, `agentHooks`
 - Use the `ui` controls for buttons, fields, switches, dialogs and action menus. Use `className="ui-card"` for a card, `var(--space-panel-inset)` and `var(--space-2)` for spacing, and inline styles for layout. Plain `h1`–`h3`, `p` and `button` get host styling.
 - Use host color tokens (`var(--...)`) so light and dark themes both work. Rely only on the `core` roles in `src/shared/design-system/tokens/registry.ts`; other custom properties, classes and `data-*` attributes are internal.
 - Avoid fixed widths; pages can be narrow.
+- The legacy `buzz.relay-notes/notes` page uses the host's Notes icon even when installed as an external plugin.
 - A canonical plugin page link can open beside a conversation if the named
   plugin registers a matching panel with `addressable: true`. Links fall back
   to the plugin page if the panel does not qualify.
