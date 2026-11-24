@@ -155,6 +155,7 @@ Other grants (`mcp`, `managedFiles`, `publicImages`, `publicPages`, `agentHooks`
 - Use the `ui` controls for buttons, fields, switches, dialogs and action menus. Use `className="ui-card"` for a card, `var(--space-panel-inset)` and `var(--space-2)` for spacing, and inline styles for layout. Plain `h1`–`h3`, `p` and `button` get host styling.
 - Use host color tokens (`var(--...)`) so light and dark themes both work. Rely only on the `core` roles in `src/shared/design-system/tokens/registry.ts`; other custom properties, classes and `data-*` attributes are internal.
 - Avoid fixed widths; pages can be narrow.
+- The legacy `buzz.relay-notes/notes` page uses the host's Notes icon even when installed as an external plugin.
 - A canonical plugin page link can open beside a conversation if the named
   plugin registers a matching panel with `addressable: true`. Links fall back
   to the plugin page if the panel does not qualify.
