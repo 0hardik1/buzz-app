@@ -126,6 +126,17 @@ test.describe("member scrolling", () => {
     const general = dialog.getByRole("combobox", { name: "General access" });
     await expect(list).toHaveAttribute("data-refreshing", "false");
     await expect(general).toBeInViewport();
+    // The heading must not cover its own control before the member tabs.
+    const generalBounds = await general.boundingBox();
+    await page.mouse.click(
+      generalBounds.x + generalBounds.width / 2,
+      generalBounds.y + generalBounds.height / 2,
+    );
+    await expect(
+      page.getByRole("option", { name: "Private", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(general).toBeFocused();
     await dialog.getByRole("tab", { name: /^Agents ·/ }).click();
     await expect(general).toBeInViewport();
     await list.evaluate((element) => {
