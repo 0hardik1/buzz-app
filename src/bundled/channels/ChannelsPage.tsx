@@ -2596,10 +2596,11 @@ function ChannelWorkspace({
                 if (behindSettings()) return;
                 select(channelId);
               }}
-              solo={({ agent, name }) => (
+              solo={({ agent, name, focusRequest }) => (
                 <SoloDraft
                   key={agent ?? ""}
                   embedded
+                  focusRequest={focusRequest}
                   name={name}
                   agent={agent}
                   projectId={messageDraft?.workspace}
