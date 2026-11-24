@@ -1237,6 +1237,43 @@ it("copies each file card in a message on its own line", () => {
   }
 });
 
+it("copies a selection across media without its disclosure label", () => {
+  const gif = "https://example.org/preview.gif";
+  const view = renderMessage({
+    row: {
+      ...row,
+      attachments: [
+        { kind: "image", url: gif },
+        {
+          kind: "file",
+          url: "https://relay.test/notes.txt",
+          name: "notes.txt",
+          size: 1024,
+        },
+      ],
+    },
+    media: (url) =>
+      url === gif ? url : `/api/relay/media?url=${encodeURIComponent(url)}`,
+  });
+  const copy = () => {
+    const selection = document.getSelection();
+    if (!selection) throw new Error("jsdom selection missing");
+    const range = document.createRange();
+    range.setStart(screen.getByText("Root"), 0);
+    range.setEndAfter(screen.getByText("1 KB"));
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return serializeSelection(selection, "text");
+  };
+  try {
+    expect(copy()).toBe(`Root\n${gif}\nnotes.txt`);
+    fireEvent.click(screen.getByRole("button", { name: "Image" }));
+    expect(copy()).toBe("Root\nnotes.txt");
+  } finally {
+    view.unmount();
+  }
+});
+
 it("lets a plugin open a file from the host file card, keeping Download", () => {
   const placements: unknown[] = [];
   const messages: unknown[] = [];

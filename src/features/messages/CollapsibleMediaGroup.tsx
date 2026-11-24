@@ -51,7 +51,7 @@ export function CollapsibleMediaGroup({
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon;
   return (
     <div className={styles.mediaGroup}>
-      <div className={styles.mediaDisclosure}>
+      <div className={styles.mediaDisclosure} data-copy-text="">
         <Button
           variant="ghost"
           shape={collapsed ? "capsule" : "icon"}
