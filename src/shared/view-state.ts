@@ -1,6 +1,12 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { traceDraft } from "./draft-diagnostics";
+import {
+  createDraftStorage,
+  isStoredDraft,
+  type DraftRecord,
+  type RetirementHistory,
+} from "./draft-storage";
 
 // View intent is durable and explicitly partitioned; connection generations are not storage keys.
 type RemovedView = { key: string; revision: string };
@@ -27,7 +33,134 @@ const changed = (
   if (key) traceDraft(scope, key, "notify");
   for (const listener of viewListeners.get(scope) ?? []) listener(key, removed);
 };
-/** Same durable view keys as the composer; no parallel draft store or index. */
+let draftStorage: ReturnType<typeof createDraftStorage> | undefined;
+let draftsLoaded = false;
+
+export function initializeDraftStorage() {
+  if (typeof indexedDB === "undefined") return;
+  draftStorage ??= createDraftStorage(changed);
+  return draftStorage.ready.then(
+    () => {
+      draftsLoaded = true;
+    },
+    () => {
+      /* Composer reports unavailable storage without writing a second copy. */
+    },
+  );
+}
+
+export function refreshDraftView(scope: string, key: string) {
+  if (draftStorage && isStoredDraft(key))
+    return draftStorage.refresh(scope, key);
+}
+
+export function writeDraftView(
+  scope: string,
+  key: string,
+  value: unknown,
+  purge = viewScopePurgeToken(scope),
+) {
+  if (!draftStorage || !isStoredDraft(key)) return writeView(scope, key, value);
+  try {
+    const revision = JSON.stringify(value);
+    return draftStorage
+      .update(scope, key, (record, token) =>
+        purge === token
+          ? { record: { ...record, revision }, result: true }
+          : { result: false },
+      )
+      .catch(() => {
+        traceDraft(scope, key, "write-failed");
+        return false;
+      });
+  } catch {
+    traceDraft(scope, key, "write-failed");
+    return false;
+  }
+}
+
+type DraftSaveResult = "saved" | "changed" | "failed";
+
+async function changeDraft(
+  scope: string,
+  key: string,
+  expected: string | null | undefined,
+  revision: string | null,
+  purge: string | null | undefined,
+  retire?: { cursor: number | undefined },
+): Promise<DraftSaveResult> {
+  if (expected === undefined || purge === undefined) return "failed";
+  try {
+    return (
+      (await draftStorage?.update<DraftSaveResult>(
+        scope,
+        key,
+        (record, token) => {
+          if (purge !== token) return { result: "changed" };
+          const same = record.revision === revision;
+          const matches = record.revision === expected;
+          const result = same || matches ? "saved" : "changed";
+          if (retire && expected !== null && expected !== revision) {
+            const history = record.history ?? [0];
+            if (wasRetired(history, expected, retire.cursor))
+              return { result: same ? "saved" : "changed" };
+            return {
+              result,
+              record: rememberRetirement(
+                matches ? { ...record, revision } : record,
+                expected,
+              ),
+            };
+          }
+          return matches && !same
+            ? { result, record: { ...record, revision } }
+            : { result };
+        },
+      )) ?? "failed"
+    );
+  } catch {
+    traceDraft(scope, key, "write-failed");
+    return "failed";
+  }
+}
+
+export function saveDraftRevision(
+  scope: string,
+  key: string,
+  expected: string | null | undefined,
+  revision: string | null,
+  purge: string | null | undefined,
+) {
+  if (draftStorage && isStoredDraft(key))
+    return changeDraft(scope, key, expected, revision, purge);
+  const current = viewRevision(scope, key);
+  if (current === revision) return "saved";
+  if (revision !== null)
+    return replaceViewRevision(scope, key, expected, revision);
+  if (current === undefined) return "failed";
+  if (current !== expected) return "changed";
+  try {
+    clearView(scope, key);
+    return "saved";
+  } catch {
+    return "failed";
+  }
+}
+
+export function retireDraftRevision(
+  scope: string,
+  key: string,
+  expected: string | null | undefined,
+  replacement: string,
+  cursor: number | undefined,
+  purge = viewScopePurgeToken(scope),
+) {
+  return draftStorage && isStoredDraft(key)
+    ? changeDraft(scope, key, expected, replacement, purge, { cursor })
+    : retireViewDraft(scope, key, expected, replacement, cursor);
+}
+
+/** Notifications cover only the requested view coordinates. */
 export function subscribeView(
   scope: string,
   listener: ViewListener,
@@ -71,6 +204,7 @@ export function subscribeView(
       const pair: unknown = JSON.parse(event.key.slice(prefix.length));
       if (Array.isArray(pair) && pair[0] === scope) {
         const key = typeof pair[1] === "string" ? pair[1] : undefined;
+        if (key && draftStorage && isStoredDraft(key)) return;
         if (key) traceDraft(scope, key, "storage");
         notify(
           key,
@@ -103,6 +237,10 @@ export function readView<T>(scope: string, key: string, fallback: T): T {
 }
 /** Exact serialized revision; undefined means storage could not be read. */
 export function viewRevision(scope: string, key: string) {
+  if (draftStorage && isStoredDraft(key))
+    return draftsLoaded
+      ? (draftStorage.record(scope, key)?.revision ?? null)
+      : undefined;
   try {
     return localStorage.getItem(`buzz-view.v1:${JSON.stringify([scope, key])}`);
   } catch {
@@ -110,6 +248,7 @@ export function viewRevision(scope: string, key: string) {
   }
 }
 export function writeView(scope: string, key: string, value: unknown) {
+  if (draftStorage && isStoredDraft(key)) return false;
   try {
     return writeViewRevision(scope, key, JSON.stringify(value));
   } catch {
@@ -239,36 +378,23 @@ export function listDraftViews(
   let limited = false;
   let unavailable = 0;
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const storageKey = localStorage.key(i);
-      if (!storageKey?.startsWith(prefix)) continue;
-      let pair: unknown;
-      try {
-        pair = JSON.parse(storageKey.slice(prefix.length));
-      } catch {
-        continue;
-      }
-      if (
-        !Array.isArray(pair) ||
-        pair.length !== 2 ||
-        pair[0] !== scope ||
-        typeof pair[1] !== "string" ||
-        !draftCoordinates(pair[1])
-      )
-        continue;
-      const draft = parseDraftView(localStorage.getItem(storageKey));
+    const entries =
+      draftStorage?.entries(scope) ?? legacyDraftEntries(scope, prefix);
+    for (const { key, revision } of entries) {
+      if (!draftCoordinates(key)) continue;
+      const draft = parseDraftView(revision);
       if (draft === "oversized") {
         unavailable++;
         continue;
       }
       if (!draft) continue;
       try {
-        if (!meaningful(draft.value, pair[1])) continue;
+        if (!meaningful(draft.value, key)) continue;
         if (drafts.length === 500) {
           limited = true;
           break;
         }
-        drafts.push({ key: pair[1], value: draft.value });
+        drafts.push({ key, value: draft.value });
       } catch {
         /* Malformed old draft. */
       }
@@ -283,9 +409,7 @@ export function listDraftViews(
     !drafts.some((entry) => entry.key === selected)
   ) {
     try {
-      const raw = localStorage.getItem(
-        `${prefix}${JSON.stringify([scope, selected])}`,
-      );
+      const raw = viewRevision(scope, selected);
       if (raw && raw.length <= MAX_DRAFT_VIEW_LENGTH)
         drafts.push({ key: selected, value: JSON.parse(raw) });
     } catch {
@@ -293,6 +417,27 @@ export function listDraftViews(
     }
   }
   return { entries: drafts, limited, unavailable };
+}
+
+function* legacyDraftEntries(scope: string, prefix: string) {
+  for (let i = 0; i < localStorage.length; i++) {
+    const storageKey = localStorage.key(i);
+    if (!storageKey?.startsWith(prefix)) continue;
+    let pair: unknown;
+    try {
+      pair = JSON.parse(storageKey.slice(prefix.length));
+    } catch {
+      continue;
+    }
+    if (
+      Array.isArray(pair) &&
+      pair.length === 2 &&
+      pair[0] === scope &&
+      typeof pair[1] === "string" &&
+      draftCoordinates(pair[1])
+    )
+      yield { key: pair[1], revision: localStorage.getItem(storageKey) };
+  }
 }
 
 const conflictDraftPrefix = "buzz-draft-conflict.v1:";
@@ -305,6 +450,8 @@ const viewScopePurgeKey = (scope: string) =>
 
 /** A leave invalidates window-local recovery even when its editor is closed. */
 export function viewScopePurgeToken(scope: string) {
+  if (draftStorage)
+    return draftsLoaded ? draftStorage.purgeToken(scope) : undefined;
   try {
     return localStorage.getItem(viewScopePurgeKey(scope));
   } catch {
@@ -316,7 +463,9 @@ export function conflictDraftKey(scope: string, key: string) {
   return `${conflictDraftPrefix}${JSON.stringify([scope, key])}`;
 }
 
-function retirementHistory(scope: string, key: string): [number, ...string[]] {
+function retirementHistory(scope: string, key: string): RetirementHistory {
+  if (draftStorage && isStoredDraft(key))
+    return draftStorage.record(scope, key)?.history ?? [0];
   return JSON.parse(
     localStorage.getItem(draftRetirementKey(scope, key)) ?? "[0]",
   );
@@ -339,15 +488,39 @@ export function draftWasRetired(
   revision: string,
   cursor: number | undefined,
 ) {
-  if (cursor === undefined) return false;
   try {
-    const [end, ...revisions] = retirementHistory(scope, key);
-    return revisions
-      .slice(Math.max(0, cursor - end + revisions.length))
-      .includes(revisionDigest(revision));
+    return wasRetired(retirementHistory(scope, key), revision, cursor);
   } catch {
     return false;
   }
+}
+
+function wasRetired(
+  [end, ...revisions]: RetirementHistory,
+  revision: string,
+  cursor: number | undefined,
+) {
+  return (
+    cursor !== undefined &&
+    revisions
+      .slice(Math.max(0, cursor - end + revisions.length))
+      .includes(revisionDigest(revision))
+  );
+}
+
+function rememberRetirement(
+  record: DraftRecord,
+  revision: string,
+): DraftRecord {
+  const [end, ...previous] = record.history ?? [0];
+  return {
+    ...record,
+    history: [
+      end + 1,
+      ...previous.slice(1 - maxRetiredRevisions),
+      revisionDigest(revision),
+    ],
+  };
 }
 
 function recordDraftRetirement(scope: string, key: string, revision: string) {
@@ -385,6 +558,17 @@ export function clearViewScope(scope: string) {
   const keyPrefix = `${JSON.stringify([scope]).slice(0, -1)},`;
   const purgeKey = viewScopePurgeKey(scope);
   const token = crypto.randomUUID();
+  if (draftStorage) {
+    return draftStorage.purge(scope, token).then(() => {
+      clearScopedStorage(localStorage, `buzz-view.v1:${keyPrefix}`);
+      clearScopedStorage(localStorage, `${draftRetirementPrefix}${keyPrefix}`);
+      if (typeof sessionStorage !== "undefined")
+        clearScopedStorage(
+          sessionStorage,
+          `${conflictDraftPrefix}${keyPrefix}`,
+        );
+    });
+  }
   let retry = false;
   try {
     localStorage.setItem(purgeKey, token);
@@ -436,6 +620,13 @@ export function clearViewValue(key: string, value: unknown) {
 
 /** Recovery callers must confirm cleanup before retiring their durable operation. */
 export function clearView(scope: string, ...keys: string[]) {
+  if (draftStorage && keys.some(isStoredDraft)) {
+    for (const key of keys) if (!isStoredDraft(key)) clearView(scope, key);
+    return draftStorage.erase(scope, keys.filter(isStoredDraft), (record) => ({
+      ...rememberRetirement(record, record.revision ?? ""),
+      revision: null,
+    }));
+  }
   const removed: RemovedView[] = [];
   for (const key of keys) {
     const storageKey = `buzz-view.v1:${JSON.stringify([scope, key])}`;

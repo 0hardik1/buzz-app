@@ -144,9 +144,10 @@ import {
   writeView,
   viewRevision,
   viewScopePurgeToken,
-  replaceView,
-  replaceViewRevision,
-  retireViewDraft,
+  refreshDraftView,
+  saveDraftRevision,
+  retireDraftRevision,
+  writeDraftView,
   subscribeView,
 } from "../../shared/view-state";
 import styles from "./Messages.module.css";
@@ -222,7 +223,8 @@ const noAgents: readonly string[] = [];
 const cannotOpen = () => false;
 
 type DraftSaveResult = "saved" | "changed" | "failed";
-type FlushDraft = () => DraftSaveResult | undefined;
+type DraftSave = DraftSaveResult | Promise<DraftSaveResult>;
+type FlushDraft = () => DraftSave | undefined;
 const pendingDraftSaves = new Map<string, Set<FlushDraft>>();
 
 function registerDraftSave(key: string, flush: FlushDraft) {
@@ -239,9 +241,9 @@ function registerDraftSave(key: string, flush: FlushDraft) {
 }
 
 /** Operations that retire or replace a saved draft must see pending edits. */
-export function flushPendingDraft(scope: string, key: string) {
+export async function flushPendingDraft(scope: string, key: string) {
   for (const flush of pendingDraftSaves.get(`${scope}:${key}`) ?? []) {
-    const result = flush();
+    const result = await flush();
     if (result === "changed" || result === "failed") return false;
   }
   return true;
@@ -1298,8 +1300,10 @@ function Composer({
   const pendingDraftSave = useRef<{
     timer: ReturnType<typeof setTimeout>;
     draft: MentionDraft;
-    save(): DraftSaveResult;
+    save(): DraftSave;
   }>(null);
+  const draftSaveInFlight = useRef<Promise<DraftSaveResult>>(undefined);
+  const submissionSave = useRef<Promise<void>>(undefined);
   const cancelDraftSave = useCallback(() => {
     const pending = pendingDraftSave.current;
     if (!pending) return;
@@ -1310,7 +1314,11 @@ function Composer({
   const flushDraft = useCallback(() => {
     const result = cancelDraftSave()?.save();
     flushConflict();
-    return result ?? (conflictDraft.current ? "changed" : undefined);
+    return (
+      result ??
+      draftSaveInFlight.current ??
+      (conflictDraft.current ? "changed" : undefined)
+    );
   }, [cancelDraftSave, flushConflict]);
   useLayoutEffect(() => {
     if (!presented) flushDraft();
@@ -1358,10 +1366,25 @@ function Composer({
     if (submission) {
       // Submission recovery checks the durable prompt before restoring a
       // rejected send. It must see newer edits made in another window.
-      unsavedDraft.current = !writeView(scope, draftKey, next);
-      submission.unsaved?.(
-        unsavedDraft.current || unsavedPicks.current.size > 0,
-      );
+      const result = writeDraftView(scope, draftKey, next, purgeToken);
+      const update = (saved: boolean) => {
+        unsavedDraft.current = !saved;
+        submission.unsaved?.(
+          unsavedDraft.current || unsavedPicks.current.size > 0,
+        );
+      };
+      if (result instanceof Promise) {
+        if (!submissionSave.current) {
+          unsavedDraft.current = true;
+          submission.unsaved?.(true);
+        }
+        const save = result.then((saved) => {
+          if (submissionSave.current !== save) return;
+          submissionSave.current = undefined;
+          update(saved);
+        });
+        submissionSave.current = save;
+      } else update(result);
       submission.onDraftChange?.(next);
       return;
     }
@@ -1381,63 +1404,98 @@ function Composer({
   };
   function persist(
     next: MentionDraft,
-    expected = revision.current,
+    expected?: string | null,
     acceptedDraft?: AcceptedDraft,
-  ) {
-    const currentPurgeToken = viewScopePurgeToken(scope);
-    if (currentPurgeToken !== undefined && currentPurgeToken !== purgeToken)
-      return "changed";
+  ): DraftSave {
+    const run = () =>
+      persistNow(
+        next,
+        acceptedDraft
+          ? acceptedDraft.revision
+          : expected === undefined
+            ? revision.current
+            : expected,
+        acceptedDraft,
+      );
+    const inFlight = draftSaveInFlight.current;
+    const result = inFlight ? inFlight.then(run) : run();
+    if (!(result instanceof Promise)) return result;
+    const tracked = result.finally(() => {
+      if (draftSaveInFlight.current === tracked)
+        draftSaveInFlight.current = undefined;
+    });
+    draftSaveInFlight.current = tracked;
+    return tracked;
+  }
+
+  function persistNow(
+    next: MentionDraft,
+    expected: string | null | undefined,
+    acceptedDraft?: AcceptedDraft,
+  ): DraftSave {
+    const token = viewScopePurgeToken(scope);
+    if (token !== undefined && token !== purgeToken) return "changed";
     const serialized = JSON.stringify(next);
-    const current = viewRevision(scope, draftKey);
-    diagnose("persist", expected, current, serialized);
-    if (acceptedDraft?.retiredByOwner && current === undefined) {
-      setStorageFailed(true);
-      return "failed";
-    }
+    diagnose("persist", expected, viewRevision(scope, draftKey), serialized);
     writing.current = true;
-    // Another writer can already have saved the same draft.
-    let result = acceptedDraft?.retiredByOwner
-      ? current === serialized
-        ? "saved"
-        : "changed"
+    const ownerResult = (): DraftSaveResult => {
+      const current = viewRevision(scope, draftKey);
+      return current === undefined
+        ? "failed"
+        : current === serialized
+          ? "saved"
+          : "changed";
+    };
+    const result = acceptedDraft?.retiredByOwner
+      ? (refreshDraftView(scope, draftKey)?.then(
+          ownerResult,
+          () => "failed" as const,
+        ) ?? ownerResult())
       : acceptedDraft
-        ? retireViewDraft(
+        ? retireDraftRevision(
             scope,
             draftKey,
             expected,
             serialized,
             acceptedDraft.retirementCursor,
+            purgeToken,
           )
-        : current === serialized
-          ? "saved"
-          : replaceViewRevision(scope, draftKey, expected, serialized);
-    writing.current = false;
-    const observed = viewRevision(scope, draftKey);
-    if (
-      result === "failed" &&
-      observed !== undefined &&
-      observed !== expected &&
-      observed !== serialized
-    )
-      result = "changed";
-    diagnose(result, expected, observed, serialized);
-    if (result === "saved") {
-      revision.current = serialized;
-      draftAtRevision.current = next;
-      savedCursor.current = draftRetirementCursor(scope, draftKey);
-      forgetConflict();
-      // Saved text has no unsaved edits left to protect: a later change made
-      // elsewhere is loaded unless the user is in this composer.
-      dirty.current = false;
+        : saveDraftRevision(scope, draftKey, expected, serialized, purgeToken);
+
+    function finish(result: DraftSaveResult): DraftSaveResult {
+      writing.current = false;
+      const observed = viewRevision(scope, draftKey);
+      if (
+        result === "failed" &&
+        observed !== undefined &&
+        observed !== expected &&
+        observed !== serialized
+      )
+        result = "changed";
+      diagnose(result, expected, observed, serialized);
+      if (result === "saved") {
+        revision.current = serialized;
+        draftAtRevision.current = next;
+        savedCursor.current = draftRetirementCursor(scope, draftKey);
+        if (next === valueRef.current) {
+          forgetConflict();
+          // Typing may continue while the transaction is pending.
+          dirty.current = false;
+        }
+      }
+      if (result === "changed" && next === valueRef.current && dirty.current)
+        reportConflict(next);
+      else
+        setConflict((alreadyConflicted) =>
+          result === "saved"
+            ? false
+            : alreadyConflicted || result === "changed",
+        );
+      setStorageFailed(result === "failed");
+      return result;
     }
-    if (result === "changed" && next === valueRef.current && dirty.current)
-      reportConflict(next);
-    else
-      setConflict((alreadyConflicted) =>
-        result === "saved" ? false : alreadyConflicted || result === "changed",
-      );
-    setStorageFailed(result === "failed");
-    return result;
+
+    return result instanceof Promise ? result.then(finish) : finish(result);
   }
   const [error, setError] = useState<string>();
   const [pasteTooLong, setPasteTooLong] = useState(false);
@@ -2100,27 +2158,32 @@ function Composer({
       reconcileDraft();
       return;
     }
-    const result = persist(pending.next, pending.revision, pending);
-    // No stale sent text needs cleanup if nothing was saved and absence is
-    // still readable.
-    if (
-      result === "failed" &&
-      (pending.revision !== null || viewRevision(scope, draftKey) !== null)
-    )
-      return;
-    const peerRevision =
-      result === "changed" ? viewRevision(scope, draftKey) : undefined;
-    if (result === "changed" && peerRevision === undefined) return;
-    recoveryFor(session).delete(recoveryKey);
-    setAccepted(undefined);
-    // Another editor owns this revision. Acceptance cannot erase its work.
-    if (peerRevision !== undefined) {
-      loadSaved(peerRevision);
-      return;
-    }
-    dirty.current = false;
-    edited.current = false;
-    onDraftSaved?.();
+    const result = persist(pending.next, undefined, pending);
+    const finish = (result: DraftSaveResult) => {
+      if (recoveryFor(session).get(recoveryKey) !== pending) return;
+      // No stale sent text needs cleanup if nothing was saved and absence is
+      // still readable.
+      if (
+        result === "failed" &&
+        (pending.revision !== null || viewRevision(scope, draftKey) !== null)
+      )
+        return;
+      const peerRevision =
+        result === "changed" ? viewRevision(scope, draftKey) : undefined;
+      if (result === "changed" && peerRevision === undefined) return;
+      recoveryFor(session).delete(recoveryKey);
+      setAccepted(undefined);
+      // Another editor owns this revision. Acceptance cannot erase its work.
+      if (peerRevision !== undefined) {
+        loadSaved(peerRevision);
+        return;
+      }
+      dirty.current = false;
+      edited.current = false;
+      onDraftSaved?.();
+    };
+    if (result instanceof Promise) return result.then(finish);
+    finish(result);
   }
   useEffect(() => {
     if (outbox?.supports(9)) void session.emoji.ensure();
@@ -3277,7 +3340,26 @@ function Composer({
       input.current?.reset(recovering.next);
       return;
     }
-    const flushed = flushDraft();
+    const beforeFlush = valueRef.current;
+    const flush = flushDraft();
+    const flushed = flush instanceof Promise ? await flush : flush;
+    if (submissionSave.current) await submissionSave.current;
+    const latestDraft = refreshDraftView(scope, draftKey);
+    if (latestDraft) {
+      try {
+        await latestDraft;
+      } catch {
+        setStorageFailed(true);
+        return;
+      }
+    }
+    if (
+      valueRef.current !== beforeFlush ||
+      !permitted.current ||
+      admission.current ||
+      sendAttempt.current
+    )
+      return;
     if (!submission) {
       const current = viewRevision(scope, draftKey);
       diagnose("send-start", revision.current, current);
@@ -3520,6 +3602,8 @@ function Composer({
           }
         }
       }
+      const preparedDraft = refreshDraftView(scope, draftKey);
+      if (preparedDraft) await preparedDraft;
       attempt.signal.throwIfAborted();
       if (attachments.store.snapshot().some((item) => item.status === "error"))
         return;
@@ -3570,6 +3654,8 @@ function Composer({
           );
         if (!(await linkSharing.prepare(linkedChats, attempt.signal, current)))
           return;
+        const publishDraft = refreshDraftView(scope, draftKey);
+        if (publishDraft) await publishDraft;
         attempt.signal.throwIfAborted();
         const publishRevision = viewRevision(scope, draftKey);
         if (publishRevision !== savedRevision) {
@@ -3786,6 +3872,8 @@ function Composer({
       if (capturedAttachments.length && !fullSession(session)) {
         setSending(true);
         const uploaded = await attachments.store.prepareForSend(attempt.signal);
+        const uploadDraft = refreshDraftView(scope, draftKey);
+        if (uploadDraft) await uploadDraft;
         attempt.signal.throwIfAborted();
         // The detached owner receives the revision captured for this send.
         const current = viewRevision(scope, draftKey);
@@ -3819,10 +3907,11 @@ function Composer({
             const sent = typeof result === "string" ? result : await result;
             if (sent && live.current) onSend?.(sent);
           },
-          (files, preparationError) => {
+          async (files, preparationError) => {
             // Only the original saved draft or the untouched follow-up can be
             // restored. A later edit belongs to its author, not this job.
-            if (!flushPendingDraft(scope, draftKey)) return "conflict";
+            if (!(await flushPendingDraft(scope, draftKey))) return "conflict";
+            await refreshDraftView(scope, draftKey);
             const current = viewRevision(scope, draftKey);
             const capturedRevision = JSON.stringify(captured);
             const cleared = (raw: string | null | undefined) => {
@@ -3887,7 +3976,13 @@ function Composer({
             if (target.snapshot().length) return "conflict";
             if (
               current !== capturedRevision &&
-              replaceView(scope, draftKey, current, captured) !== "saved"
+              (await saveDraftRevision(
+                scope,
+                draftKey,
+                current,
+                capturedRevision,
+                purgeToken,
+              )) !== "saved"
             )
               return false;
             if (!target.adopt(files)) return false;
@@ -3963,7 +4058,8 @@ function Composer({
       const latest = threadSeed ?? (seedsFromWindow ? windowSeed() : undefined);
       if (latest) seedApplied.current = seedKey(latest);
       if (id) onSend?.(id);
-      finishDraft(pending);
+      const finished = finishDraft(pending);
+      if (finished) await finished;
     } catch (reason) {
       if (live.current && !attempt.signal.aborted)
         setError(reason instanceof Error ? reason.message : String(reason));
