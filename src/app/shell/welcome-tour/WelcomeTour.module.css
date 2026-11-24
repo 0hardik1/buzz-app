@@ -86,7 +86,7 @@
  */
 .scene {
   --loop: 4.8s;
-  --row: var(--space-3);
+  --row: var(--space-4);
   --gap: var(--space-1);
   --pad: var(--space-1h);
   --delay: 0s;
@@ -165,50 +165,65 @@
 .row[data-enter="3"] {
   animation-name: enter-3;
 }
+/* A plugin's icon, row-high, so its name lines up with the title. */
 .lead {
+  display: grid;
   flex-shrink: 0;
-  inline-size: var(--space-2);
-  block-size: var(--space-2);
-  background: currentColor;
-  border-radius: var(--space-half);
-}
-.lead[data-lead="person"] {
-  border-radius: var(--radius-pill);
-}
-/* Agents are squircles and people circles, as their avatars are. At these
-   sizes a rounded square reads the same as the avatar mask. */
-.lead[data-lead="agent"] {
+  place-items: center;
+  inline-size: var(--row);
+  block-size: var(--row);
   border-radius: 30%;
+  background: var(--border-standard);
+  color: var(--text-subtle);
+}
+.lead > svg {
+  inline-size: 62.5%;
+  block-size: 62.5%;
+}
+/* Someone's avatar, row-high: people are circles with a person, agents
+   squircles with the robot, as in the sidebar. At this size a rounded square
+   reads the same as the avatar mask. */
+.mark {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  inline-size: var(--row);
+  block-size: var(--row);
+  border-radius: var(--radius-pill);
+  background: var(--border-standard);
+  color: var(--text-subtle);
+}
+.mark[data-lead="agent"] {
+  border-radius: 30%;
+  background: var(--affordance-accent-prominent);
+  color: var(--text-on-accent);
+}
+.mark > svg {
+  inline-size: 62.5%;
+  block-size: 62.5%;
 }
 .trail {
   display: flex;
   margin-inline-start: auto;
 }
 
-/* A header's mark: a # or a lock, sized like the bell. */
+/* A header's # sits in the avatar column, so the title starts where the
+   messages' text does. A lock at the end is smaller. */
 .glyph {
   order: -1;
   flex-shrink: 0;
-  inline-size: var(--space-3);
-  block-size: var(--space-3);
-  margin-inline-end: var(--space-1);
+  inline-size: var(--row);
+  block-size: var(--row);
+  margin-inline-end: var(--space-1h);
   color: var(--text-subtle);
 }
 .glyph.end {
   order: 1;
+  inline-size: var(--space-3);
+  block-size: var(--space-3);
   margin-inline: auto 0;
 }
 
-/* Who's speaking or in the conversation: avatar-sized marks, people neutral
-   and agents accent. */
-:is(.faces, .message) > .lead {
-  inline-size: var(--space-3);
-  block-size: var(--space-3);
-  color: var(--border-prominent);
-}
-:is(.faces, .message) > .lead[data-lead="agent"] {
-  color: var(--affordance-accent-prominent);
-}
 /* A group overlaps, each mark cut out of the panel. */
 .faces {
   display: flex;
@@ -220,19 +235,34 @@
   order: 1;
   margin-inline: auto 0;
 }
-.faces > .lead {
+.faces > .mark {
   box-shadow: 0 0 0 var(--space-half) var(--surface-panel);
 }
-.faces > .lead + .lead {
-  margin-inline-start: calc(var(--space-1) * -1);
+.faces > .mark + .mark {
+  margin-inline-start: calc(var(--space-half) * -1);
+}
+/* On its own, a group is the drawing: bigger, centred and spaced out. */
+.stage > .faces {
+  --row: var(--space-6);
+  justify-self: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+.stage > .faces > .mark {
+  box-shadow: none;
+}
+.stage > .faces > .mark + .mark {
+  margin-inline-start: 0;
 }
 
 /* A message: someone's mark beside a bubble, or your own at the end. */
+/* It lines up with the header: avatars in one column, then the text. */
 .message {
   --width: 72%;
   display: flex;
   align-items: flex-end;
-  gap: var(--space-1);
+  gap: var(--space-1h);
+  padding-inline: var(--space-1);
 }
 .message[data-length="short"] {
   --width: 44%;
@@ -244,7 +274,7 @@
   display: flex;
   align-items: center;
   inline-size: var(--width);
-  block-size: var(--space-4);
+  block-size: var(--row);
   padding-inline: var(--space-1h);
   border-radius: var(--radius-pill);
   background: var(--surface-message);
@@ -323,12 +353,17 @@
   animation-delay: calc(var(--delay) + var(--loop) / 18);
 }
 
+/* Over messages, the title starts where their text does, inside the bubbles. */
+.sketch:has(> .message) > .header > .bar {
+  margin-inline-start: var(--space-1h);
+}
+
 /* The bell sits before the header's title, as on the Activity page. */
 .bell {
   order: -1;
   flex-shrink: 0;
-  inline-size: var(--space-3);
-  block-size: var(--space-3);
+  inline-size: var(--row);
+  block-size: var(--row);
   margin-inline-end: var(--space-1h);
   color: var(--text-standard);
   transform-origin: 50% 0;
@@ -380,13 +415,6 @@
   border-radius: var(--radius-pill);
   background: var(--surface-panel);
 }
-.face {
-  flex-shrink: 0;
-  inline-size: var(--space-3);
-  block-size: var(--space-3);
-  border-radius: 30%;
-  background: var(--affordance-accent-prominent);
-}
 .typed {
   flex: 1;
   max-inline-size: 55%;
@@ -396,18 +424,10 @@
   animation: type var(--loop) steps(6, end) var(--delay) infinite both
     var(--state);
 }
-/* The answer's mark sits under the face, and its bar starts with the typed
-   one: the pill's padding plus its border. */
+/* The answer's avatar sits under the field's, or where its typing starts,
+   with the field's padding and border. */
 .search + .row {
   --hairline: 1px;
-  gap: var(--space-2);
-  padding-inline-start: calc(
-    var(--space-2) +
-    var(--space-half) +
-    var(--hairline)
-  );
-}
-.search[data-agent="false"] + .row {
   padding-inline-start: calc(var(--space-2) + var(--hairline));
 }
 

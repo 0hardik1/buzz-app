@@ -3,6 +3,9 @@ import {
   BellIcon,
   HashIcon,
   LockIcon,
+  PlugIcon,
+  RobotIcon,
+  UserIcon,
 } from "../../../shared/design-system/icons";
 import styles from "./WelcomeTour.module.css";
 
@@ -56,14 +59,23 @@ export function Sketch({
   );
 }
 
+/** Someone's avatar: a person (circle) or an agent (squircle), with its icon. */
+export function Mark({ lead }: { lead: "person" | "agent" }) {
+  return (
+    <span className={styles.mark} data-lead={lead}>
+      {lead === "agent" ? <RobotIcon /> : <UserIcon />}
+    </span>
+  );
+}
+
 export function Row({
-  lead = "channel",
+  lead = "plugin",
   tone = "neutral",
   enter,
   trail,
 }: {
-  /** The leading mark: a channel, a person (circle) or an agent (squircle). */
-  lead?: "channel" | "person" | "agent";
+  /** The leading mark: a plugin (rounded square), a person (circle) or an agent (squircle). */
+  lead?: "plugin" | "person" | "agent";
   /** Accent marks the row the drawing is about. */
   tone?: "neutral" | "accent";
   /** Arrive on the timeline; the step staggers rows that arrive together. */
@@ -73,7 +85,13 @@ export function Row({
 }) {
   return (
     <span className={styles.row} data-tone={tone} data-enter={enter}>
-      <span className={styles.lead} data-lead={lead} />
+      {lead === "plugin" ? (
+        <span className={styles.lead}>
+          <PlugIcon />
+        </span>
+      ) : (
+        <Mark lead={lead} />
+      )}
       <span className={styles.bar} />
       {trail != null && <span className={styles.trail}>{trail}</span>}
     </span>
@@ -106,7 +124,7 @@ export function Message({
       data-length={length}
       data-enter={enter}
     >
-      {!own && <span className={styles.lead} data-lead={from} />}
+      {!own && <Mark lead={from} />}
       <span className={styles.bubble} data-reply={reply}>
         {reply && (
           <span className={styles.typing}>
@@ -134,7 +152,7 @@ export function Faces({
     <span className={styles.faces} data-at={at}>
       {of.map((lead, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
-        <span key={index} className={styles.lead} data-lead={lead} />
+        <Mark key={index} lead={lead} />
       ))}
     </span>
   );
@@ -143,6 +161,10 @@ export function Faces({
 /** A channel's # before its title. */
 export function Hash() {
   return <HashIcon className={styles.glyph} />;
+}
+
+export function Plug() {
+  return <PlugIcon className={styles.glyph} />;
 }
 
 /** A lock at the header's end, for something private. */
@@ -168,7 +190,7 @@ export function Switch({ state = "off" }: { state?: "off" | "on" | "flip" }) {
 export function Search({ agent = true }: { agent?: boolean }) {
   return (
     <span className={styles.search} data-agent={agent}>
-      {agent && <span className={styles.face} />}
+      {agent && <Mark lead="agent" />}
       <span className={styles.typed} />
     </span>
   );

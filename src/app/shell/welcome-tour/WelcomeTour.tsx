@@ -6,6 +6,7 @@ import {
   Hash,
   Lock,
   Message,
+  Plug,
   Row,
   Scene,
   Search,
@@ -46,11 +47,8 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
         "Buzz is where people and AI agents work together. Here’s a quick look around.",
       visual: (
         <Scene still>
-          <Sketch>
-            <Row lead="person" />
-            <Row lead="agent" tone="accent" />
-            <Row lead="person" />
-          </Sketch>
+          {/* People and agents, together. */}
+          <Faces of={["person", "agent", "person", "agent", "person"]} />
         </Scene>
       ),
     },
@@ -146,10 +144,10 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
       align: "start",
       visual: (
         <Scene>
-          <Sketch>
-            <Row lead="channel" trail={<Switch state="on" />} />
-            <Row lead="channel" trail={<Switch state="flip" />} />
-            <Row lead="channel" trail={<Switch />} />
+          <Sketch header={<Plug />}>
+            <Row trail={<Switch state="on" />} />
+            <Row trail={<Switch state="flip" />} />
+            <Row trail={<Switch />} />
           </Sketch>
         </Scene>
       ),
