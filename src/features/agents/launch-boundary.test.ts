@@ -416,15 +416,20 @@ it("starts Claude sessions from the synced copies, with no relay request but rec
     seeded,
     synced(),
   );
+  // Leaves out the helpers that read the session's title for its name.
+  const sessions = () =>
+    claude.processes.filter(
+      (process) => !["workspace", "size", "read-page"].includes(process.id),
+    );
   const prompted = (index: number) =>
     vi.waitFor(() =>
-      expect(JSON.stringify(claude.processes[index]?.received)).toContain(
+      expect(JSON.stringify(sessions()[index]?.received)).toContain(
         "SYNCED INSTRUCTIONS",
       ),
     );
   f.mention();
   await prompted(0);
-  const [first] = claude.processes;
+  const [first] = sessions();
   expect(first?.model).toBe("synced-model");
   expect(first?.options.cwd).toBe("/this/device");
   expect(JSON.stringify(first?.received)).not.toContain("LOCAL INSTRUCTIONS");
@@ -435,8 +440,8 @@ it("starts Claude sessions from the synced copies, with no relay request but rec
   f.transport.offline = true;
   f.mention();
   await prompted(1);
-  expect(claude.processes[1]?.model).toBe("synced-model");
-  expect(JSON.stringify(claude.processes[1]?.received)).not.toContain(
+  expect(sessions()[1]?.model).toBe("synced-model");
+  expect(JSON.stringify(sessions()[1]?.received)).not.toContain(
     "LOCAL INSTRUCTIONS",
   );
   expect(f.deliveries[1]?.revisions).toEqual(revisions);
@@ -503,7 +508,13 @@ function fakeCodex() {
     options = value;
     return process;
   };
-  return { spawn, sent };
+  // What the conversation itself sent, without the thread that titles it.
+  const own = () =>
+    sent.filter((wire) => {
+      const params = wire.params as Record<string, unknown> | undefined;
+      return !params?.ephemeral && !params?.outputSchema;
+    });
+  return { spawn, sent, own };
 }
 
 it("starts a Codex thread and a turn from the synced copies; offline, only its conversation reads fail", async () => {
@@ -528,7 +539,7 @@ it("starts a Codex thread and a turn from the synced copies; offline, only its c
     synced(),
   );
   const starts = (method: string) =>
-    codex.sent.filter((wire) => wire.method === method);
+    codex.own().filter((wire) => wire.method === method);
   const outcome = (id: string) =>
     f.activity.reader.work().find((work) => work.messageId === id);
   f.plugin.agents.registerSessionRouter({
@@ -722,7 +733,7 @@ it.each([
       return {
         f,
         prompted: () =>
-          codex.sent.filter((wire) => wire.method === "turn/start").length,
+          codex.own().filter((wire) => wire.method === "turn/start").length,
       };
     },
   },
@@ -818,7 +829,7 @@ it("keeps an addressed Attention wake when a session association declines", asyn
   await vi.advanceTimersByTimeAsync(60_000);
   await vi.waitFor(() =>
     expect(
-      codex.sent.filter((wire) => wire.method === "turn/start"),
+      codex.own().filter((wire) => wire.method === "turn/start"),
     ).toHaveLength(1),
   );
   expect(prepare).toHaveBeenCalledOnce();
@@ -883,7 +894,7 @@ it.each(["thread", "channel"] as const)(
     expect(current).toBeTruthy();
     expect(current).not.toBe(prior);
     expect(
-      codex.sent.filter((wire) => wire.method === "thread/start"),
+      codex.own().filter((wire) => wire.method === "thread/start"),
     ).toHaveLength(2);
   },
 );
