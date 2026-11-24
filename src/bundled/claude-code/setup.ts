@@ -257,6 +257,9 @@ export type SetupState = Readonly<{
   output: string;
   /** Why the latest release is not the one in use, after it failed its test. */
   notice: string | undefined;
+  /** Whether a protected agent could run, from the same sample as `status`
+   * (`ClaudeAuth.protectedEligible`); undefined until known. */
+  protectedReady: boolean | undefined;
 }>;
 const OUTPUT_LIMIT = 20_000;
 
@@ -271,6 +274,7 @@ export class ClaudeSetup {
     running: undefined,
     output: "",
     notice: undefined,
+    protectedReady: undefined,
   };
   private readonly listeners = new Set<() => void>();
   private health: AgentProviderSnapshot = { readiness: "checking" };
@@ -296,6 +300,8 @@ export class ClaudeSetup {
     readonly auth = new ClaudeAuth(spawn),
   ) {
     this.spawn = spawn && auth.authorize(spawn);
+    // A saved or cleared key, or a changed own setup, changes it at once.
+    auth.subscribe(() => this.set({ protectedReady: auth.protectedEligible }));
   }
 
   snapshot = () => this.state;
@@ -364,6 +370,7 @@ export class ClaudeSetup {
     }
     this.set({
       status,
+      protectedReady: this.auth.protectedEligible,
       ...(invalidate
         ? { models: [], modelsChecking: false, modelsError: "" }
         : {}),

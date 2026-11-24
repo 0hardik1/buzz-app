@@ -9,7 +9,7 @@ import { type ComponentType, createElement } from "react";
 import { pubkeyOf } from "../../features/agents/membership";
 import { ownerReads, readyOwnerReads } from "../../features/agents/reads";
 import { withProviderWords } from "../../features/agents/failure-words";
-import { refusedByBuzz } from "./auth";
+import { PROTECTED_NEEDS, refusedByBuzz } from "./auth";
 import type { PluginModule } from "../../plugins/api";
 import { ClaudeLogoIcon } from "../../shared/design-system/icons";
 import { claudeRun, TYPE_ID } from "./run";
@@ -266,6 +266,23 @@ export const apply: PluginModule["apply"] = (ctx) => {
         .model,
     }),
     recommends: (candidate) => setup.offers(candidate),
+    // Protected agents never get the device list, so a new one that starts
+    // protected waits for the person's own setup or a saved key.
+    admitsCreation: {
+      check: async () =>
+        (await agents.startsProtected()) && !(await setup.auth.protectedReady())
+          ? PROTECTED_NEEDS
+          : undefined,
+      subscribe: (listener) => {
+        let last = setup.snapshot().protectedReady;
+        return setup.subscribe(() => {
+          const now = setup.snapshot().protectedReady;
+          if (now === last) return;
+          last = now;
+          listener();
+        });
+      },
+    },
     adopt: (carry, saved) => ({
       ...saved,
       instructions: carry.instructions ?? saved.instructions,

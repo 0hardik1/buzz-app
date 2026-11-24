@@ -116,6 +116,10 @@ const nativeStore = ():
  * friction can put it first. */
 export const leadsHarnesses = false;
 
+/** Why a new protected Claude agent can't be made yet. */
+export const PROTECTED_NEEDS =
+  "Protected Claude agents need your own Claude sign-in or a saved API key. Keys on the device list don't count.";
+
 /** Claude's credentials on this computer. */
 export class ClaudeAuth {
   /** Which way this build authenticates. */
@@ -173,6 +177,8 @@ export class ClaudeAuth {
   /** Whether a key was saved, as last asked: protected launches use it even
    * beside the person's own setup. */
   private keySaved = false;
+  /** Whether `keySaved` is an answer yet, not its starting value. */
+  private keyKnown = false;
 
   private has() {
     const store = this.store;
@@ -186,6 +192,7 @@ export class ClaudeAuth {
     };
     asking.then((saved) => {
       this.keySaved = saved;
+      this.keyKnown = true;
       if (!saved) forget();
     }, forget);
     return asking;
@@ -246,6 +253,23 @@ export class ClaudeAuth {
     return key || device ? {} : undefined;
   }
 
+  /** Whether a protected agent can run, as last sampled: the person's own
+   * setup or a saved key. Protected launches never get the device list, so
+   * it never counts. Undefined while either answer is unknown. */
+  get protectedEligible(): boolean | undefined {
+    if (this.owned === true || (this.keyKnown && this.keySaved)) return true;
+    return this.owned === false && this.keyKnown ? false : undefined;
+  }
+
+  /** `protectedEligible`, asked only for answers not yet sampled, so it
+   * never starts a check over. */
+  async protectedReady() {
+    const known = this.protectedEligible;
+    if (known !== undefined) return known;
+    const [own, key] = await Promise.all([this.settled(), this.has()]);
+    return !!own || key;
+  }
+
   /** What Settings needs, asked again: whether the person has a setup of
    * their own, and whether a key is saved, which security reviews still
    * need. */
@@ -266,6 +290,7 @@ export class ClaudeAuth {
     try {
       await store.save(key);
       this.keySaved = true;
+      this.keyKnown = true;
     } finally {
       // A refused save leaves the key as it was; anything else may not.
       this.saved = undefined;
@@ -282,6 +307,7 @@ export class ClaudeAuth {
     try {
       await store.clear();
       this.keySaved = false;
+      this.keyKnown = true;
     } finally {
       this.saved = undefined;
     }

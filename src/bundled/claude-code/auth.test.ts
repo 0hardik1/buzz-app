@@ -499,3 +499,32 @@ it("keeps the person's own setup with a device-list key: no key is asked for", a
     options,
   ]);
 });
+
+it("keeps protected eligibility to the person's own setup or a saved key, from the check's own answers", async () => {
+  // Only the device list: ordinary agents are ready, protected ones are not.
+  store(false);
+  state.agentEnv.set("", ["ANTHROPIC_API_KEY"]);
+  const device = host();
+  const auth = new ClaudeAuth(device.spawn);
+  expect(auth.protectedEligible).toBeUndefined();
+  await expect(auth.check()).resolves.toEqual({});
+  expect(auth.protectedEligible).toBe(false);
+  // Read from what the check sampled: no second key or own-setup ask.
+  const asked = [state.asked, device.status.asked];
+  await expect(auth.protectedReady()).resolves.toBe(false);
+  expect([state.asked, device.status.asked]).toEqual(asked);
+  // A saved key counts at once, and clearing it takes it away again.
+  await auth.save(KEY);
+  expect(auth.protectedEligible).toBe(true);
+  await auth.clear();
+  expect(auth.protectedEligible).toBe(false);
+  // The person's own setup counts without a key.
+  const own = new ClaudeAuth(host({ loggedIn: true }).spawn);
+  await own.check();
+  expect(own.protectedEligible).toBe(true);
+  // Unsampled, it asks rather than assuming either way.
+  store(true);
+  await expect(new ClaudeAuth(host().spawn).protectedReady()).resolves.toBe(
+    true,
+  );
+});
