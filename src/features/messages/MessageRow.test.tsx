@@ -5955,3 +5955,53 @@ it("a timecode opens only its video group and saves that choice", () => {
     cleanup();
   }
 });
+
+it("seeks each shown video once and ignores old seeks when a group reopens", () => {
+  const props = {
+    row: {
+      ...row,
+      attachments: ["one", "two", "three"].map((name) => ({
+        kind: "video" as const,
+        url: `https://relay.test/media/${name}.mp4`,
+      })),
+    },
+    scope: "multi-video-seek",
+    profile: undefined,
+    media: (url: string) => `/api/relay/media?url=${encodeURIComponent(url)}`,
+    onOpenLink: () => false,
+    day: false,
+    retry: undefined,
+  };
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const view = renderDom(<MessageRow {...props} />);
+  const players = () => [...view.container.querySelectorAll("video")];
+  try {
+    const [first, , third] = screen.getAllByRole("button", { name: "Video" });
+    if (!first || !third) throw new Error("Expected three video disclosures");
+    view.rerender(
+      <MessageRow {...props} mediaSeekTo={5} mediaSeekRequest={1} />,
+    );
+    for (const video of players().reverse()) fireEvent.loadedMetadata(video);
+    expect(players().map((video) => video.currentTime)).toEqual([5, 5, 5]);
+    expect(play).toHaveBeenCalledTimes(3);
+
+    fireEvent.click(first);
+    fireEvent.click(third);
+    view.rerender(
+      <MessageRow {...props} mediaSeekTo={5} mediaSeekRequest={2} />,
+    );
+    expect(first).toHaveAttribute("aria-expanded", "true");
+    expect(third).toHaveAttribute("aria-expanded", "false");
+    for (const video of players()) fireEvent.loadedMetadata(video);
+    expect(play).toHaveBeenCalledTimes(5);
+    fireEvent.click(third);
+    const reopened = players()[2];
+    if (!reopened) throw new Error("Expected the third video to be shown");
+    fireEvent.loadedMetadata(reopened);
+    expect(reopened.currentTime).toBe(0);
+    expect(play).toHaveBeenCalledTimes(5);
+  } finally {
+    view.unmount();
+    play.mockRestore();
+  }
+});

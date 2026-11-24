@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -24,6 +25,7 @@ export function CollapsibleMediaGroup({
   imageList,
   grid,
   seekRequest,
+  openOnSeek,
   children,
 }: {
   scope: string | undefined;
@@ -32,7 +34,8 @@ export function CollapsibleMediaGroup({
   imageList: boolean;
   grid: boolean;
   seekRequest: number | undefined;
-  children: ReactNode;
+  openOnSeek: boolean;
+  children: (allowSeek: boolean) => ReactNode;
 }) {
   const id = useId();
   const subscribe = useCallback(
@@ -44,9 +47,15 @@ export function CollapsibleMediaGroup({
     () => mediaCollapsed(scope, groupKey),
     () => false,
   );
+  // All shown players receive the row's timecode. Hiding the group retires
+  // that request before its players can mount again.
+  const [activeSeek, setActiveSeek] = useState<number>();
+  if (collapsed && activeSeek !== undefined) setActiveSeek(undefined);
   useEffect(() => {
-    if (seekRequest !== undefined) setMediaCollapsed(scope, groupKey, false);
-  }, [scope, groupKey, seekRequest]);
+    if (seekRequest === undefined) return;
+    if (openOnSeek) setMediaCollapsed(scope, groupKey, false);
+    if (!mediaCollapsed(scope, groupKey)) setActiveSeek(seekRequest);
+  }, [scope, groupKey, seekRequest, openOnSeek]);
   const groupLabel = label === "Image" ? "1 image" : label;
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon;
   return (
@@ -82,7 +91,8 @@ export function CollapsibleMediaGroup({
         data-image-grid={(grid && !collapsed) || undefined}
         hidden={collapsed}
       >
-        {!collapsed && children}
+        {!collapsed &&
+          children(seekRequest === undefined || activeSeek === seekRequest)}
       </div>
     </div>
   );

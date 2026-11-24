@@ -47,7 +47,6 @@ type MediaAttachmentProps = {
   preload?: "auto" | "metadata" | "none";
   seekTo?: number;
   seekRequest?: number;
-  onSeekApplied?(request: number): void;
   onPlayback?(playback: MediaPlayback): void;
   onOpenReview?(attachment: Attachment, seconds: number): void;
   compact?: boolean;
@@ -60,10 +59,11 @@ function useVideoPosition(
   seekTo: number | undefined,
   seekRequest: number | undefined,
   active: boolean,
-  onSeekApplied?: (request: number) => void,
 ) {
   const wasActive = useRef(active);
   useLayoutEffect(() => {
+    // A monotonically increasing request lets the same timecode seek again.
+    void seekRequest;
     const recovered = active && !wasActive.current;
     wasActive.current = active;
     const element = video.current;
@@ -77,12 +77,11 @@ function useVideoPosition(
     const seek = () => {
       element.currentTime = Math.max(0, seekTo);
       void element.play().catch(() => {});
-      if (seekRequest !== undefined) onSeekApplied?.(seekRequest);
     };
     if (element.readyState >= HTMLMediaElement.HAVE_METADATA) seek();
     else element.addEventListener("loadedmetadata", seek, { once: true });
     return () => element.removeEventListener("loadedmetadata", seek);
-  }, [seekTo, seekRequest, video, active, onSeekApplied]);
+  }, [seekTo, seekRequest, video, active]);
 }
 
 export function MediaAttachment({
@@ -93,7 +92,6 @@ export function MediaAttachment({
   preload = "auto",
   seekTo,
   seekRequest,
-  onSeekApplied,
   onPlayback,
   onOpenReview,
   compact = false,
@@ -129,13 +127,7 @@ export function MediaAttachment({
       } as CSSProperties)
     : undefined;
   const visiblePreview = preview ?? capturedPreview;
-  useVideoPosition(
-    video,
-    seekTo,
-    seekRequest,
-    active && !compact,
-    onSeekApplied,
-  );
+  useVideoPosition(video, seekTo, seekRequest, active && !compact);
   const element = useMediaElementSource(
     attachment.kind === "video" ? source : undefined,
   );
