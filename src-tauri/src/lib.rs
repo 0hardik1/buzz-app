@@ -120,7 +120,10 @@ use relay::{
     relay_upload_begin, relay_upload_cancel, relay_upload_chunk, relay_verify_signatures,
     relay_workflow_runs,
 };
-use relay::{huddle_close, huddle_open, huddle_pcm, huddle_realtime_transcription_available, huddle_realtime_transcription_connect, huddle_recognize, huddle_touch, Huddles};
+use relay::{
+    huddle_close, huddle_open, huddle_pcm, huddle_realtime_transcription_available,
+    huddle_realtime_transcription_connect, huddle_recognize, huddle_touch, Huddles,
+};
 mod terminal;
 #[cfg(all(test, unix))]
 mod test_executable;

@@ -1065,18 +1065,21 @@ mod tests {
                 .await
                 .expect("the owner was never heard");
                 // Another human and this agent remain, but its owner is gone.
-                send(&mut relay, json!({"type":"left","peer_index":1,"pubkey":owner})).await;
+                send(
+                    &mut relay,
+                    json!({"type":"left","peer_index":1,"pubkey":owner}),
+                )
+                .await;
                 while let Some(frame) = relay.next().await {
                     if matches!(frame.unwrap(), Message::Close(_)) {
                         break;
                     }
                 }
             };
-            let (played, ()) = tokio::time::timeout(FAILURE_BOUND, async {
-                tokio::join!(playing, relay_side)
-            })
-            .await
-            .expect("the agent seat stayed connected after its owner left");
+            let (played, ()) =
+                tokio::time::timeout(FAILURE_BOUND, async { tokio::join!(playing, relay_side) })
+                    .await
+                    .expect("the agent seat stayed connected after its owner left");
             played.unwrap();
             assert!(heard.lock().unwrap().iter().all(|peer| *peer == owner));
         }
