@@ -15,13 +15,12 @@ export function createMicrophoneTranscript(
   let silence = 0;
   let pending = 0;
   let queue = Promise.resolve();
-  let failed = false;
   function flush() {
     const utterance = frames;
     const shouldRecognize = voiced >= sampleRate * 0.12;
     frames = [];
     length = voiced = silence = 0;
-    if (!shouldRecognize || failed || signal.aborted) return;
+    if (!shouldRecognize || signal.aborted) return;
     if (pending >= 3) {
       report(
         new Error("Speech recognition fell behind. A transcript was skipped."),
@@ -31,7 +30,7 @@ export function createMicrophoneTranscript(
     pending++;
     queue = queue
       .then(async () => {
-        if (failed || signal.aborted) return;
+        if (signal.aborted) return;
         // Capture is 48 kHz mono. Average triples to reduce aliasing at 16 kHz.
         const samples = utterance.flatMap((frame) =>
           Array.from({ length: Math.floor(frame.length / 3) }, (_, index) => {
@@ -45,10 +44,7 @@ export function createMicrophoneTranscript(
         if (text && !signal.aborted) publish(text);
       })
       .catch((error: unknown) => {
-        if (!signal.aborted) {
-          failed = true;
-          report(error);
-        }
+        if (!signal.aborted) report(error);
       })
       .finally(() => {
         pending--;
@@ -56,7 +52,7 @@ export function createMicrophoneTranscript(
   }
   return {
     input(frame: number[]) {
-      if (failed || signal.aborted || !frame.length) return;
+      if (signal.aborted || !frame.length) return;
       const loud =
         frame.reduce((energy, sample) => energy + sample * sample, 0) >
         frame.length * 0.009 ** 2;

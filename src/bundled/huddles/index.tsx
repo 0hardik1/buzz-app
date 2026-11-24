@@ -1,3 +1,4 @@
+import { relayOrigin } from "../../features/communities/destination";
 import {
   remoteDmVoiceCalls,
   withRemoteDmVoiceCalls,
@@ -44,6 +45,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
             agent.type === "buzz.codex/codex" &&
             agent.place === "here" &&
             agent.owner === destination.viewer &&
+            relayOrigin(agent.relay) === relayOrigin(destination.relayUrl) &&
             !agent.protection &&
             !agent.executionBinding &&
             channel.members?.includes(agent.pubkey),

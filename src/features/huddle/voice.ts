@@ -50,6 +50,7 @@ export function createHuddleVoices(
       | undefined,
   ): Seat {
     const id = crypto.randomUUID();
+    const callSession = session;
     const abort = new AbortController();
     let connection: AgentVoiceConnection | undefined;
     let opening: Promise<void> | undefined;
@@ -158,11 +159,13 @@ export function createHuddleVoices(
             }),
             resumeOnClose: () => {
               const current = huddles.snapshot();
+              const relayState = relay.snapshot();
               return (
                 current.id === call &&
                 current.phase === "leaving" &&
-                relay.snapshot().session === session &&
-                relay.snapshot().status === "ready"
+                relayState.session === callSession &&
+                relayState.scope === destination.scope &&
+                relayState.status === "ready"
               );
             },
           }),
