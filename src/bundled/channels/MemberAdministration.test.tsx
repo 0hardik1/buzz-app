@@ -76,6 +76,7 @@ async function setup(
     | "dm" = "private",
   targetPicture?: string,
   targetProfiled = true,
+  libraryAgent = false,
 ) {
   const solo = visibility === "solo" || visibility === "view-only-solo";
   const visibilityFlag =
@@ -197,12 +198,18 @@ async function setup(
     (url: string, size?: "small") =>
       `https://media.example/${size ?? "original"}?url=${encodeURIComponent(url)}`,
   );
+  const library = {
+    definitions: [],
+    identities: libraryAgent ? [{ pubkey: target.pubkey, name: "Morgan" }] : [],
+  };
+  const readAgentLibrary = vi.fn(async () => library);
   const sessionOwner = createRelaySession(
     {
       viewer: viewer.pubkey,
       relayAuthor: relay.pubkey,
       media,
       query,
+      ...(libraryAgent ? { readAgentLibrary } : {}),
       ...(supported
         ? {
             memberAdministration: {
@@ -296,6 +303,7 @@ async function setup(
     publish,
     write,
     query,
+    readAgentLibrary,
     onOpenLink,
     onOpenMessage,
     openMessage,
@@ -2431,6 +2439,11 @@ it("shows member type tabs with counts and retains the selected group while sear
   expect(
     screen.getByRole("tabpanel", { name: "Agents · 0" }),
   ).toHaveTextContent("No members match your search.");
+  expect(
+    within(screen.getByRole("tabpanel", { name: "Agents · 0" })).queryByRole(
+      "list",
+    ),
+  ).not.toBeInTheDocument();
   await t.user.click(screen.getByRole("tab", { name: "People · 1" }));
   const carl = within(list).getByText("Carl (you)");
   expect(carl).toBeVisible();
@@ -2533,6 +2546,80 @@ it("keeps agent owners in the Agents tab", async () => {
   expect(
     screen.queryByRole("button", { name: /^Open profile for Carl/ }),
   ).not.toBeInTheDocument();
+});
+
+it("preserves the selected agent tab while a role retry reloads the existing library", async () => {
+  const t = await setup(
+    "admin",
+    "member",
+    true,
+    undefined,
+    false,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    "private",
+    undefined,
+    true,
+    true,
+  );
+  await t.user.click(await screen.findByRole("tab", { name: "Agents · 1" }));
+  await vi.waitFor(() =>
+    expect(memberData()).toHaveAttribute("data-refreshing", "false"),
+  );
+  const query = required(t.query.getMockImplementation());
+  t.query.mockImplementation(async (filters) => {
+    if (filters.some((filter) => filter.kinds?.includes(39001)))
+      throw new Error("Role read failed");
+    return query(filters);
+  });
+  await act(async () => {
+    await t.session.memberAdministration.refresh(id);
+  });
+  await screen.findByText("Role read failed");
+  t.query.mockImplementation(query);
+  const delayedLibrary = deferred();
+  const library = await t.readAgentLibrary();
+  t.readAgentLibrary.mockImplementation(async () => {
+    await delayedLibrary.promise;
+    return library;
+  });
+  try {
+    await t.user.click(
+      screen.getByRole("button", { name: "Retry member data" }),
+    );
+    await vi.waitFor(() =>
+      expect(t.session.memberAdministration.snapshot(id).status).toBe("ready"),
+    );
+    expect(memberData()).toHaveAttribute("data-refreshing", "true");
+  } finally {
+    await act(async () => delayedLibrary.resolve());
+  }
+  await vi.waitFor(() =>
+    expect(memberData()).toHaveAttribute("data-refreshing", "false"),
+  );
+  expect(screen.getByRole("tab", { name: "Agents · 1" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByRole("tabpanel")).toHaveTextContent("Morgan");
+});
+
+it("focuses the surviving group heading when a focused person leaves a one-group roster", async () => {
+  const t = await setup();
+  const actions = screen.getByRole("button", { name: "Actions for Morgan" });
+  actions.focus();
+  expect(actions).toHaveFocus();
+  t.confirm(undefined);
+  await act(async () => {
+    await t.session.memberAdministration.refresh(id);
+  });
+  expect(
+    screen.queryByRole("button", { name: "Actions for Morgan" }),
+  ).toBeNull();
+  expect(screen.getByRole("heading", { name: "People · 2" })).toHaveFocus();
 });
 
 it("preserves the member tab through role changes and selects People on reopen", async () => {

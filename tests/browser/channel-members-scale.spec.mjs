@@ -45,7 +45,6 @@ test("large channel members stays usable while browsing and searching the roster
   await pages.getByRole("button", { name: "Next" }).click();
   await expect(pages.getByText("2 of 51")).toBeVisible();
   await expect(panel).toBeFocused();
-  expect(await list.evaluate((node) => node.scrollTop)).toBe(0);
   await expect(list.getByRole("listitem").first()).toBeInViewport();
   await dialog.getByRole("tab", { name: /^Agents ·/ }).click();
   await dialog.getByRole("tab", { name: /^People ·/ }).click();

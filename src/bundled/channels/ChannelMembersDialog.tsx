@@ -668,7 +668,9 @@ export function ChannelMembersDialog({
       : undefined;
   const selection = shownIntent?.change;
   const scrollport = useRef<HTMLElement>(null);
+  const memberTabs = useRef<HTMLDivElement>(null);
   const measureMemberTabs = useCallback((element: HTMLDivElement | null) => {
+    memberTabs.current = element;
     const list = element?.parentElement;
     if (!element || !list) return;
     // Native overflow and interface scaling can both change the sticky height.
@@ -684,6 +686,7 @@ export function ChannelMembersDialog({
         : new ResizeObserver(measure);
     observer?.observe(element);
     return () => {
+      memberTabs.current = null;
       observer?.disconnect();
       list.style.removeProperty("--member-tabs-height");
     };
@@ -808,7 +811,7 @@ export function ChannelMembersDialog({
   });
   // A late archive list moves archived members to the Archived group, which
   // remounts a focused row. Its control leaves without a blur, so focus falls
-  // to the dialog or the body. Hand off to the selected tab or Search,
+  // to the dialog or the body. Hand off to the selected tab, group heading or Search,
   // unless focus has moved on to another control.
   const listFocus = useRef<{ control: HTMLElement; group: string }>(undefined);
   useLayoutEffect(() => {
@@ -820,6 +823,7 @@ export function ChannelMembersDialog({
     if (!list || (active && !active.contains(list))) return;
     (
       list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+      document.getElementById(`${presenceId}-${previous.group}-page`) ??
       input.current
     )?.focus({ preventScroll: true });
   });
@@ -1351,7 +1355,12 @@ export function ChannelMembersDialog({
   )
     ? selectedGroup
     : presentGroups[0]?.name;
-  if (!initialLoading && selectedGroup !== memberGroup)
+  if (
+    !initialLoading &&
+    administration.status !== "loading" &&
+    !agentChoices.pending &&
+    selectedGroup !== memberGroup
+  )
     setSelectedGroup(memberGroup);
   const showTabs = !initialLoading && presentGroups.length > 1;
   const accessChoices = rolesSettled && accessGroups.length > 1;
@@ -1383,17 +1392,22 @@ export function ChannelMembersDialog({
   }
   if (pages !== memberPages.pages)
     setMemberPages({ text, accessFilter, pages });
-  const pendingMemberPage = useRef<string | null>(null);
+  const pendingMemberPage = useRef<{ group: string; focus: boolean } | null>(
+    null,
+  );
   useLayoutEffect(() => {
-    const group = pendingMemberPage.current;
+    const pending = pendingMemberPage.current;
     pendingMemberPage.current = null;
-    if (group === null) return;
-    const target = document.getElementById(`${presenceId}-${group}-page`);
-    target?.focus({ preventScroll: true });
-    if (scrollport.current) scrollport.current.scrollTop = 0;
+    if (pending === null) return;
+    const target = document.getElementById(
+      `${presenceId}-${pending.group}-page`,
+    );
+    if (pending.focus) target?.focus({ preventScroll: true });
+    if (showTabs) target?.scrollIntoView({ block: "start" });
+    else target?.parentElement?.scrollIntoView({ block: "start" });
   });
   const changeMemberPage = (group: string, page: number) => {
-    pendingMemberPage.current = group;
+    pendingMemberPage.current = { group, focus: true };
     setMemberPages({
       text,
       accessFilter,
@@ -1402,7 +1416,7 @@ export function ChannelMembersDialog({
   };
   const profileKey = !largeRoster
     ? memberKey
-    : filteredGroups
+    : groups
         .flatMap((group) => {
           const page = Math.min(
             pages[group.name] ?? 0,
@@ -2513,8 +2527,23 @@ export function ChannelMembersDialog({
                     panelId: `${presenceId}-${group.name}-page`,
                   }))}
                   onValueChange={(value) => {
+                    const panel = document.getElementById(
+                      `${presenceId}-${memberGroup}-page`,
+                    );
+                    // Keep General in its natural position until the user has
+                    // scrolled into the old panel. Then reveal the new page's
+                    // start below the sticky tabs, without moving tab focus.
+                    if (
+                      panel &&
+                      memberTabs.current &&
+                      panel.getBoundingClientRect().top <
+                        memberTabs.current.getBoundingClientRect().bottom
+                    )
+                      pendingMemberPage.current = {
+                        group: value,
+                        focus: false,
+                      };
                     setSelectedGroup(value);
-                    if (scrollport.current) scrollport.current.scrollTop = 0;
                   }}
                 />
               </div>
@@ -2607,27 +2636,31 @@ export function ChannelMembersDialog({
                                 : "No members match this filter."}
                             </p>
                           )}
-                          <ul
-                            aria-busy={refreshing}
-                            onFocus={(event) => {
-                              // Portaled menus bubble here too; keep only rows.
-                              if (
-                                event.currentTarget.contains(event.target) &&
-                                event.target instanceof HTMLElement
-                              )
-                                listFocus.current = {
-                                  control: event.target,
-                                  group: group.name,
-                                };
-                            }}
-                          >
-                            {group.keys
-                              .slice(
-                                page * MEMBER_PAGE_SIZE,
-                                (page + 1) * MEMBER_PAGE_SIZE,
-                              )
-                              .map((key) => row(key, memberLabel(key), false))}
-                          </ul>
+                          {group.keys.length > 0 && (
+                            <ul
+                              aria-busy={refreshing}
+                              onFocus={(event) => {
+                                // Portaled menus bubble here too; keep only rows.
+                                if (
+                                  event.currentTarget.contains(event.target) &&
+                                  event.target instanceof HTMLElement
+                                )
+                                  listFocus.current = {
+                                    control: event.target,
+                                    group: group.name,
+                                  };
+                              }}
+                            >
+                              {group.keys
+                                .slice(
+                                  page * MEMBER_PAGE_SIZE,
+                                  (page + 1) * MEMBER_PAGE_SIZE,
+                                )
+                                .map((key) =>
+                                  row(key, memberLabel(key), false),
+                                )}
+                            </ul>
+                          )}
                           {pageCount > 1 && (
                             <nav
                               aria-label={`${group.name} member pages`}

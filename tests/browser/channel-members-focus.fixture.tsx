@@ -54,13 +54,15 @@ const namesReady = new Promise<void>((resolve) => {
 let namesRequested = false;
 const additions: string[] = [];
 const channelId = "11111111-1111-4111-8111-111111111111";
-// Only the scroll-dismissal journey needs an overflowing roster.
-const scrollMembers = new URLSearchParams(location.search).has("scroll")
-  ? Array.from({ length: 16 }, (_, index) => ({
-      key: keypair(),
-      name: `Member ${index + 1}`,
-    }))
-  : [];
+// Overflow for scroll dismissal, or a second page for one-group paging.
+const peopleScale = new URLSearchParams(location.search).has("people-scale");
+const scrollMembers =
+  new URLSearchParams(location.search).has("scroll") || peopleScale
+    ? Array.from({ length: peopleScale ? 60 : 16 }, (_, index) => ({
+        key: keypair(),
+        name: `Member ${index + 1}`,
+      }))
+    : [];
 // Real owner signatures for the opt-in search workload, not a mocked verifier.
 const invitationScale = new URLSearchParams(location.search).has(
   "invitation-scale",

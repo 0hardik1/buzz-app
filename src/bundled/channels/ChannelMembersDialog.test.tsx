@@ -139,6 +139,7 @@ async function setup(
     personIsRelayAgent?: boolean;
     /** The DM is the relay's moderation DM with the viewer. */
     moderation?: boolean;
+    visitor?: boolean;
   } = {},
 ) {
   const viewer = keypair(),
@@ -157,7 +158,7 @@ async function setup(
   const id = "11111111-1111-4111-8111-111111111111";
   const target = localAgent ? agent.pubkey : person.pubkey;
   const members = [
-    viewer.pubkey,
+    ...(options.visitor ? [] : [viewer.pubkey]),
     ...Array.from({ length: options.extraMembers ?? 0 }, (_, i) =>
       (i + 10000).toString(16).padStart(64, "0"),
     ),
@@ -389,6 +390,8 @@ async function setup(
     await within(
       await screen.findByRole("region", { name: "Member list" }),
     ).findAllByRole("listitem");
+  else if (options.visitor)
+    await screen.findByText("Join this channel to add people and agents.");
   else if (missingNames) await screen.findByText(/Some names could not load/);
   else await screen.findByText("Carl (you)");
   return {
@@ -4179,6 +4182,39 @@ it("loads another member page after a previous page fails", async () => {
   expect(
     screen.queryByText(/Some names could not load/),
   ).not.toBeInTheDocument();
+});
+
+it("hydrates the current page of unopened member groups before searching", async () => {
+  const archived = Array.from({ length: 40 }, () =>
+    profile(keypair(), { name: "Olivia" }),
+  );
+  const t = await setup("stream", false, false, undefined, undefined, {
+    extraMembers: 60,
+    memberProfiles: archived,
+    archivedMembers: archived.map((event) => event.pubkey),
+  });
+  await screen.findByRole("tab", { name: "Archived · 40" });
+  await vi.waitFor(() =>
+    expect(memberData()).toHaveAttribute("data-refreshing", "false"),
+  );
+  // Profiles enter through the real directory's author-bounded reads; do not
+  // seed its map or hydrate every profile via an unrelated session.read.
+  await t.user.type(screen.getByRole("searchbox"), "o");
+  expect(screen.getByRole("tab", { name: "Archived · 40" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: /^People ·/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await t.user.click(screen.getByRole("tab", { name: "Archived · 40" }));
+  expect(screen.getByRole("tabpanel")).toHaveTextContent("Olivia");
+});
+
+it("shows join guidance and an empty member list to a nonmember visitor", async () => {
+  await setup("stream", false, false, undefined, undefined, { visitor: true });
+  expect(
+    screen.getByText("Join this channel to add people and agents."),
+  ).toBeVisible();
+  expect(await screen.findByText("No members to show.")).toBeVisible();
 });
 
 it("lists archived members in their own tab after People and Agents", async () => {
