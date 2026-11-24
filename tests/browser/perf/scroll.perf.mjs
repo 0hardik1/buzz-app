@@ -42,9 +42,7 @@ for (const [name, distance, speed, count] of [
           if (!(await older.count())) break;
           await expect(older).toHaveText("Load older messages");
           await older.evaluate((button) => button.click());
-          await expect
-            .poll(() => app.pending.length)
-            .toBeGreaterThan(released);
+          await expect.poll(() => app.pending.length).toBeGreaterThan(released);
         }
         await expect(older).toHaveCount(0);
         await expect(
