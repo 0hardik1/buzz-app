@@ -4172,6 +4172,8 @@ function Composer({
             editing.target &&
             event.key === "Escape" &&
             !event.defaultPrevented &&
+            // A portal, such as the attachment preview, owns its own Escape.
+            event.currentTarget.contains(event.target as Node) &&
             !event.nativeEvent.isComposing &&
             event.nativeEvent.keyCode !== 229 &&
             !completion.composing.current
