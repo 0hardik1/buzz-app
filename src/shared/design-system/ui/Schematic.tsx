@@ -1,4 +1,4 @@
-import { Children, type CSSProperties, type ReactNode } from "react";
+import { Children, type CSSProperties, type ReactNode, useState } from "react";
 import { HandGrabIcon, HandStopIcon, PointerIcon } from "../icons/index";
 
 /*
@@ -12,12 +12,19 @@ type Vars = CSSProperties & Record<`--${string}`, string | number>;
 
 export function SchematicScene({
   children,
+  alternate,
   still = false,
 }: {
   children: ReactNode;
+  /**
+   * A second drawing that takes turns with children, one loop each, swapping
+   * while the scene is faded out. Reduced motion holds children.
+   */
+  alternate?: ReactNode;
   /** Hold a single frame instead of looping, for a scene that only sets context. */
   still?: boolean;
 }) {
+  const [turn, setTurn] = useState(0);
   return (
     <div
       data-buzz-ui=""
@@ -25,7 +32,19 @@ export function SchematicScene({
       data-still={still ? "" : undefined}
       aria-hidden="true"
     >
-      <div className="buzz-schematic-stage">{children}</div>
+      <div
+        className="buzz-schematic-stage"
+        onAnimationIteration={(event) => {
+          // Parts loop on the same timeline; only the stage's own loop counts.
+          if (event.target !== event.currentTarget) return;
+          if (alternate) setTurn(turn === 0 ? 1 : 0);
+        }}
+      >
+        {/* A fresh mount restarts the drawing's parts on the stage's loop. */}
+        <div key={turn} className="buzz-schematic-turn">
+          {turn === 1 && alternate ? alternate : children}
+        </div>
+      </div>
     </div>
   );
 }

@@ -44,6 +44,11 @@
       var(--schematic-delay) infinite both var(--schematic-state);
   }
 
+  /* Lays out as part of the stage; it exists only to restart a turn. */
+  .buzz-schematic-turn {
+    display: contents;
+  }
+
   .buzz-schematic-slot {
     position: relative;
     display: grid;

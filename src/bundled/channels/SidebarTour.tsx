@@ -58,7 +58,25 @@ export const sidebarTourPages: readonly TourPage[] = [
     description:
       "Drag the handle to show more or fewer rows. Double-click it to show all.",
     visual: (
-      <SchematicScene>
+      <SchematicScene
+        alternate={
+          <SchematicCard
+            visibleRows={2}
+            motion="expand"
+            grip={
+              <SchematicGrip tone="accent">
+                <SchematicPointer motion="double-tap" />
+              </SchematicGrip>
+            }
+          >
+            <SchematicRow lead="channel" />
+            <SchematicRow lead="person" />
+            <SchematicRow lead="chat" />
+            <SchematicRow lead="channel" />
+            <SchematicRow lead="person" />
+          </SchematicCard>
+        }
+      >
         <SchematicCard
           visibleRows={2}
           motion="grow"

@@ -159,8 +159,15 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose:
       "Draw simplified product UI, such as cards, rows, handles and a hand, to illustrate a gesture.",
     behavior:
-      "Decorative and hidden from assistive tech, so surrounding copy carries the meaning. Parts share one looping timeline (grow, expand, lift, yield, row entry, drag and double-tap); reduced motion holds the finished frame, and a still scene never loops. The resize grip sits inside the card's bottom edge, as in the app. Accent marks only the part a scene is about.",
-    variants: ["grow", "expand", "reorder", "rows entering", "still"],
+      "Decorative and hidden from assistive tech, so surrounding copy carries the meaning. Parts share one looping timeline (grow, expand, lift, yield, row entry, drag and double-tap); reduced motion holds the finished frame, and a still scene never loops. An alternate drawing takes turns with the main one, one loop each, swapping while the scene is faded out. The resize grip sits inside the card's bottom edge, as in the app. Accent marks only the part a scene is about.",
+    variants: [
+      "grow",
+      "expand",
+      "reorder",
+      "rows entering",
+      "alternating",
+      "still",
+    ],
     status: "proposed",
     collection: "components",
     source: "shared/design-system/ui/Schematic.tsx",
