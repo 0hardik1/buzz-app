@@ -54,8 +54,11 @@ if that desktop app is up and running.
 
 - **Top bar**: your communities and your profile picture, which opens
   **Settings**, sit at its right.
-- **Tabs**: threads, agents and other things you open appear as tabs on the
-  right.
+- **Threads and tabs**: threads, profiles and link panels open by default as a
+  sheet over the conversation's message box; Back or **X** closes it. **Move to
+  side panel** on the sheet moves that thread into a tab. To open them as tabs
+  instead, set **Settings → Appearance → Open threads in** to **Side pane** or
+  **Main pane**. Calls, canvases and apps always open as tabs on the right.
 - **Left Sidebar**: a stack of cards. The **Plugins** card lists **Messages**,
   **Agents**, **Activity** and any pages plugins add. Then come **Solo**,
   **Favorites**, your workspaces (which organize groups of channels/chats/dms),
