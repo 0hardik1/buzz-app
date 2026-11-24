@@ -115,8 +115,8 @@ test("Team offers empty-workspace creation with keyboard focus, emoji and confir
     if (
       awaitingReconciliation &&
       Array.isArray(filters) &&
-      filters.map((filter) => filter["#d"]?.join()).join() ===
-        "channel-workspaces,channel-stars,channel-mutes,channel-workspace-sort"
+      filters.length === 5 &&
+      filters.some((filter) => filter["#d"]?.includes("channel-workspaces"))
     ) {
       if (filters.every((filter) => filter.consistency === "strong")) {
         writerReads++;
