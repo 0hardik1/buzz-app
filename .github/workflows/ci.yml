@@ -230,14 +230,13 @@ jobs:
         with:
           key: windows-native
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Exercise FFmpeg recovery on the Windows host
+        if: inputs.ffmpeg_acceptance
+        run: cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
       - name: Native lint including Windows backend
         run: cargo clippy -p Buzz -p buzz-agent-controller -p buzz-credential-store -p buzz-mesh-compute --locked --all-targets -- -D warnings
       - name: All native package tests
         run: cargo test -p Buzz -p buzz-agent-controller -p buzz-credential-store -p buzz-mesh-compute --locked --no-fail-fast
-
-      - name: Exercise FFmpeg recovery on the Windows host
-        if: inputs.ffmpeg_acceptance
-        run: cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
 
   measurements:
     if: github.event_name != 'workflow_dispatch'
