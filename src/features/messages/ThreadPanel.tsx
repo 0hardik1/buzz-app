@@ -1340,18 +1340,13 @@ function ThreadMessages({
     threadUnread,
   ]);
   const withdrawnFor = useRef<AbortSignal>(undefined);
+  const membersVisit =
+    navigation?.target.kind === "conversation" &&
+    navigation.target.panel === "members";
   const revealed = useMessageReveal({
     scroller,
-    focus:
-      revealFocus !== false &&
-      !(
-        navigation?.target.kind === "conversation" &&
-        navigation.target.panel === "members"
-      ),
-    mark: !(
-      navigation?.target.kind === "conversation" &&
-      navigation.target.panel === "members"
-    ),
+    focus: revealFocus !== false && !membersVisit,
+    mark: !membersVisit,
     settled: positioned,
     messageId,
     signal: active ? revealSignal : undefined,
@@ -2540,6 +2535,7 @@ function ThreadMessages({
             threadRootId={resolvedRoot}
             linkedMessageId={
               messageId !== resolvedRoot &&
+              !membersVisit &&
               (revealSelected || (!!navigation && !positionedVisit))
                 ? messageId
                 : undefined

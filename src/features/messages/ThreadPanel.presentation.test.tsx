@@ -298,7 +298,7 @@ const drawn = () =>
   );
 const scroller = () => screen.getByRole("region", { name: "Thread messages" });
 const lastReading = () => readingProps.at(-1) as ReadingProps;
-const navigationTo = (messageId: string) =>
+const navigationTo = (messageId: string, panel?: "members") =>
   ({
     entryId: "visit",
     target: {
@@ -307,6 +307,7 @@ const navigationTo = (messageId: string) =>
       channelId: "c",
       messageId,
       threadRootId: root.id,
+      ...(panel ? { panel } : {}),
       scope: {
         viewer: viewer.pubkey,
         communityOrigin: "https://fixture.invalid",
@@ -941,6 +942,14 @@ it("keeps uninterrupted focus on a pending linked reply through withdrawal and m
   });
   expect(rootOpen.latest.current?.linkedMessageId).toBeUndefined();
   rootOpen.unmount();
+
+  const membersOpen = mount({
+    replies: [a, d, b],
+    navigation: navigationTo(d.id, "members"),
+    props: { messageId: d.id, tabbed: true },
+  });
+  expect(membersOpen.latest.current?.linkedMessageId).toBeUndefined();
+  membersOpen.unmount();
 
   const linked = mount({
     replies: [a, d, b],
