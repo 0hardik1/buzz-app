@@ -1,7 +1,7 @@
 /**
  * The tour's "Tidy it up", performed: the sidebar glides to the card that
- * trims the most, so the change is unmistakable, then every card trims slowly
- * together. A card qualifies while it shows everything only because the tour
+ * trims the most, so the change is unmistakable, then every card trims together
+ * at a steady pace. A card qualifies while it shows everything only because the tour
  * is unanswered and it holds more than the default.
  */
 
@@ -9,8 +9,14 @@ const listeners = new Set<() => void>();
 const emit = () => {
   for (const listener of listeners) listener();
 };
-// Cards that would trim, by key, with their rows.
-const untidy = new Map<string, HTMLElement>();
+/** Trim pace: each hidden row adds this much, within the floor and ceiling. */
+const PER_ROW = 60;
+const FLOOR = 500;
+const CEILING = 1500;
+
+type Untidy = { rows: HTMLElement; trims: number };
+// Cards that would trim, by key, with their rows and how many rows they hide.
+const untidy = new Map<string, Untidy>();
 // Cards kept full until the show reaches them, once the tour is answered.
 let held: ReadonlySet<string> = new Set();
 
@@ -24,12 +30,13 @@ export const tidyShow = {
   /** Whether any card would trim, so the tour asks. */
   pending: () => untidy.size > 0,
   held: (key: string) => held.has(key),
-  /** A card that would trim registers its rows while it would. */
-  register(key: string, rows: HTMLElement) {
-    untidy.set(key, rows);
+  /** A card that would trim registers its rows, and how many it hides, while it would. */
+  register(key: string, rows: HTMLElement, trims: number) {
+    const card = { rows, trims };
+    untidy.set(key, card);
     emit();
     return () => {
-      if (untidy.get(key) !== rows) return;
+      if (untidy.get(key) !== card) return;
       untidy.delete(key);
       emit();
     };
@@ -72,12 +79,9 @@ export async function runTidyShow(answer: () => void) {
     "(prefers-reduced-motion: reduce)",
   ).matches;
   if (still || cards.length === 0) return release(keys);
-  // The tallest card, while every card shows everything, trims the most.
   const star = cards
-    .map(([, rows]) => rows)
-    .reduce((most, rows) =>
-      rows.scrollHeight > most.scrollHeight ? rows : most,
-    );
+    .map(([, card]) => card)
+    .reduce((most, card) => (card.trims > most.trims ? card : most)).rows;
   const card = star.closest<HTMLElement>("[data-sidebar-section]") ?? star;
   const scroller = scrollParent(card);
   const view = scroller?.getBoundingClientRect();
@@ -86,10 +90,18 @@ export async function runTidyShow(answer: () => void) {
     card.scrollIntoView({ behavior: "smooth", block: "start" });
     await until(scroller ?? window, "scrollend", 700);
   }
-  for (const [, rows] of cards) rows.setAttribute("data-card-showcase", "");
+  // A steady pace, so a long card trims as calmly as a short one.
+  for (const [, { rows, trims }] of cards) {
+    const pace = Math.min(CEILING, Math.max(FLOOR, trims * PER_ROW));
+    rows.style.setProperty("--card-trim-duration", `${pace}ms`);
+    rows.setAttribute("data-card-showcase", "");
+  }
   release(keys);
-  await until(star, "transitionend", 1600);
-  for (const [, rows] of cards) rows.removeAttribute("data-card-showcase");
+  await until(star, "transitionend", CEILING + 200);
+  for (const [, { rows }] of cards) {
+    rows.removeAttribute("data-card-showcase");
+    rows.style.removeProperty("--card-trim-duration");
+  }
 }
 
 function scrollParent(element: HTMLElement) {

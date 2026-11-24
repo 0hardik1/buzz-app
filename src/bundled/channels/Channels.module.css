@@ -1109,7 +1109,7 @@ html[data-keyboard-navigation]
 }
 /* The tour's tidy trims every card slowly, as a show. */
 .cardRows[data-card-showcase]:not([data-resizing]) {
-  transition-duration: var(--duration-showcase);
+  transition-duration: var(--card-trim-duration, var(--duration-showcase));
   transition-timing-function: var(--easing-settle);
 }
 /* The grip sits in the card's bottom edge and appears on hover. */

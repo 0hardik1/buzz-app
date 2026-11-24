@@ -40,7 +40,7 @@ afterEach(() => {
 function untidyCard() {
   const rows = document.createElement("div");
   document.body.append(rows);
-  unregister = tidyShow.register("scope/card", rows);
+  unregister = tidyShow.register("scope/card", rows, 3);
 }
 
 function mount(ready = true) {

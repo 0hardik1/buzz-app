@@ -117,7 +117,7 @@ export function SidebarCardResize({
   useEffect(() => {
     const rows = list.current;
     if (!tidyKey || !rows || count <= DEFAULT_SIZE) return;
-    return tidyShow.register(tidyKey, rows);
+    return tidyShow.register(tidyKey, rows, count - DEFAULT_SIZE);
   }, [tidyKey, count]);
   // Rows the card shows now, for assistive technology.
   const [shown, setShown] = useState(0);
