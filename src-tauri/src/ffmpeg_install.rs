@@ -123,7 +123,7 @@ async fn install_with_path(path: &OsStr, require_version8: bool, os: &str) -> Re
         if let Some(major) = installed {
             return Err(format!("Buzz found FFmpeg {major}. This photo needs FFmpeg 8 or newer. Install a compatible version through your distribution, or upload a JPEG instead."));
         }
-        return Err("PackageKit could not make FFmpeg available. Install FFmpeg with your distribution’s package manager, then try again.".into());
+        return Err("Approve the installation if your system prompts you. If FFmpeg is still unavailable, install it with your distribution’s package manager and try again.".into());
     }
     if !status.success() {
         return Err("Installation didn’t finish. Check your connection and any system approval prompt, then try again.".into());

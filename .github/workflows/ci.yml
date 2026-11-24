@@ -178,12 +178,14 @@ jobs:
       # --workspace includes Tauri, unlike the default Cargo member selection.
       - name: All Rust tests and doctests
         run: ./bin/cargo test --workspace --locked
-      - name: Exercise FFmpeg recovery on the Linux host
+      - name: Exercise FFmpeg recovery with administrator approval on the Linux host
         id: ffmpeg_linux
         if: github.event_name == 'workflow_dispatch' && inputs.ffmpeg_acceptance
         run: |
           sudo apt-get install --no-install-recommends -y packagekit-tools
-          ./bin/cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
+          # Headless runners have no desktop authentication agent. Build as the runner,
+          # then run only the selected native acceptance test as administrator.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sudo -n --" ./bin/cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
       - name: Diagnose Linux FFmpeg recovery
         if: failure() && steps.ffmpeg_linux.outcome == 'failure'
         run: |
