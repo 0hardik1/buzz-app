@@ -115,7 +115,6 @@ it("keeps one provider footer across tabs and measures its changing height for t
     agentSync: () => undefined,
     addedTabs: () => [],
     memberships: () => [],
-    protectionStranded: () => false,
   } as unknown as Agents;
   render(
     <AgentDetails

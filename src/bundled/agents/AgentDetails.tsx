@@ -36,7 +36,6 @@ import type {
 import {
   AgentArchiveRetry,
   AgentDelete,
-  AgentProtectionRecovery,
   AgentRemoveHere,
   inSeveral,
 } from "../../features/agents/AgentManage";
@@ -580,7 +579,6 @@ export function AgentDetails({
                       />
                     )}
                     <AgentArchiveRetry agents={agents} agent={agent} />
-                    <AgentProtectionRecovery agents={agents} agent={agent} />
                     {inSeveral(agents, agent) && (
                       <PreferenceRow
                         title="Remove from this community"

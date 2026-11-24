@@ -2096,12 +2096,11 @@ export type Agents = {
   /** Unarchives an imported agent whose archive state was not checked, as
    * import does, keeping its key and settings. Resolves with what is left. */
   unarchive(agent: AgentKey): Promise<string | undefined>;
-  /** Whether it is protected by a plugin that isn't running, so it can't run
-   * until that plugin runs again or its protection is removed. */
-  protectionStranded(agent: AgentKey): boolean;
-  /** Removes that protection once the owner confirms in a native dialog, as
-   * its plugin can't. Resolves to whether it was removed. */
-  removeStrandedProtection(agent: AgentKey): Promise<boolean>;
+  /** Before plugin `provider` is deleted, removes the protection it gives
+   * agents and the owner's defaults once the owner confirms in a native
+   * dialog, so no agent is left bound to a missing plugin. Resolves to
+   * whether the delete may go ahead. */
+  releaseProtection(provider: string): Promise<boolean>;
   /** Whether a watch's classifier can run on this device now. */
   classifier(): ClassifierAvailability;
   /** Creates a team, or replaces the one with `id`. Members, by pubkey, must
@@ -2774,11 +2773,6 @@ export class AgentsService extends Service implements Agents {
           );
         },
       },
-    );
-    ctx.effect(() =>
-      this.protection.subscribe(() => {
-        for (const listener of this.listeners) listener();
-      }),
     );
     this.configStore = new AgentConfigStore(storage);
     this.teamsChanged();
@@ -8320,23 +8314,25 @@ export class AgentsService extends Service implements Agents {
       await this.refresh();
     });
   }
-  // Until plugin start-up ends, a protection plugin may just not have started yet.
-  protectionStranded(key: AgentKey) {
-    const provider = this.liveMember(key)?.protection?.provider;
-    return (
-      !!provider && this.pluginsStarted() && !this.protection.running(provider)
+  async releaseProtection(provider: string) {
+    const release = this.native?.releaseProtection?.bind(this.native);
+    if (!release) return true;
+    const protectedKeys = new Set(
+      this.identities
+        .filter(
+          (agent) => !agent.deleted && agent.protection?.provider === provider,
+        )
+        .map((agent) => agent.pubkey),
     );
-  }
-  async removeStrandedProtection(key: AgentKey) {
-    const identity = this.liveMember(key);
-    if (!identity || !this.protectionStranded(key)) return false;
-    const remove = this.native?.removeProtection?.bind(this.native);
-    if (!remove) throw new Error("Native agent protection is unavailable");
-    let removed = false;
-    await this.changeProtection(identity.pubkey, false, async () => {
-      removed = await remove(identity.pubkey, identity.protectionRevision ?? 0);
-    });
-    return removed;
+    const owner = this.communities.snapshot().viewer ?? null;
+    if (!(await release(provider, owner))) return false;
+    // Restart sessions that started under the removed protection.
+    for (const pubkey of protectedKeys)
+      await this.changeProtection(pubkey, false, async () => {}).catch(
+        () => {},
+      );
+    await this.refresh();
+    return true;
   }
   /** The membership of this key, unless it was deleted. */
   private liveMember(key: AgentKey) {

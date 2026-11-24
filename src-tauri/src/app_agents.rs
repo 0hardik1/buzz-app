@@ -717,26 +717,28 @@ pub(crate) async fn app_agent_set_protection(
     .await
 }
 
-/// The owner's native consent to drop protection its plugin can no longer
-/// change. The dialog names what storage holds, not what the caller sent.
-fn remove_protection_dialog(subject: &str, provider: &str) -> bool {
+/// The owner's native consent to delete a plugin that still protects agents.
+/// The dialog names what storage holds, not what the caller sent.
+fn release_protection_dialog(protected: &str, provider: &str) -> bool {
     let result = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Warning)
-        .set_title("Remove protection?")
-        .set_description(format!("{subject} protected by {provider}, which isn't running in this copy of Buzz. Removing protection lets it run without security checks, including in any other copy of Buzz on this Mac, such as a development build.\n\nTo keep it protected, install or turn on that plugin instead."))
-        .set_buttons(rfd::MessageButtons::OkCancelCustom("Remove protection".into(), "Cancel".into()))
+        .set_title("Delete this plugin and remove protection?")
+        .set_description(format!("{protected} protected by {provider}. Deleting the plugin also removes this protection, so they run without security checks, including in any other copy of Buzz on this Mac, such as a development build.\n\nTo keep them protected, cancel and keep the plugin."))
+        .set_buttons(rfd::MessageButtons::OkCancelCustom("Delete and remove protection".into(), "Cancel".into()))
         .show();
     result == rfd::MessageDialogResult::Ok
-        || result == rfd::MessageDialogResult::Custom("Remove protection".into())
+        || result == rfd::MessageDialogResult::Custom("Delete and remove protection".into())
 }
 
-/// Removes an agent's protection once the owner confirms natively, so no
-/// plugin can unprotect an agent. Resolves to whether it was removed.
+/// Before a plugin is deleted, removes the protection it gives agents and the
+/// owner's defaults, once the owner confirms natively, so no plugin can
+/// unprotect an agent and none is left bound to a missing plugin. Resolves to
+/// whether the delete may go ahead: true when nothing named the plugin.
 #[tauri::command]
-pub(crate) async fn app_agent_remove_protection(
+pub(crate) async fn app_agent_release_protection(
     state: tauri::State<'_, AppAgentHost>,
-    pubkey: String,
-    revision: u64,
+    provider: String,
+    owner: Option<String>,
 ) -> Result<bool, String> {
     let agents = state.agents.clone()?;
     let hosting = state.hosting.clone();
@@ -745,22 +747,49 @@ pub(crate) async fn app_agent_remove_protection(
         let _prompt = prompt
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(row) = agents
-            .list()?
-            .into_iter()
-            .find(|agent| agent.pubkey == pubkey && !agent.deleted)
-        else {
-            return Err("No such agent on this device".into());
+        let mut protected: Vec<AppAgent> = Vec::new();
+        for row in agents.list()? {
+            if !row.deleted
+                && row
+                    .protection
+                    .as_ref()
+                    .is_some_and(|binding| binding.provider == provider)
+                && !protected.iter().any(|agent| agent.pubkey == row.pubkey)
+            {
+                protected.push(row);
+            }
+        }
+        let defaults = match &owner {
+            Some(owner) => Some(agents.protection_defaults(owner)?).filter(|saved| {
+                saved
+                    .defaults
+                    .as_ref()
+                    .is_some_and(|binding| binding.provider == provider)
+            }),
+            None => None,
         };
-        let Some(binding) = row.protection else {
-            return Ok(false);
+        if protected.is_empty() && defaults.is_none() {
+            return Ok(true);
+        }
+        let mut names: Vec<String> = protected.iter().map(|agent| agent.name.clone()).collect();
+        if defaults.is_some() {
+            names.push("new agents".into());
+        }
+        let subject = match names.as_slice() {
+            [one] if defaults.is_none() => format!("{one} is"),
+            _ => format!("{} are", names.join(", ")),
         };
-        if !remove_protection_dialog(&format!("{} is", row.name), &binding.provider) {
+        if !release_protection_dialog(&subject, &provider) {
             return Ok(false);
         }
-        hosting.protecting(&pubkey, || {
-            agents.set_protection(&pubkey, revision, &binding.provider, None)
-        })?;
+        for agent in &protected {
+            hosting.protecting(&agent.pubkey, || {
+                agents.set_protection(&agent.pubkey, agent.protection_revision, &provider, None)
+            })?;
+        }
+        if let (Some(owner), Some(saved)) = (&owner, defaults) {
+            agents.set_protection_defaults(owner, saved.revision, &provider, None)?;
+        }
         Ok(true)
     })
     .await

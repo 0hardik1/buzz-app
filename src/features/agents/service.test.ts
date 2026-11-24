@@ -23778,30 +23778,51 @@ describe("synced teams", () => {
   });
 });
 
-it("offers to remove protection only once plugin start-up is over and its plugin isn't running", async () => {
-  const identities: AgentIdentity[] = [];
-  const f = await setup({ identities, starting: true });
-  const agent = await f.service.create({
-    type: "example/echo",
-    name: "Worker",
+describe("deleting a protection plugin", () => {
+  async function protectedAgent(provider: string) {
+    const identities: AgentIdentity[] = [];
+    const retire = vi.fn(async () => {});
+    const f = await setup({ identities, retire });
+    const agent = await f.service.create({
+      type: "example/echo",
+      name: "Worker",
+    });
+    const identity = identities[0];
+    if (!identity) throw new Error("Expected native identity");
+    identities[0] = {
+      ...identity,
+      protection: { provider, policy: {} },
+      protectionRevision: 1,
+    };
+    await f.service.refresh();
+    retire.mockClear();
+    return { f, agent, retire };
+  }
+
+  it("removes the protection it gives once the owner confirms, then restarts its agents", async () => {
+    const { f, agent, retire } = await protectedAgent("example");
+    const releaseProtection = vi.fn(
+      async (_provider: string, _owner: string | null) => true,
+    );
+    Object.assign(f.native, { releaseProtection });
+    await expect(f.service.releaseProtection("example")).resolves.toBe(true);
+    expect(releaseProtection.mock.calls[0]?.[0]).toBe("example");
+    expect(retire).toHaveBeenCalledWith(agent.key);
   });
-  const identity = identities[0];
-  if (!identity) throw new Error("Expected native identity");
-  identities[0] = {
-    ...identity,
-    protection: { provider: "example", policy: {} },
-    protectionRevision: 1,
-  };
-  await f.service.refresh();
-  // The plugin may only be starting, so it isn't stranded yet.
-  expect(f.service.protectionStranded(agent.key)).toBe(false);
-  f.settleStartup();
-  expect(f.service.protectionStranded(agent.key)).toBe(true);
-  f.plugin.agentProtection.register({
-    processProtection: { readOnlyPaths: ["/provider"], hiddenPaths: [] },
-    checkEvidence: async () => true,
+
+  it("keeps protection and stops the delete when the owner cancels", async () => {
+    const { f, retire } = await protectedAgent("example");
+    Object.assign(f.native, { releaseProtection: vi.fn(async () => false) });
+    await expect(f.service.releaseProtection("example")).resolves.toBe(false);
+    expect(retire).not.toHaveBeenCalled();
   });
-  expect(f.service.protectionStranded(agent.key)).toBe(false);
+
+  it("restarts no agent another plugin protects", async () => {
+    const { f, retire } = await protectedAgent("example");
+    Object.assign(f.native, { releaseProtection: vi.fn(async () => true) });
+    await expect(f.service.releaseProtection("other")).resolves.toBe(true);
+    expect(retire).not.toHaveBeenCalled();
+  });
 });
 
 it("revoking the runner while a protected shared tool waits cancels it before any side effect", async () => {
