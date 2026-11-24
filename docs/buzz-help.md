@@ -204,6 +204,15 @@ confirm the update to save the new source; no reinstall is needed.
 A plugin runs with the same reach as Buzz itself, with no sandbox. Install
 one only if you trust its author with your account and your computer.
 
+**Vim keys**, off by default, runs Buzz from the keyboard. There is one cursor,
+where focus is. `j`/`k`/`h`/`l`, `gg`/`G` and `Ctrl-d`/`Ctrl-u` move it
+through messages, the sidebar, menus, Settings and dialogs, and
+`Ctrl-h`/`Ctrl-l` move between panes (`Alt` on Windows and Linux). Enter
+enters a message's thread or opens a choice; `go` opens the actions under the
+cursor, each with a key; Space starts leader keys; `i` types in the message
+box and Escape leaves it. Its keys select a text field without typing; `i` or
+Enter edits it. The plugin's page in **Settings → Plugins** is its manual.
+
 ## Docs
 
 Docs is a bundled plugin for live Markdown documents shared with people and
