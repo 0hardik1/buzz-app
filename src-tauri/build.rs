@@ -142,6 +142,7 @@ fn main() {
             "relay_admin_save_attachment",
             "relay_project_git",
             "relay_project_git_cancel",
+            "relay_channel_repository",
             "relay_channel_sign",
             "relay_channel_publish",
             "relay_kit_sign",

@@ -242,6 +242,30 @@ function isOwnReadStateFilter(filter: ReadFilter, viewer: string | undefined) {
   );
 }
 
+const repositoryCommands = new WeakMap<
+  object,
+  (input: { channel: string; name: string; plugin: string }) => Promise<string>
+>();
+
+/** Bind a plugin's unverified loader label to this concrete community session. */
+export function pluginRelaySession(
+  session: RelaySession,
+  plugin: string,
+): RelaySession {
+  const command = repositoryCommands.get(session);
+  return Object.freeze({
+    ...session,
+    channelRepository: Object.freeze({
+      available: !!command,
+      create(input: { channel: string; name: string }) {
+        if (!command)
+          throw new Error("Channel repository creation requires desktop.");
+        return command({ channel: input.channel, name: input.name, plugin });
+      },
+    }),
+  });
+}
+
 /** Compose once per relay/viewer. Plugins get one interface; the host owns disposal. */
 export function createRelaySession(
   transport: ReadTransport | null,
@@ -2797,6 +2821,14 @@ export function createRelaySession(
   }
   const session = Object.freeze({
     lifetimeSignal: lifetime.signal,
+    channelRepository: Object.freeze({
+      available: false as boolean,
+      create(_input: { channel: string; name: string }): Promise<string> {
+        return Promise.reject(
+          new Error("Channel repository creation requires a plugin context."),
+        );
+      },
+    }),
     artifactIncremental: transport?.artifactIncremental,
     supportsMigrationWrites: true as const,
     memberAdditions,
@@ -4416,6 +4448,13 @@ export function createRelaySession(
   updateInterests();
   refreshChannelActivity();
 
+  const repositoryCommand = transport?.channelRepository;
+  if (repositoryCommand)
+    repositoryCommands.set(session, (input) => {
+      if (closed)
+        return Promise.reject(new Error("This community session has closed."));
+      return repositoryCommand(input);
+    });
   return {
     session,
     async restore() {

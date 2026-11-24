@@ -3,7 +3,8 @@ import type { LocalAgentSource } from "../agents/local-activity";
 import type { LocalAgents } from "../agents/local";
 import type { IdentityNames } from "../identity-names/service";
 import { createPresenceActivity } from "../presence/activity";
-import { Context } from "@deepseek-ai/cordis";
+import { Context, Service } from "@deepseek-ai/cordis";
+import { pluginRelaySession } from "../relay/session";
 import {
   provideRelay,
   type RelayData,
@@ -285,7 +286,65 @@ export function createCommunities(
     selected: () =>
       state.selected ? communityDestination(state.selected).url : undefined,
   };
-  ctx.provide("relay", relay);
+  class ScopedRelay extends Service implements RelayData {
+    private readonly snapshots = new WeakMap<
+      object,
+      WeakMap<object, RelaySnapshot>
+    >();
+    private readonly sessions = new WeakMap<
+      object,
+      WeakMap<object, RelaySnapshot["session"]>
+    >();
+    constructor(context: Context) {
+      super(context, "relay");
+    }
+    get snapshot() {
+      const owner = this.ctx.pluginOwner;
+      if (!owner) return relay.snapshot;
+      let snapshots = this.snapshots.get(owner);
+      if (!snapshots) {
+        snapshots = new WeakMap();
+        this.snapshots.set(owner, snapshots);
+      }
+      let sessions = this.sessions.get(owner);
+      if (!sessions) {
+        sessions = new WeakMap();
+        this.sessions.set(owner, sessions);
+      }
+      return () => {
+        const original = relay.snapshot();
+        const cached = snapshots.get(original);
+        if (cached) return cached;
+        let session = sessions.get(original.session);
+        if (!session) {
+          session = pluginRelaySession(original.session, owner.id);
+          sessions.set(original.session, session);
+        }
+        const wrapped = Object.freeze({ ...original, session });
+        snapshots.set(original, wrapped);
+        return wrapped;
+      };
+    }
+    subscribe(fn: () => void) {
+      return relay.subscribe(fn);
+    }
+    retry() {
+      relay.retry();
+    }
+    tryAgain() {
+      relay.tryAgain();
+    }
+    disconnect() {
+      relay.disconnect();
+    }
+    clearCache() {
+      return relay.clearCache();
+    }
+    selected() {
+      return relay.selected?.();
+    }
+  }
+  new ScopedRelay(ctx);
   const identity =
     identityReady ??
     (live

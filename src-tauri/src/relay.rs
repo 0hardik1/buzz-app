@@ -23,7 +23,9 @@ use tokio::sync::oneshot;
 use url::Url;
 
 mod catalog;
+mod channel_repository;
 mod channel_writes;
+pub(crate) use channel_repository::relay_channel_repository;
 mod kit;
 pub(crate) use channel_writes::{
     relay_channel_publish, relay_channel_sign, relay_direct_message, relay_kit_decode,
@@ -1170,6 +1172,7 @@ async fn send(
             body,
             authenticated,
             response_limit,
+            None,
         )
         .await
     }
@@ -1261,6 +1264,7 @@ async fn send_authorized(
     body: Option<String>,
     authenticated: bool,
     response_limit: usize,
+    expected_viewer: Option<&str>,
 ) -> Result<RelayResponse> {
     let mut request = client()?.request(
         reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| "Invalid relay method")?,
@@ -1291,6 +1295,9 @@ async fn send_authorized(
                 .concat(),
             })
             .await?;
+        if expected_viewer.is_some_and(|viewer| auth["pubkey"] != viewer) {
+            return Err("Your identity changed; try again.".into());
+        }
         request = request
             .header(
                 "Authorization",

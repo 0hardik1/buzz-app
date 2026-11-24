@@ -199,6 +199,9 @@ For a Git-installed plugin, an agent's update request or a pinned install link
 can switch the tracked branch even when the code is unchanged. Review and
 confirm the update to save the new source; no reinstall is needed.
 
+A desktop plugin can ask to create a channel repository. A channel owner or
+admin must confirm the repository and its fixed branch protections.
+
 A plugin runs with the same reach as Buzz itself, with no sandbox. Install
 one only if you trust its author with your account and your computer.
 

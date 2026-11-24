@@ -122,6 +122,11 @@ export interface ReadTransport {
   ) => () => void;
   readonly artifactIncremental?: ArtifactIncrementalReader;
   readonly projectGit?: RepoGit;
+  readonly channelRepository?: (input: {
+    channel: string;
+    name: string;
+    plugin: string;
+  }) => Promise<string>;
   readonly readAgentMemories?: MemoryReader;
   /** Session-scoped owner proof, not an arbitrary signing capability. */
   readonly authorizeAgentLog?: (

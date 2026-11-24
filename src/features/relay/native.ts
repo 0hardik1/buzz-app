@@ -608,6 +608,21 @@ export async function connectNativeTransport(
       signal.throwIfAborted();
       return response;
     }),
+    channelRepository: async ({ channel, name, plugin }) => {
+      try {
+        return await invoke<string>("relay_channel_repository", {
+          request: {
+            community: origin,
+            viewer: transport.viewer,
+            channel,
+            name,
+            plugin,
+          },
+        });
+      } catch (error) {
+        throw typeof error === "string" ? new Error(error) : error;
+      }
+    },
     projectGit: repoGitHost(async (read, signal) => {
       const response = await admitSignedRequest(
         origin,

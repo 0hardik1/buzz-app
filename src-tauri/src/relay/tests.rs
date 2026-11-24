@@ -1251,6 +1251,10 @@ fn native_write_commands_reach_handlers_through_production_ipc() {
             "relay_direct_message",
             serde_json::json!({"community":"invalid","pubkeys":[]}),
         ),
+        (
+            "relay_channel_repository",
+            serde_json::json!({"request":{"community":"invalid","viewer":"x","channel":"x","name":"x","plugin":"x"}}),
+        ),
     ];
     for (command, body) in requests {
         let result = get_ipc_response(
@@ -5213,4 +5217,34 @@ fn pin_commands_name_one_channel_and_one_message() {
     ] {
         assert!(validate_event("https://relay.test", &pin(tags)).is_err());
     }
+}
+
+#[test]
+fn repository_request_constructs_only_fixed_protections() {
+    let event =
+        channel_repository::announcement("11111111-1111-4111-8111-111111111111", "shared", 123);
+    assert_eq!(event.kind, 30617);
+    assert!(validate_event("https://relay.test", &event).is_err());
+    assert_eq!(event.content, "");
+    assert_eq!(
+        event.tags,
+        vec![
+            vec!["d", "shared"],
+            vec!["name", "shared"],
+            vec!["buzz-channel", "11111111-1111-4111-8111-111111111111"],
+            vec![
+                "buzz-protect",
+                "refs/heads/**",
+                "no-force-push",
+                "no-delete"
+            ],
+            vec![
+                "buzz-protect",
+                "refs/heads/main",
+                "push:owner",
+                "no-force-push",
+                "no-delete"
+            ],
+        ]
+    );
 }

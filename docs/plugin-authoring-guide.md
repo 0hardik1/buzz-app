@@ -107,6 +107,20 @@ its members, the host keeps the source on individual additions for the rest.
 Both calls report relay migration throttling with an error that starts with
 `rate-limited:`. Pause the import before issuing another write when you see it.
 
+## Channel repositories
+
+On desktop, a plugin can check `session.channelRepository.available` and call
+`await session.channelRepository.create({ channel, name })` on the selected
+community session. The person must be a channel owner or admin and approve the
+native confirmation. The app builds the announcement and fixes its protections:
+no force-push or branch deletion, and the main branch requires the relay's Owner
+role. The repository creator is also treated as Owner by the relay. The plugin
+cannot supply tags or protection rules. The displayed plugin label is provided by
+the loader but is unverified; installed plugins run unsandboxed. The call returns
+the announcement ID only after the relay announcement and Git repository are
+confirmed; an error after announcement can mean the outcome is unconfirmed.
+Browser hosts do not offer this capability.
+
 ## Host access (`manifest.host`)
 
 Declare in `manifest.json` the commands, processes, network origins and files your plugin uses, then add `"host"` to `inject`. The host's own APIs only do what's declared, so this is how they get wired up. It isn't a security boundary: plugin code runs in the app and can reach past it.

@@ -2405,3 +2405,28 @@ it("a refused unsigned GET reports no community refusal", async () => {
   expect(refusals).toEqual([]);
   stop?.();
 });
+
+it("binds a repository request to the transport's community and viewer", async () => {
+  const transport = await connectNativeTransport(community);
+  assert.exists(transport.channelRepository);
+  vi.mocked(invoke).mockRejectedValueOnce("Repository creation cancelled.");
+  await expect(
+    transport.channelRepository({
+      channel: "channel",
+      name: "docs",
+      plugin: "example.plugin",
+    }),
+  ).rejects.toThrow("Repository creation cancelled.");
+  expect(vi.mocked(invoke).mock.lastCall).toEqual([
+    "relay_channel_repository",
+    {
+      request: {
+        community,
+        viewer: viewer.pubkey,
+        channel: "channel",
+        name: "docs",
+        plugin: "example.plugin",
+      },
+    },
+  ]);
+});

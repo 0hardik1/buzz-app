@@ -1408,3 +1408,57 @@ it("reloads every open community in place, as new sessions", async () => {
     "/api/relay/secondary/session",
   ]);
 });
+
+it("binds repository requests to each plugin scope and retains snapshot identities", async () => {
+  setup();
+  const ctx = new Context();
+  roots.push(ctx);
+  const create = vi.fn(
+    async (_input: { channel: string; name: string; plugin: string }) => {
+      throw new Error("Cancelled");
+    },
+  );
+  const client = createCommunities(
+    ctx,
+    false,
+    undefined,
+    "",
+    undefined,
+    Promise.resolve(viewer),
+    async () => ({
+      viewer,
+      relayAuthor: "b".repeat(64),
+      media: () => undefined,
+      query: async () => [],
+      channelRepository: create,
+    }),
+  );
+  await flush();
+  client.joined(
+    { id: "https://relay.test", name: "Relay" },
+    { name: "Person", picture: "" },
+  );
+  await flush();
+  const a = ctx.extend({ pluginOwner: { id: "one.plugin", revision: "1" } });
+  const b = ctx.extend({ pluginOwner: { id: "two.plugin", revision: "1" } });
+  const first = a.relay.snapshot();
+  expect(a.relay.snapshot()).toBe(first);
+  const detached = a.relay.snapshot;
+  expect(detached()).toBe(first);
+  expect(b.relay.snapshot().session).not.toBe(first.session);
+  await expect(
+    first.session.channelRepository.create({
+      channel: "channel",
+      name: "docs",
+    }),
+  ).rejects.toThrow("Cancelled");
+  await expect(
+    b.relay
+      .snapshot()
+      .session.channelRepository.create({ channel: "channel", name: "docs" }),
+  ).rejects.toThrow("Cancelled");
+  expect(create.mock.calls.map((call) => call[0])).toEqual([
+    { channel: "channel", name: "docs", plugin: "one.plugin" },
+    { channel: "channel", name: "docs", plugin: "two.plugin" },
+  ]);
+});
