@@ -536,8 +536,6 @@ function setup(
     subscribeSteps: () => () => {},
     protectionStranded: () => false,
     removeStrandedProtection: async () => false,
-    strandedDefaults: async () => undefined,
-    removeStrandedDefaults: async () => false,
     isReady: () => true,
     whenReady: async () => {},
     switchable: () => false,

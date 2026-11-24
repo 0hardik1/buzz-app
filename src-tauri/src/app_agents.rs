@@ -766,31 +766,6 @@ pub(crate) async fn app_agent_remove_protection(
     .await
 }
 
-/// Clears the owner's protection defaults once the owner confirms natively.
-#[tauri::command]
-pub(crate) async fn app_agent_remove_protection_defaults(
-    host: tauri::State<'_, AppAgentHost>,
-    owner: String,
-    revision: u64,
-) -> Result<bool, String> {
-    let agents = host.agents()?;
-    let prompt = host.protection_upgrade.clone();
-    blocking(move || {
-        let _prompt = prompt
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(binding) = agents.protection_defaults(&owner)?.defaults else {
-            return Ok(false);
-        };
-        if !remove_protection_dialog("New agents are", &binding.provider) {
-            return Ok(false);
-        }
-        agents.set_protection_defaults(&owner, revision, &binding.provider, None)?;
-        Ok(true)
-    })
-    .await
-}
-
 /// Identities earlier agent systems saved on this machine, as Agents could take
 /// them over; the caller leaves out its own.
 #[tauri::command]

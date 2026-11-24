@@ -2102,13 +2102,6 @@ export type Agents = {
   /** Removes that protection once the owner confirms in a native dialog, as
    * its plugin can't. Resolves to whether it was removed. */
   removeStrandedProtection(agent: AgentKey): Promise<boolean>;
-  /** Present while new agents' protection defaults name a plugin that isn't
-   * running, so new agents can't run either. */
-  strandedDefaults(): Promise<
-    Readonly<{ owner: string; revision: number }> | undefined
-  >;
-  /** Clears those defaults once the owner confirms in a native dialog. */
-  removeStrandedDefaults(): Promise<boolean>;
   /** Whether a watch's classifier can run on this device now. */
   classifier(): ClassifierAvailability;
   /** Creates a team, or replaces the one with `id`. Members, by pubkey, must
@@ -8344,24 +8337,6 @@ export class AgentsService extends Service implements Agents {
       removed = await remove(identity.pubkey, identity.protectionRevision ?? 0);
     });
     return removed;
-  }
-  async strandedDefaults() {
-    const owner = this.communities.snapshot().viewer;
-    if (!owner || !this.native?.protectionDefaults) return undefined;
-    const saved = await this.native.protectionDefaults(owner);
-    const provider = saved.defaults?.provider;
-    return provider &&
-      this.pluginsStarted() &&
-      !this.protection.running(provider)
-      ? { owner, revision: saved.revision }
-      : undefined;
-  }
-  async removeStrandedDefaults() {
-    const stranded = await this.strandedDefaults();
-    const remove = this.native?.removeProtectionDefaults?.bind(this.native);
-    if (!stranded) return false;
-    if (!remove) throw new Error("Native agent protection is unavailable");
-    return remove(stranded.owner, stranded.revision);
   }
   /** The membership of this key, unless it was deleted. */
   private liveMember(key: AgentKey) {
