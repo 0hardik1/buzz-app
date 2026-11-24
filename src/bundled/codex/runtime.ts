@@ -283,6 +283,7 @@ type Active = {
   steering: Promise<void>;
   reply: Request;
   finished: boolean;
+  terminalStatus?: string;
   /** The owner stopped it, so its interruption is not reported. */
   stopped?: boolean;
   /** The one interrupt every Stop of this turn shares. */
@@ -2219,7 +2220,10 @@ export class CodexRuntime {
       if (
         leaving &&
         active &&
-        !active.finished &&
+        (!active.finished ||
+          (!active.stopped &&
+            active.terminalStatus === "interrupted" &&
+            Object.hasOwn(active.reply, "adopted"))) &&
         active.reply.conversation.channelId === channelId &&
         active.reply.replyRoot === root
       ) {
@@ -4845,7 +4849,12 @@ export class CodexRuntime {
         : followed.completed);
       await active.steering;
       // Closing the seat after Codex completed does not undo its spoken reply.
-      if (adopted === undefined || !active.finished) signal.throwIfAborted();
+      if (
+        adopted === undefined ||
+        !active.finished ||
+        active.resumeSpeechInText
+      )
+        signal.throwIfAborted();
       if (status === "interrupted" && active.stopped) {
         const pending = active.requests.filter(
           (taken): taken is TextRequest =>
@@ -4896,7 +4905,7 @@ export class CodexRuntime {
         speechEvent &&
         threadToResume &&
         !entry.abort.signal.aborted &&
-        !active.finished;
+        (!active.finished || active.terminalStatus === "interrupted");
       if (!resumeSpeech)
         for (const taken of active.requests) taken.failActivity(message(error));
       const ended = active.finished;
@@ -5036,7 +5045,12 @@ type Item = {
 function follow(
   rpc: AppServer,
   signal: AbortSignal | undefined,
-  turn: { threadId?: string; turnId?: string; finished: boolean },
+  turn: {
+    threadId?: string;
+    turnId?: string;
+    finished: boolean;
+    terminalStatus?: string;
+  },
   onItem?: (method: string, item: Item) => void,
 ) {
   let finish!: (status: string) => void;
@@ -5071,6 +5085,7 @@ function follow(
     if (wire.method === "turn/started" && p.turn) turn.turnId = p.turn.id;
     if (p.item && wire.method) onItem?.(wire.method, p.item);
     if (terminalTurn) {
+      turn.terminalStatus = terminalTurn.status;
       turn.finished = true;
       if (terminalTurn.status === "failed")
         fail(new Error(terminalTurn.error?.message ?? "Codex turn failed"));

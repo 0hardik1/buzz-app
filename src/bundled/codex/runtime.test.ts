@@ -14350,48 +14350,63 @@ it("switches active Solo work to voice and back to text on the same Codex thread
   }
 });
 
-it("resumes a delegated spoken turn as a normal text turn after leaving", async () => {
-  vi.stubGlobal("RTCPeerConnection", class {});
-  const f = fixture();
-  f.soloChannels.add("channel");
-  const d = f.delivery("spoken work");
-  const { config } = scoped(d, "channel");
-  const signal = new AbortController();
-  try {
-    const connected = await join(f, d, {
-      config,
-      conversation: { channelId: "channel" },
-      signal: signal.signal,
-      resumeOnClose: () => true,
-    });
-    f.emit({
-      method: "turn/started",
-      params: { threadId: "thread-1", turn: { id: "speech-1" } },
-    });
-    await vi.waitFor(() =>
-      expect(
-        f.runtime
-          .sessions(d.agent.key)
-          .some((view) => view.status === "Working"),
-      ).toBe(true),
-    );
-    signal.abort();
-    await connected.close();
+it.each([false, true])(
+  "resumes a delegated spoken turn after leaving (Codex interrupted first: %s)",
+  async (interruptedFirst) => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const f = fixture();
+    f.soloChannels.add("channel");
+    const d = f.delivery("spoken work");
+    const { config } = scoped(d, "channel");
+    const signal = new AbortController();
+    try {
+      const connected = await join(f, d, {
+        config,
+        conversation: { channelId: "channel" },
+        signal: signal.signal,
+        resumeOnClose: () => true,
+      });
+      f.emit({
+        method: "turn/started",
+        params: { threadId: "thread-1", turn: { id: "speech-1" } },
+      });
+      await vi.waitFor(() =>
+        expect(
+          f.runtime
+            .sessions(d.agent.key)
+            .some((view) => view.status === "Working"),
+        ).toBe(true),
+      );
+      if (interruptedFirst)
+        f.emit({
+          method: "turn/completed",
+          params: {
+            threadId: "thread-1",
+            turn: { id: "speech-1", status: "interrupted" },
+          },
+        });
+      signal.abort();
+      await connected.close();
 
-    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    expect(f.starts()[0]?.params).toMatchObject({ threadId: "thread-1" });
-    expect(JSON.stringify(f.starts()[0]?.params)).toContain(
-      "interrupted when the Huddle ended",
-    );
-    expect(
-      f.sent.find((wire) => wire.method === "turn/interrupt")?.params,
-    ).toEqual({ threadId: "thread-1", turnId: "speech-1" });
-    await f.complete(0);
-  } finally {
-    signal.abort();
-    f.runtime.dispose();
-  }
-});
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(f.starts()[0]?.params).toMatchObject({ threadId: "thread-1" });
+      expect(JSON.stringify(f.starts()[0]?.params)).toContain(
+        "interrupted when the Huddle ended",
+      );
+      expect(
+        f.sent.find((wire) => wire.method === "turn/interrupt")?.params,
+      ).toEqual(
+        interruptedFirst
+          ? undefined
+          : { threadId: "thread-1", turnId: "speech-1" },
+      );
+      await f.complete(0);
+    } finally {
+      signal.abort();
+      f.runtime.dispose();
+    }
+  },
+);
 
 it("publishes a completed typed Huddle answer once without injecting speech", async () => {
   vi.stubGlobal("RTCPeerConnection", class {});
