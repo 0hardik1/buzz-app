@@ -1,6 +1,6 @@
 import { test, expect } from "./fixture.mjs";
 import { hoverMessage } from "./message-actions.mjs";
-import { clickRow, open, settle } from "./timeline.mjs";
+import { activate, clickRow, open, settle } from "./timeline.mjs";
 
 // Browser-only: the inline thread and details are dialogs on the conversation
 // visit. Only real history events, layout around a composer and the composer's
@@ -447,4 +447,194 @@ test.describe("Sending", () => {
     await page.goForward();
     await expect(detailsSheet(page)).toHaveCount(0);
   });
+});
+
+const presentedTest = test.extend({
+  pluginFixtures: true,
+  threadPlacement: "inline",
+  enabledPlugins: ["fixture.thread-arrangement"],
+});
+
+presentedTest.describe("Presented focus", () => {
+  const threadHistory = (scope) =>
+    scope.getByRole("region", { name: "Thread messages", exact: true });
+  const arrangementStatus = (scope) =>
+    scope.getByRole("status", { name: "Arrangement status", exact: true });
+
+  presentedTest(
+    "deleting a focused presented reply in an inline thread keeps the surviving focused row in view",
+    async ({ page, app }) => {
+      const [root] = roots(app);
+      const replies = [];
+      for (let index = 0; index < 80; index++) {
+        const content =
+          index === 79
+            ? `Jump to <buzz://message?channel=alpha&id=${replies[40].id}&thread=${root.id}>`
+            : `Presented reply ${index}: ${"Synthetic history line. ".repeat(3)}`;
+        replies.push(
+          app.append(
+            "primary",
+            "alpha",
+            content,
+            false,
+            true,
+            root.id,
+            undefined,
+            [],
+            root.created_at + index + 10,
+          ),
+        );
+      }
+      const target = replies[40];
+      const survivor = replies[41];
+      const linkReply = replies[79];
+      app.append("primary", "alpha", "Channel tail", false, true);
+
+      await open(page, app);
+      await clickRow(page, viewThread(page, root));
+      await expect(sheet(page)).toBeVisible();
+      await sheet(page)
+        .getByRole("button", { name: "Oldest first", exact: true })
+        .click();
+      await expect(arrangementStatus(sheet(page))).toHaveText(
+        /^Arranged: \d+$/,
+      );
+
+      const history = threadHistory(sheet(page));
+      const linkRow = history.locator(`[data-message-id="${linkReply.id}"]`);
+      await linkRow.scrollIntoViewIfNeeded();
+      await page.evaluate(() => {
+        let release;
+        const gate = new Promise((resolve) => {
+          release = resolve;
+        });
+        let armed = true;
+        window.__releaseRemembered = () => release();
+        window.fixtureArrangementBeforePresent = () => {
+          if (!armed) return Promise.resolve();
+          armed = false;
+          return gate;
+        };
+      });
+      await activate(linkRow.getByRole("link"));
+      await expect(sheet(page)).toBeVisible();
+      const reopenedHistory = threadHistory(sheet(page));
+      const targetRow = reopenedHistory.locator(
+        `[data-message-id="${target.id}"]`,
+      );
+      await expect(
+        targetRow.locator(
+          '[data-highlight-surface][class*="messageHighlight"]',
+        ),
+      ).toBeVisible();
+      await expect(targetRow).toBeFocused();
+      await page.evaluate(() => window.__releaseRemembered?.());
+      await expect(arrangementStatus(sheet(page))).toHaveText(
+        /^Arranged: \d+$/,
+      );
+      await settle(page, reopenedHistory);
+
+      app.deleteTarget(target);
+      await expect(targetRow).toHaveCount(0);
+      const survivorRow = reopenedHistory.locator(
+        `[data-message-id="${survivor.id}"]`,
+      );
+      await expect(survivorRow.locator(":scope > [data-layout]")).toBeFocused();
+      await settle(page, reopenedHistory);
+
+      const intersects = await reopenedHistory.evaluate((section, id) => {
+        const row = section.querySelector(`[data-message-id="${id}"]`);
+        const s = section.getBoundingClientRect();
+        const r = row?.getBoundingClientRect();
+        return !!r && r.bottom > s.top && r.top < s.bottom;
+      }, survivor.id);
+      expect(intersects).toBe(true);
+      await expect(survivorRow).toBeInViewport();
+    },
+  );
+
+  presentedTest(
+    "following a link to a reply hidden by a remembered presentation keeps focus on the linked reply after withdrawal",
+    async ({ page, app }) => {
+      const [root] = roots(app);
+      const replies = Array.from({ length: 80 }, (_, index) =>
+        app.append(
+          "primary",
+          "alpha",
+          `Filtered reply ${index}`,
+          false,
+          true,
+          root.id,
+          undefined,
+          [],
+          root.created_at + index + 10,
+        ),
+      );
+      const target = replies[2];
+      const linkMessage = app.append(
+        "primary",
+        "alpha",
+        `Jump to <buzz://message?channel=alpha&id=${target.id}&thread=${root.id}>`,
+        false,
+        true,
+      );
+      await open(page, app);
+      await clickRow(page, viewThread(page, root));
+      await expect(sheet(page)).toBeVisible();
+      await sheet(page)
+        .getByRole("button", { name: "Filter out reply 2", exact: true })
+        .click();
+      await expect(arrangementStatus(sheet(page))).toHaveText(
+        /^Arranged: \d+$/,
+      );
+      await expect(
+        threadHistory(sheet(page)).locator(`[data-message-id="${target.id}"]`),
+      ).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(sheet(page)).toHaveCount(0);
+
+      await page.evaluate((targetId) => {
+        let release;
+        const gate = new Promise((resolve) => {
+          release = resolve;
+        });
+        let armed = true;
+        window.fixtureArrangementBeforePresent = () => {
+          if (!armed) return Promise.resolve();
+          armed = false;
+          return gate;
+        };
+        const onFocusIn = (event) => {
+          const node = event.target instanceof Element ? event.target : null;
+          const row = node?.closest?.("[data-message-id]");
+          if (row?.getAttribute("data-message-id") === targetId) {
+            document.removeEventListener("focusin", onFocusIn, true);
+            release();
+          }
+        };
+        document.addEventListener("focusin", onFocusIn, true);
+      }, target.id);
+
+      await activate(
+        page
+          .locator(
+            `[data-channel-timeline] [data-message-id="${linkMessage.id}"]`,
+          )
+          .getByRole("link"),
+      );
+      await expect(sheet(page)).toBeVisible();
+      const history = threadHistory(sheet(page));
+      const targetRow = history.locator(`[data-message-id="${target.id}"]`);
+      await expect(arrangementStatus(sheet(page))).toHaveText(
+        "Showing the linked reply in Buzz order",
+      );
+      await expect(
+        targetRow.locator(
+          '[data-highlight-surface][class*="messageHighlight"]',
+        ),
+      ).toBeVisible();
+      await expect(targetRow).toBeInViewport();
+      await expect(targetRow).toBeFocused();
+    },
+  );
 });

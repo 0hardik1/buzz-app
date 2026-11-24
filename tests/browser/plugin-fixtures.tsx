@@ -3,13 +3,24 @@ import { soloRegionFixture } from "./solo-region-fixture";
 import { companionPlugins } from "./companion-fixture";
 import * as shortcutCounter from "../../examples/plugins/shortcut-counter/plugin.js";
 import shortcutManifest from "../../examples/plugins/shortcut-counter/manifest.json";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { flushSync } from "react-dom";
 import type { BundledPlugin } from "../../src/plugins/manager";
 import type { Navigation } from "../../src/features/navigation/controller";
 import type { PageProps } from "../../src/features/pages/service";
 import type { PageNavigation } from "../../src/features/navigation/service";
-import type { PageTabTarget } from "../../src/features/conversation/contracts";
+import type {
+  ComposerAccessoryProps,
+  PageTabTarget,
+} from "../../src/features/conversation/contracts";
+import type { RelayEvent } from "../../src/features/relay/events";
 import type { RelayData } from "../../src/features/relay/service";
 import { PanelSubview } from "../../src/features/panels/PanelSubview";
 import { FolderOpenIcon } from "../../src/shared/design-system/icons";
@@ -138,7 +149,214 @@ const fill = (background: string, zIndex?: number) => () => (
   <div style={{ position: "absolute", inset: 0, background, zIndex }} />
 );
 
+const threadArrangementMemory = new Map<
+  string,
+  { mode: "oldest" | "exclude"; excludeText?: string; topId?: string }
+>();
+
+function firstVisibleReplyId(bar: HTMLDivElement | null) {
+  const surface = bar?.closest(
+    "[data-details-sheet-surface], [data-reading-surface]",
+  );
+  const scroller = surface?.querySelector<HTMLElement>(
+    '[aria-label="Thread messages"]',
+  );
+  if (!scroller) return undefined;
+  const top = scroller.getBoundingClientRect().top;
+  const row = [
+    ...scroller.querySelectorAll<HTMLElement>("ol [data-message-id]"),
+  ].find((node) => node.getBoundingClientRect().bottom > top);
+  return row?.dataset.messageId;
+}
+
+function ThreadArrangementBar(props: ComposerAccessoryProps) {
+  const { channelId, threadRootId, session, present, presentation } = props;
+  const key = `${channelId}:${threadRootId ?? ""}`;
+  const [status, setStatus] = useState("");
+  const barRef = useRef<HTMLDivElement>(null);
+  const activeMode = useRef<
+    { mode: "oldest" | "exclude"; excludeText?: string } | undefined
+  >(undefined);
+  const eventsRef = useRef<RelayEvent[]>([]);
+  const lastTopId = useRef<string | undefined>(undefined);
+  const wasPresentation = useRef(presentation);
+  const presentRef = useRef(present);
+  presentRef.current = present;
+
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    const surface = bar?.closest(
+      "[data-details-sheet-surface], [data-reading-surface]",
+    );
+    const scroller = surface?.querySelector<HTMLElement>(
+      '[aria-label="Thread messages"]',
+    );
+    if (!scroller) return;
+    const onScroll = () => {
+      const id = firstVisibleReplyId(bar);
+      if (id) lastTopId.current = id;
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      const id = firstVisibleReplyId(bar);
+      if (id) lastTopId.current = id;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const previous = wasPresentation.current;
+    wasPresentation.current = presentation;
+    if (previous === "shown" && presentation === "none") {
+      activeMode.current = undefined;
+      threadArrangementMemory.delete(key);
+      setStatus("Showing the linked reply in Buzz order");
+    }
+  }, [key, presentation]);
+
+  const applyRows = useCallback(
+    (
+      rows: RelayEvent[],
+      choice: { mode: "oldest" | "exclude"; excludeText?: string },
+      place: "start" | "keep" | { id: string },
+    ) => {
+      const shown =
+        choice.mode === "exclude" && choice.excludeText
+          ? rows.filter((event) => event.content !== choice.excludeText)
+          : rows;
+      const result = presentRef.current?.({
+        ids: shown.map((event) => event.id),
+        events: shown,
+        complete: true,
+        place,
+      });
+      if (result === "shown") setStatus(`Arranged: ${shown.length}`);
+    },
+    [],
+  );
+
+  const scanAndPresent = useCallback(
+    async (
+      choice: { mode: "oldest" | "exclude"; excludeText?: string },
+      place: "start" | "keep" | { id: string },
+    ) => {
+      if (!threadRootId || !session.snapshotRead) return;
+      activeMode.current = choice;
+      threadArrangementMemory.set(key, choice);
+      const raw = await session.snapshotRead(
+        [
+          {
+            "#h": [channelId],
+            "#e": [threadRootId],
+            kinds: [9],
+            thread_window: true,
+            limit: 200,
+          },
+        ],
+        { priority: "background" },
+      );
+      const sorted = raw
+        .filter((event) => event.kind === 9 && event.id !== threadRootId)
+        .toSorted(
+          (a, b) =>
+            a.created_at - b.created_at ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        );
+      eventsRef.current = sorted;
+      const gate = (
+        window as { fixtureArrangementBeforePresent?: () => Promise<void> }
+      ).fixtureArrangementBeforePresent;
+      if (gate) await gate();
+      if (activeMode.current !== choice) return;
+      applyRows(sorted, choice, place);
+    },
+    [applyRows, channelId, key, session, threadRootId],
+  );
+
+  useEffect(() => {
+    if (!threadRootId || !present) return;
+    const saved = threadArrangementMemory.get(key);
+    if (saved)
+      void scanAndPresent(
+        { mode: saved.mode, excludeText: saved.excludeText },
+        saved.topId ? { id: saved.topId } : "start",
+      );
+    return () => {
+      const choice = activeMode.current;
+      if (choice && threadArrangementMemory.has(key))
+        threadArrangementMemory.set(key, {
+          ...choice,
+          topId: lastTopId.current,
+        });
+    };
+  }, [key, present, scanAndPresent, threadRootId]);
+
+  useEffect(() => {
+    if (!threadRootId) return;
+    return session.subscribeLive(({ events }) => {
+      const choice = activeMode.current;
+      if (!choice) return;
+      const deleted = new Set<string>();
+      for (const event of events) {
+        if (event.kind !== 5) continue;
+        for (const [name, target] of event.tags)
+          if (name === "e" && target) deleted.add(target);
+      }
+      if (!deleted.size) return;
+      const next = eventsRef.current.filter((event) => !deleted.has(event.id));
+      if (next.length === eventsRef.current.length) return;
+      eventsRef.current = next;
+      applyRows(next, choice, "keep");
+    });
+  }, [applyRows, session, threadRootId]);
+
+  if (!threadRootId || !present) return null;
+  return (
+    <div ref={barRef}>
+      <button
+        type="button"
+        onClick={() => void scanAndPresent({ mode: "oldest" }, "start")}
+      >
+        Oldest first
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void scanAndPresent(
+            { mode: "exclude", excludeText: "Filtered reply 2" },
+            "start",
+          )
+        }
+      >
+        Filter out reply 2
+      </button>
+      <span role="status" aria-label="Arrangement status">
+        {status}
+      </span>
+    </div>
+  );
+}
+
 export const fixturePlugins: readonly BundledPlugin[] = [
+  {
+    manifest: {
+      id: "fixture.thread-arrangement",
+      name: "Thread arrangement fixture",
+      apiVersion: 1,
+    },
+    enabledByDefault: false,
+    module: {
+      inject: ["conversation"],
+      apply(ctx) {
+        ctx.conversation.registerAccessory({
+          id: "arrange",
+          title: "Thread arrangement",
+          placement: "reader",
+          component: ThreadArrangementBar,
+        });
+      },
+    },
+  },
   soloRegionFixture,
   {
     manifest: {

@@ -921,3 +921,174 @@ it("transfers focus when removing a collapsed reply branch or its nested replies
   fireEvent.keyDown(scroller(), { key: "ArrowDown" });
   expect(document.activeElement).toBe(rowBox(d));
 });
+
+it("scrolls only the thread scroller just enough when focus recovers to an offscreen row, leaving visible survivors in place", () => {
+  vi.useFakeTimers();
+  const rowBox = (event: EventData) =>
+    document.querySelector<HTMLElement>(
+      `[data-message-id="${event.id}"] > [data-layout]`,
+    );
+  const extra = Array.from({ length: 5 }, (_, index) =>
+    replyEvent(`e${index}`, T + 20 + index),
+  );
+  const all = [a, b, c, d, ...extra];
+  const h = mount({ replies: all });
+  h.present({ ids: all.map((row) => row.id), events: [root, ...all] });
+
+  const focusA = rowBox(a) as HTMLElement;
+  focusA.tabIndex = -1;
+  focusA.focus();
+  scrolled = 0;
+  act(() => {
+    h.receive(
+      [
+        eventDto(
+          signed(other, {
+            kind: 5,
+            content: "",
+            created_at: T + 60,
+            tags: [
+              ["h", "c"],
+              ["e", a.id],
+            ],
+          }),
+        ),
+      ],
+      { phase: "live", channelId: "c" },
+    );
+  });
+  focusA.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+  expect(document.activeElement).toBe(rowBox(b));
+  expect(scrolled).toBe(0);
+
+  scrolled = 1500;
+  act(() => {
+    h.receive(
+      [
+        eventDto(
+          signed(other, {
+            kind: 5,
+            content: "",
+            created_at: T + 61,
+            tags: [
+              ["h", "c"],
+              ["e", b.id],
+            ],
+          }),
+        ),
+      ],
+      { phase: "live", channelId: "c" },
+    );
+  });
+  rowBox(b)?.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+  expect(document.activeElement).toBe(rowBox(c));
+  expect(scrolled).toBe(100);
+
+  const far = extra[3] as EventData;
+  const farNext = extra[4] as EventData;
+  const focusFar = rowBox(far) as HTMLElement;
+  focusFar.tabIndex = -1;
+  focusFar.focus();
+  scrolled = 0;
+  act(() => {
+    h.receive(
+      [
+        eventDto(
+          signed(other, {
+            kind: 5,
+            content: "",
+            created_at: T + 62,
+            tags: [
+              ["h", "c"],
+              ["e", far.id],
+            ],
+          }),
+        ),
+      ],
+      { phase: "live", channelId: "c" },
+    );
+  });
+  focusFar.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+  expect(document.activeElement).toBe(rowBox(farNext));
+  expect(scrolled).toBe(50);
+});
+
+it("keeps focus on a pending linked reply when a hiding presentation withdraws, then recovers on a later deletion", async () => {
+  const rowEl = (event: EventData) =>
+    document.querySelector<HTMLElement>(`[data-message-id="${event.id}"]`);
+  const rowBox = (event: EventData) =>
+    document.querySelector<HTMLElement>(
+      `[data-message-id="${event.id}"] > [data-layout]`,
+    );
+  const navigation = navigationTo(d.id);
+  const h = mount({
+    replies: [a, d, b],
+    navigation,
+    props: { messageId: d.id },
+    snapshot: { targetStatus: "loading" },
+  });
+  const targetBefore = rowEl(d) as HTMLElement;
+  targetBefore.tabIndex = -1;
+  targetBefore.focus();
+  expect(document.activeElement).toBe(targetBefore);
+
+  h.present({ ids: [a.id, b.id] });
+  expect(h.latest.current?.presentation).toBe("none");
+  expect(rowEl(d)).toBe(targetBefore);
+  expect(document.activeElement).toBe(targetBefore);
+
+  h.publish({ targetStatus: "ready", target: rowOf(h, d) });
+  await waitFor(() =>
+    expect(navigation.complete).toHaveBeenCalledExactlyOnceWith({
+      status: "opened",
+    }),
+  );
+
+  h.present({ ids: [a.id, d.id, b.id] });
+  const focusedD = rowBox(d) as HTMLElement;
+  focusedD.tabIndex = -1;
+  focusedD.focus();
+  expect(document.activeElement).toBe(focusedD);
+
+  vi.useFakeTimers();
+  act(() => {
+    h.receive(
+      [
+        eventDto(
+          signed(other, {
+            kind: 5,
+            content: "",
+            created_at: T + 70,
+            tags: [
+              ["h", "c"],
+              ["e", d.id],
+            ],
+          }),
+        ),
+      ],
+      { phase: "live", channelId: "c" },
+    );
+  });
+  focusedD.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+  expect(document.activeElement).toBe(rowBox(b));
+});

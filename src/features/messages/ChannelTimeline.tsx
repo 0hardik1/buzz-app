@@ -1017,7 +1017,6 @@ function Timeline({
     return () => observer.disconnect();
   }, []);
   useMessageSelection(scroller, rows, queries, channelId);
-  usePresentedFocusRecovery(scroller, arrangement !== undefined, display, rows);
   // While the connection recovers, its notice is the one report, so the
   // history edge does not repeat the reason. Recovery does not retry older
   // history, and paging stops on a failed read, so Retry stays either way.
@@ -1513,6 +1512,31 @@ function Timeline({
       at === "end" ? { align: "end" } : { align: "start", offset: -y },
     );
   }, [arrangement, display, owner, rows, placement, size.edgeHeight]);
+  usePresentedFocusRecovery(
+    scroller,
+    arrangement !== undefined,
+    display,
+    rows,
+    {
+      pendingRevealId:
+        requestedId &&
+        targetSignal &&
+        !targetSignal.aborted &&
+        revealedSignal !== targetSignal
+          ? requestedId
+          : undefined,
+      onScroll: () => {
+        const element = scroller.current;
+        if (!element) return;
+        follow.current =
+          element.scrollHeight - element.clientHeight - element.scrollTop < 80;
+        savedPosition.current = {
+          ...positionAt(element),
+          bottom: follow.current,
+        };
+      },
+    },
+  );
   // Shift keeps the distance from the end, so it holds the reader only while
   // the rows from their first visible item to the end are kept. Relay pages
   // break same-second ties by id, rows by send time: a page can land below the

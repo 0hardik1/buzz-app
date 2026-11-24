@@ -728,12 +728,42 @@ function ThreadMessages({
     const current = view.snapshot();
     return current.status === "ready" ? current.root : undefined;
   }, [view]);
-  const [arrangement, display] = useArrangement({
+  const [lostPlace, setLostPlace] = useState<AbortSignal>();
+  const returning =
+    !!navigation?.traversal &&
+    lostPlace !== navigation.signal &&
+    navigation.position(THREAD_PLACE) !== undefined;
+  const rootTarget =
+    navigation?.target.kind === "conversation" &&
+    navigation.target.threadRootId === messageId;
+  const positionedVisit = rootTarget || returning;
+  const [inlineReveal, setInlineReveal] = useState<AbortSignal>();
+  useEffect(() => {
+    void revealRequest;
+    if (!revealSelected) return;
+    const request = new AbortController();
+    setInlineReveal(request.signal);
+    return () => request.abort();
+  }, [revealSelected, revealRequest]);
+  const [revealedSignal, setRevealedSignal] = useState<AbortSignal>();
+  const [withdrawnSignal, setWithdrawnSignal] = useState<AbortSignal>();
+  const requested =
+    inlineReveal ?? (positionedVisit ? undefined : navigation?.signal);
+  const [arrangement, presented] = useArrangement({
     session,
     channelId,
     rootId: subthreadId ? undefined : resolvedRoot,
     limits: THREAD_LIMITS,
   });
+  const targetHidden =
+    !!presented &&
+    messageId !== resolvedRoot &&
+    !presented.rows.some((row) => row.id === messageId);
+  const exactPending =
+    active && !!requested && !requested.aborted && revealedSignal !== requested;
+  const willWithdraw =
+    targetHidden && exactPending && withdrawnSignal !== requested;
+  const display = willWithdraw ? undefined : presented;
   const mode = readerMode(display);
   const modeNow = useRef(mode);
   modeNow.current = mode;
@@ -889,12 +919,6 @@ function ThreadMessages({
   const profiles = useRowProfiles(session.profiles, rows);
   const agentPubkeys = useKnownAgentPubkeys(session, profiles);
   const scroller = useRef<HTMLElement>(null);
-  usePresentedFocusRecovery(
-    scroller,
-    arrangement !== undefined,
-    display,
-    shownReplies,
-  );
   const readerBar = useRef<HTMLDivElement>(null);
   const positioned = useRef(false);
   const positionedLatestRequest = useRef<AbortSignal | undefined>(undefined);
@@ -964,11 +988,6 @@ function ThreadMessages({
   );
   // Back/Forward to a visit with a recorded place returns there instead of
   // replaying its opening, unless that place can no longer be shown.
-  const [lostPlace, setLostPlace] = useState<AbortSignal>();
-  const returning =
-    !!navigation?.traversal &&
-    lostPlace !== navigation.signal &&
-    navigation.position(THREAD_PLACE) !== undefined;
   const restoredVisit = useRef<AbortSignal | undefined>(undefined);
   // The row Back/Forward restored. If it joins a folded group later, as a
   // relay does once its owner verifies, that group opens once to keep it shown;
@@ -1044,10 +1063,14 @@ function ThreadMessages({
           container.scrollTop
       : undefined;
   }, [selectedRow]);
+  const revealSignal = targetHidden && !willWithdraw ? undefined : requested;
+  const revealSignalRef = useRef(revealSignal);
+  revealSignalRef.current = revealSignal;
   const completeTarget = useCallback(() => {
     // Exact lookup can finish before context. Preserve this row's reading
     // position through prepended history without refocusing it after opening.
     targetAnchor.current = selectedOffset();
+    if (revealSignalRef.current) setRevealedSignal(revealSignalRef.current);
     setInitialPositioned(true);
     captureResizePosition();
     readingSettled.current = true;
@@ -1098,11 +1121,6 @@ function ThreadMessages({
         return new Set([...current, ...ancestors]);
       });
   }, [tree, messageId, navigation, revealRequest]);
-  const rootTarget =
-    navigation?.target.kind === "conversation" &&
-    navigation.target.threadRootId === messageId;
-  // Ordinary opens are positioned, not revealed; so is a return to a saved place.
-  const positionedVisit = rootTarget || returning;
   // Reopening an already-shown thread selects nothing new, so its reader needs
   // a focus handoff to start reading. First positioning leaves the opening's
   // tab/composer focus handoff alone.
@@ -1321,21 +1339,6 @@ function ThreadMessages({
     view,
     threadUnread,
   ]);
-  const [inlineReveal, setInlineReveal] = useState<AbortSignal>();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: each reveal request needs its own signal.
-  useEffect(() => {
-    if (!revealSelected) return;
-    const request = new AbortController();
-    setInlineReveal(request.signal);
-    return () => request.abort();
-  }, [revealSelected, revealRequest]);
-  const targetHidden =
-    !!display &&
-    messageId !== resolvedRoot &&
-    !display.rows.some((row) => row.id === messageId);
-  const requested =
-    inlineReveal ?? (positionedVisit ? undefined : navigation?.signal);
-  const revealSignal = targetHidden ? undefined : requested;
   const withdrawnFor = useRef<AbortSignal>(undefined);
   const revealed = useMessageReveal({
     scroller,
@@ -1625,6 +1628,7 @@ function ThreadMessages({
       revealed.current !== navigation.signal
     ) {
       revealed.current = navigation.signal;
+      setRevealedSignal(navigation.signal);
       navigation.complete({ status: "opened" });
     }
     if (
@@ -1635,6 +1639,7 @@ function ThreadMessages({
       withdrawnFor.current !== requested
     ) {
       withdrawnFor.current = requested;
+      setWithdrawnSignal(requested);
       arrangement?.withdraw();
     } else if (
       navigation &&
@@ -1642,6 +1647,7 @@ function ThreadMessages({
       revealed.current !== navigation.signal
     ) {
       revealed.current = navigation.signal;
+      setRevealedSignal(navigation.signal);
       navigation.complete({ status: "opened" });
     }
     // A mounted ordinary thread acknowledges the visit before slow history can
@@ -2034,6 +2040,15 @@ function ThreadMessages({
   useLayoutEffect(() => {
     const element = scroller.current;
     if (arrangement?.snapshot() !== display) return;
+    if (
+      active &&
+      requested &&
+      !requested.aborted &&
+      revealed.current !== requested
+    ) {
+      place.cancel();
+      return;
+    }
     const shown = new Set(shownReplies.map((reply) => reply.id));
     const at = place.take((id) => shown.has(id), display ? "start" : "end");
     if (!element || !at) return;
@@ -2058,12 +2073,33 @@ function ThreadMessages({
   }, [
     arrangement,
     display,
+    active,
+    requested,
+    revealed,
     shownReplies,
     tree,
     expanded,
     place,
     captureResizePosition,
   ]);
+  usePresentedFocusRecovery(
+    scroller,
+    arrangement !== undefined,
+    display,
+    shownReplies,
+    {
+      pendingRevealId:
+        exactPending && messageId !== resolvedRoot ? messageId : undefined,
+      onScroll: () => {
+        const element = scroller.current;
+        if (!element) return;
+        follow.current =
+          element.scrollHeight - element.clientHeight - element.scrollTop < 80;
+        lineTop.current = undefined;
+        captureResizePosition();
+      },
+    },
+  );
   const jumpToLatest = () => {
     const element = scroller.current;
     if (!element) return;
