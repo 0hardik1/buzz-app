@@ -40,6 +40,12 @@ test("a thread title reads as one line that opens its thread", async ({
     await expect(
       history.getByRole("button", { name: "View thread: 4 replies" }),
     ).toBeVisible();
+    // Hovering the line shows its Reply toolbar, as a full message's does.
+    await line.hover();
+    await expect(
+      line.locator("xpath=..").getByRole("button", { name: "Reply" }),
+    ).toBeVisible();
+    await page.mouse.move(0, 0);
     for (const colorScheme of ["light", "dark"]) {
       await page.emulateMedia({ colorScheme });
       await page.screenshot({
@@ -48,6 +54,10 @@ test("a thread title reads as one line that opens its thread", async ({
     }
     await page.setViewportSize({ width: 420, height: 700 });
     await expect.poll(fits).toBe(true);
+    // A narrow chat still names the title's author.
+    await expect(
+      line.locator("xpath=..").locator("[class*='relayedName']"),
+    ).toBeVisible();
     await line.press("Enter");
     await expect(
       page.getByText(`Opened thread ${"1".repeat(64)}`),
