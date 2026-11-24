@@ -318,5 +318,6 @@ export function withRemoteDmVoiceCalls(
         : remote.voiceAgent(),
     voiceListening: huddles.voiceListening,
     voiceThinking: huddles.voiceThinking,
+    openLocalPlayout: huddles.openLocalPlayout,
   };
 }

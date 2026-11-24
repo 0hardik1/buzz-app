@@ -137,13 +137,18 @@ function setup() {
   const report = vi.fn();
   const listening = vi.fn();
   const thinking = vi.fn();
-  const start = () => {
+  const start = (
+    openLocalPlayout?: Parameters<
+      typeof createHuddleVoices
+    >[0]["openLocalPlayout"],
+  ) => {
     const dispose = createHuddleVoices(
       {
         snapshot: () => call,
         subscribe: h.subscribe,
         voiceListening: listening,
         voiceThinking: thinking,
+        ...(openLocalPlayout && { openLocalPlayout }),
       },
       agents,
       relay,
@@ -189,7 +194,8 @@ function setup() {
 }
 it("seats two room members independently and drops non-owner audio", async () => {
   const f = setup();
-  f.start();
+  const local = { play: vi.fn(), close: vi.fn() };
+  f.start((_call, peer) => (peer === "a" ? local : undefined));
   await vi.waitFor(() => expect(f.connections.size).toBe(2));
   const samples = Array(960).fill(0.1);
   required(f.callbacks.get("a"))({ type: "audio", peer: "stranger", samples });
@@ -199,11 +205,13 @@ it("seats two room members independently and drops non-owner audio", async () =>
   expect(required(f.connections.get("a")).input).toHaveBeenCalledWith(samples);
   expect(required(f.connections.get("b")).input).not.toHaveBeenCalled();
   await required(f.seatArgs.get("a")).output(samples);
+  expect(local.play).toHaveBeenCalledWith(samples);
   expect(f.bridge.send).toHaveBeenCalledWith(
     required(f.bridge.open.mock.calls[0])[0],
     samples,
   );
   f.room({ members: ["owner", "b"] });
+  expect(local.close).toHaveBeenCalledOnce();
   expect(required(f.seatArgs.get("a")).signal.aborted).toBe(true);
   await vi.waitFor(() =>
     expect(required(f.connections.get("a")).close).toHaveBeenCalledOnce(),

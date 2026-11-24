@@ -167,6 +167,34 @@ function harness(
   };
 }
 describe("Huddle lifetime", () => {
+  it("plays the local agent once and keeps relay audio for other speakers", async () => {
+    const h = harness();
+    try {
+      await h.service.join(destination);
+      h.receive({
+        type: "connected",
+        room: "room",
+        participants: ["agent", "guest"],
+      });
+      const call = h.service.snapshot().id;
+      if (!call) throw new Error("Missing owner Huddle");
+      const local = h.service.openLocalPlayout(call, "agent");
+      local?.play([0.1]);
+      h.receive({ type: "audio", peer: "agent", samples: [0.2] });
+      h.receive({ type: "audio", peer: "guest", samples: [0.3] });
+      expect(vi.mocked(h.audio.play).mock.calls).toEqual([
+        ["agent", [0.1]],
+        ["guest", [0.3]],
+      ]);
+      local?.close();
+      local?.play([0.4]);
+      h.receive({ type: "audio", peer: "agent", samples: [0.5] });
+      expect(h.audio.play).toHaveBeenCalledTimes(3);
+      expect(h.audio.play).toHaveBeenLastCalledWith("agent", [0.5]);
+    } finally {
+      await h.dispose();
+    }
+  });
   it("keeps arrival order across unordered roster snapshots and treats rejoining as new", async () => {
     const h = harness();
     await h.service.join(destination);

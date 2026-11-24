@@ -36,6 +36,7 @@ type Attempt = {
   stopAccess?: () => void;
   stopAudioSettings?: () => void;
   sender: ReturnType<typeof createPcmSender>;
+  localPlayout: Map<string, { playing: boolean }>;
 };
 const idle: HuddleSnapshot = { phase: "idle", muted: false, participants: [] };
 const message = (error: unknown) =>
@@ -285,6 +286,7 @@ export function createHuddles(
       id,
       connection,
       abort,
+      localPlayout: new Map(),
       sender: createPcmSender(
         (samples) => bridge.send(id, samples),
         abort.signal,
@@ -376,6 +378,7 @@ export function createHuddles(
         return;
       }
       if (event.type === "audio") {
+        if (attempt.localPlayout.get(event.peer)?.playing) return;
         activity(event.peer, event.samples);
         attempt.audio?.play(event.peer, event.samples);
         return;
@@ -501,6 +504,27 @@ export function createHuddles(
     };
   return {
     snapshot: () => snapshot,
+    openLocalPlayout(call: string, peer: string) {
+      const attempt = current;
+      // Remote owner calls cannot take over this device's speaker.
+      if (!attempt || attempt.id !== call || snapshot.phase !== "connected")
+        return;
+      const route = { playing: false };
+      attempt.localPlayout.set(peer, route);
+      const active = () =>
+        valid(attempt) && attempt.localPlayout.get(peer) === route;
+      return {
+        play(samples: readonly number[]) {
+          if (!active() || !snapshot.participants.includes(peer)) return;
+          route.playing = true;
+          activity(peer, samples);
+          attempt.audio?.play(peer, samples);
+        },
+        close() {
+          if (active()) attempt.localPlayout.delete(peer);
+        },
+      };
+    },
     voiceListening: voiceSeat("listening"),
     voiceThinking: voiceSeat("thinking"),
     remoteVoiceError(error: string) {
