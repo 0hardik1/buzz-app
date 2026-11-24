@@ -3,6 +3,7 @@ import {
   CONVERSATION_SEARCH_ID,
   SEARCH_ID,
 } from "../../app/shell/search-shortcuts";
+import { NEW_ID } from "../../app/shell/new-shortcut";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import type {
   BundledShortcuts,
@@ -43,6 +44,7 @@ import {
   threadSummary,
 } from "./motion";
 import { claim, newestRow, trackCursor } from "./cursor";
+import { composerModes } from "./composer";
 import { createPending, SHOW_AFTER_MS, WHICH_KEY } from "./pending";
 import { LEADER, type Sequence, type SequenceGroup } from "./sequences";
 import { WhichKey } from "./WhichKey";
@@ -79,6 +81,31 @@ export const apply: PluginModule["apply"] = (ctx) => {
           shortcut.pluginId === "buzz.channels" && shortcut.id === "mark-read",
       );
     if (entry && (!entry.when || entry.when())) void entry.run();
+  };
+  /** The message box's mode keys, while the plugin is on. */
+  let modes: ReturnType<typeof composerModes> | undefined;
+  /** Run an item of Buzz's New menu, opened by its own shortcut. */
+  const startNew = (label: string) => {
+    if (!shortcuts.runHost(NEW_ID)) {
+      announce(`${label} isn't available here.`);
+      return;
+    }
+    let frames = 30;
+    const find = () => {
+      const item = [
+        ...(openMenu()?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ??
+          []),
+      ].find((candidate) => candidate.textContent?.trim() === label);
+      if (!item) {
+        if (--frames > 0) requestAnimationFrame(find);
+        return;
+      }
+      if (item.getAttribute("aria-disabled") === "true") {
+        press(item, "Escape");
+        announce(`${label} isn't available here.`);
+      } else item.click();
+    };
+    find();
   };
   const searchHere = () => {
     if (inSidebar() || !shortcuts.runHost(CONVERSATION_SEARCH_ID))
@@ -117,6 +144,26 @@ export const apply: PluginModule["apply"] = (ctx) => {
     },
     { keys: `${LEADER}/`, title: "Search where you are", run: searchHere },
     {
+      keys: `${LEADER}i`,
+      title: "Type a message",
+      run: () => {
+        focusComposer();
+        modes?.insert();
+      },
+    },
+    { keys: `${LEADER}nn`, title: "New chat", run: () => startNew("New chat") },
+    {
+      keys: `${LEADER}nc`,
+      title: "New channel",
+      run: () => startNew("New channel"),
+    },
+    { keys: `${LEADER}nd`, title: "New DM", run: () => startNew("New DM") },
+    {
+      keys: `${LEADER}nw`,
+      title: "New workspace",
+      run: () => startNew("New workspace"),
+    },
+    {
       keys: `${LEADER}${LEADER}`,
       title: "Switch conversation",
       run: () => shortcuts.runHost(SEARCH_ID),
@@ -134,6 +181,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ];
   const groups: readonly SequenceGroup[] = [
     { keys: LEADER, title: "Leader" },
+    { keys: `${LEADER}n`, title: "New" },
     { keys: "g", title: "Go" },
     { keys: "]", title: "Next" },
     { keys: "[", title: "Previous" },
@@ -157,6 +205,13 @@ export const apply: PluginModule["apply"] = (ctx) => {
     // g is kept for gg and G, which reach a menu's first and last item.
     const release = enableMenuLetters("hjklg");
     const stopCursor = trackCursor();
+    // First, so the message box's modes see its keys before the moves below.
+    const ownModes = composerModes({
+      apple,
+      announce,
+      leader: () => pending.start(LEADER),
+    });
+    modes = ownModes;
     // A selected field takes Vim's keys instead of typing them. The shortcut
     // service skips fields, so their moves run here; i or Enter edits it.
     const fieldKeys = (event: KeyboardEvent) => {
@@ -344,6 +399,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
         pending.cancel();
         release();
         stopCursor();
+        ownModes.stop();
+        if (modes === ownModes) modes = undefined;
         removeEventListener("keydown", messageKeys, true);
         removeEventListener("keydown", fieldKeys, true);
         editField();
@@ -423,7 +480,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
   );
   key("pane-composer", "Focus the message box", control("j"), focusComposer);
   key("pane-messages", "Focus the messages", control("k"), focusMessages);
-  key("insert", "Type a message", { key: "i" }, focusComposer);
   key(
     "open-thread",
     "Open the selected message's thread",

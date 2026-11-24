@@ -209,9 +209,12 @@ where focus is. `j`/`k`/`h`/`l`, `gg`/`G` and `Ctrl-d`/`Ctrl-u` move it
 through messages, the sidebar, menus, Settings and dialogs, and
 `Ctrl-h`/`Ctrl-l` move between panes (`Alt` on Windows and Linux). Enter
 enters a message's thread or opens a choice; `go` opens the actions under the
-cursor, each with a key; Space starts leader keys; `i` types in the message
-box and Escape leaves it. Its keys select a text field without typing; `i` or
-Enter edits it. The plugin's page in **Settings → Plugins** is its manual.
+cursor, each with a key; Space starts leader keys, such as `Space i` to type
+a message and `Space n` to start a new chat, channel, DM or workspace. The
+message box has Vim's normal, insert and visual modes: Escape goes to normal
+mode, where `hjkl`, `w`, `dd`, `yy`, `p`, `u` and the rest edit, and a second
+Escape leaves. Its keys select other text fields without typing; `i` or Enter
+edits one. The plugin's page in **Settings → Plugins** is its manual.
 
 ## Docs
 

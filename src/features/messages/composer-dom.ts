@@ -99,6 +99,9 @@ export type ComposerInputElement = HTMLDivElement & {
   selectionStart: number;
   selectionEnd: number;
   selectionDirection: "forward" | "backward" | "none";
+  /** Source ranges that select and delete only as a whole, such as chips and
+   * tables. A selection that ends inside one opens it as plain text. */
+  readonly atoms: readonly Readonly<{ start: number; end: number }>[];
   disabled: boolean;
   readOnly: boolean;
   setSelectionRange(start: number, end: number, direction?: string): void;

@@ -25,6 +25,12 @@ const selectedId = (page) =>
 const nothingFocused = (page) =>
   page.evaluate(() => document.activeElement?.blur());
 
+/** `<leader>i`: type in the message box. */
+async function insert(page) {
+  await page.keyboard.press(" ");
+  await page.keyboard.press("i");
+}
+
 async function enableVimKeys(page) {
   await openSettings(page);
   await selectSettingsSection(page, "Manage plugins");
@@ -89,14 +95,170 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   ).toBeFocused();
   await animationsSettled(page.locator("[data-panel-dock]"));
 
-  // i types; Escape stops typing so j moves again.
+  // Space i types; Escape stops typing, and a second leaves, so j moves again.
   await nothingFocused(page);
-  await page.keyboard.press("i");
+  await insert(page);
   await expect(alpha).toBeFocused();
   await page.keyboard.press("j");
   await expect(alpha).toHaveText("j");
   await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
   await expect(alpha).not.toBeFocused();
+});
+
+// The editor's real selection, undo history and focus handoffs need a
+// browser; the keys' effects on text are unit-tested in editing.test.ts.
+test.describe("the message box's modes", () => {
+  const value = (box) => box.evaluate((element) => element.value);
+  const caret = (box) => box.evaluate((element) => element.selectionStart);
+  const status = (page) => page.getByText(/^-- [A-Z ]+ --$/);
+  async function typeLines(page, ...lines) {
+    for (const [index, line] of lines.entries()) {
+      if (index) await page.keyboard.press("Shift+Enter");
+      await page.keyboard.type(line);
+    }
+  }
+
+  test("Space i types, Escape is normal mode, where keys edit and never type", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const alpha = composer(page, "Alpha");
+    const selected = page.locator("[data-message-cursor]");
+    await expect(selected).toBeFocused();
+    // Plain i on a message no longer types.
+    await page.keyboard.press("i");
+    await expect(selected).toBeFocused();
+    await expect(status(page)).toHaveCount(0);
+
+    await insert(page);
+    await expect(alpha).toBeFocused();
+    await expect(status(page)).toHaveText("-- INSERT --");
+    await typeLines(page, "one two three", "four five", "six");
+    await expect.poll(() => value(alpha)).toBe("one two three\nfour five\nsix");
+
+    await page.keyboard.press("Escape");
+    await expect(alpha).toBeFocused();
+    await expect(status(page)).toHaveText("-- NORMAL --");
+    await expect(
+      page.getByRole("status").filter({ hasText: /^Normal mode$/ }),
+    ).toHaveCount(1);
+    // Nothing types in normal mode, not even a key Vim does not use.
+    await page.keyboard.press("q");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => value(alpha)).toBe("one two three\nfour five\nsix");
+    // The leader's menu keeps normal mode when it is cancelled.
+    await page.keyboard.press(" ");
+    await expect(page.locator("[data-vim-which-key]")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
+    await expect(alpha).toBeFocused();
+    await expect(status(page)).toHaveText("-- NORMAL --");
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect.poll(() => value(alpha)).toBe("four five\nsix");
+    await page.keyboard.press("5");
+    await page.keyboard.press("l");
+    await expect.poll(() => caret(alpha)).toBe(5);
+    await page.keyboard.press("x");
+    await expect.poll(() => value(alpha)).toBe("four ive\nsix");
+    // u and Ctrl-r are the editor's own undo and redo.
+    await page.keyboard.press("u");
+    await expect.poll(() => value(alpha)).toBe("four five\nsix");
+    await page.keyboard.press("u");
+    await expect.poll(() => value(alpha)).toBe("one two three\nfour five\nsix");
+    await page.keyboard.press("Control+r");
+    await expect.poll(() => value(alpha)).toBe("four five\nsix");
+    // A enters insert mode at the line's end, where keys type again.
+    await page.keyboard.press("Shift+A");
+    await expect(status(page)).toHaveText("-- INSERT --");
+    await page.keyboard.type("!");
+    await expect.poll(() => value(alpha)).toBe("four five!\nsix");
+
+    // Escape in normal mode leaves for the selected message, keeping the draft.
+    await page.keyboard.press("Escape");
+    await expect(status(page)).toHaveText("-- NORMAL --");
+    await page.keyboard.press("Escape");
+    await expect(selected).toBeFocused();
+    await expect(status(page)).toHaveCount(0);
+    await expect.poll(() => value(alpha)).toBe("four five!\nsix");
+  });
+
+  test("V selects lines, and J and K move them and keep them selected", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const alpha = composer(page, "Alpha");
+    await expect(page.locator("[data-message-cursor]")).toBeFocused();
+    await insert(page);
+    await expect(alpha).toBeFocused();
+    await typeLines(page, "a", "b", "c");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    await page.keyboard.press("Shift+V");
+    await expect(status(page)).toHaveText("-- VISUAL LINE --");
+    const chosen = () => page.evaluate(() => getSelection()?.toString());
+    await page.keyboard.press("Shift+J");
+    await expect.poll(() => value(alpha)).toBe("b\na\nc");
+    await expect.poll(chosen).toBe("a");
+    await page.keyboard.press("Shift+J");
+    await expect.poll(() => value(alpha)).toBe("b\nc\na");
+    await page.keyboard.press("Shift+K");
+    await expect.poll(() => value(alpha)).toBe("b\na\nc");
+    await expect.poll(chosen).toBe("a");
+    // d deletes the selected lines, and Escape returns to normal mode.
+    await page.keyboard.press("j");
+    await page.keyboard.press("d");
+    await expect.poll(() => value(alpha)).toBe("b");
+    await expect(status(page)).toHaveText("-- NORMAL --");
+    await page.keyboard.press("v");
+    await expect(status(page)).toHaveText("-- VISUAL --");
+    await page.keyboard.press("Escape");
+    await expect(status(page)).toHaveText("-- NORMAL --");
+    await expect(alpha).toBeFocused();
+  });
+
+  test("Space n starts a new chat, channel, DM or workspace from Buzz's New menu", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    await expect(page.locator("[data-message-cursor]")).toBeFocused();
+    await page.keyboard.press(" ");
+    await page.keyboard.press("n");
+    const whichKey = page.locator("[data-vim-which-key]");
+    for (const [name, key] of [
+      ["New chat", "n"],
+      ["New channel", "c"],
+      ["New DM", "d"],
+      ["New workspace", "w"],
+    ])
+      await expect(
+        whichKey.getByRole("menuitem", { name, exact: true }),
+      ).toHaveAttribute("aria-keyshortcuts", key);
+    // This connection can't create channels: the menu says so and closes.
+    await page.keyboard.press("c");
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: /^New channel isn't available here\.$/ }),
+    ).toHaveCount(1);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await page.keyboard.press(" ");
+    await page.keyboard.press("n");
+    await page.keyboard.press("d");
+    await expect(
+      page.getByRole("combobox", { name: "Message recipients" }),
+    ).toBeFocused();
+  });
 });
 
 test("the leader shows what can follow and runs Buzz's own actions by id", async ({
@@ -316,14 +478,16 @@ test.describe("the cursor", () => {
     await expect(box(page, 38)).toBeFocused();
     await expect(cursor(page)).toHaveCount(1);
 
-    // Escape on the message stays on it; i types and Escape comes back.
+    // Escape on the message stays on it; Space i types and Escape twice
+    // comes back.
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
     // The cursor is where focus is: typing, the sidebar and the which-key
     // menu leave the message unmarked, and Escape comes back to it.
-    await page.keyboard.press("i");
+    await insert(page);
     await expect(composer(page, "Alpha")).toBeFocused();
     await expect(cursor(page)).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
 
@@ -353,11 +517,12 @@ test.describe("the cursor", () => {
     await expect(box(page, 37)).toBeFocused();
     await expect(box(page, 37)).toBeInViewport();
     // While typing too: the selection stays rendered, and Escape returns to it.
-    await page.keyboard.press("i");
+    await insert(page);
     await expect(composer(page, "Alpha")).toBeFocused();
     await history(page).hover();
     await wheel(page, -6000);
     await expect(box(page, 37)).not.toBeInViewport();
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(box(page, 37)).toBeFocused();
     await expect(box(page, 37)).toBeInViewport();
@@ -763,11 +928,13 @@ test.describe("with a thread", () => {
     await page.keyboard.press("j");
     await expect(reply).toBeFocused();
     await expect(box).toHaveText("");
-    // Escape from the message box returns to the thread's message and keeps
-    // the thread and the draft.
-    await page.keyboard.press("i");
+    // Escape from the message box's normal mode returns to the thread's
+    // message and keeps the thread and the draft.
+    await insert(page);
     await expect(box).toBeFocused();
     await page.keyboard.type("hello");
+    await page.keyboard.press("Escape");
+    await expect(box).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(reply).toBeFocused();
     await expect(
@@ -813,9 +980,10 @@ test.describe("with a thread", () => {
     await expect.poll(() => focusedText(page)).toContain("Thread root 1");
     await one();
     // In the message box, a menu or the sidebar, no message is marked.
-    await page.keyboard.press("i");
+    await insert(page);
     await expect(panel(page).getByRole("textbox")).toBeFocused();
     await expect(marked(page)).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await one();
     await page.keyboard.press("\\");
@@ -879,12 +1047,15 @@ test.describe("with an unread conversation", () => {
     await enableVimKeys(page);
     const selected = page.locator("[data-message-cursor]");
     await expect(selected).toBeFocused();
-    await page.keyboard.press("i");
+    await insert(page);
     const alpha = composer(page, "Alpha");
     await expect(alpha).toBeFocused();
     await page.keyboard.type("hello");
     app.soloAgentMessage("alpha", "A new message arrives");
     await expect(page.getByText("A new message arrives")).toBeVisible();
+    // The first Escape is normal mode, the second leaves.
+    await page.keyboard.press("Escape");
+    await expect(alpha).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(selected).toBeFocused();
     await expect(alpha).toHaveText("hello");

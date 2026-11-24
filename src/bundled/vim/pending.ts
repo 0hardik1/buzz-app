@@ -45,7 +45,8 @@ export function createPending(
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopImmediatePropagation();
-      return cancel();
+      cancel();
+      return returnFocus();
     }
     // Arrows, Enter and Tab drive the menu while it shows; otherwise cancel.
     if (event.key.length !== 1) {
@@ -106,15 +107,17 @@ export function createPending(
       return;
     }
     cancel();
-    if (step.kind !== "run") return;
-    // Act where the sequence began, not on the menu that showed it.
+    // Act, or stop, where the sequence began, not on the menu that showed it.
+    returnFocus();
+    if (step.kind === "run") step.sequence.run();
+  }
+  function returnFocus() {
     if (
       origin?.isConnected &&
       (inMenu(document.activeElement) ||
         document.activeElement === document.body)
     )
       origin.focus({ preventScroll: true });
-    step.sequence.run();
   }
 
   return {

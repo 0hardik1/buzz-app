@@ -169,6 +169,7 @@ import { normalizeName } from "../search/person-match";
 import { ComposerAccessories } from "../conversation/ComposerAccessories";
 import { ComposerTools } from "../conversation/ComposerTools";
 import { ComposerLinkDialog } from "./ComposerLinkDialog";
+import { useComposerStatus } from "./composer-status";
 import { ComposerFormattingTools } from "./ComposerFormattingTools";
 import { AgentsContext, useSessionState } from "../agents/react";
 import { ComposerModels, type DraftPicks } from "./ComposerModels";
@@ -1173,6 +1174,7 @@ function Composer({
 
   const caret = useRef<number | undefined>(undefined);
   const input = useRef<ComposerInputElement>(null);
+  const keyStatus = useComposerStatus(input);
   const hasFocused = useRef(false);
   const focusFromControl = useRef(
     typeof autoFocus === "object" ? autoFocus : undefined,
@@ -4671,6 +4673,12 @@ function Composer({
                   place={sessionPlace}
                 />
               )}
+            {keyStatus && (
+              // Beside Send, so showing it never changes the composer's height.
+              <span className="shrink-0 whitespace-nowrap text-caption text-subtle">
+                {keyStatus}
+              </span>
+            )}
             <IconButton
               variant={
                 draft.trim() ||

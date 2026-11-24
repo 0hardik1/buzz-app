@@ -2959,6 +2959,15 @@ export function EditableInput({
             ? "backward"
             : "forward",
       },
+      atoms: {
+        configurable: true,
+        get: () => {
+          const { tokens, tables } = projection();
+          return [...tokens, ...tables]
+            .map(({ start, end }) => ({ start, end }))
+            .sort((a, b) => a.start - b.start);
+        },
+      },
       disabled: { configurable: true, get: () => current.current.disabled },
       readOnly: {
         configurable: true,
