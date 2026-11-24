@@ -14,40 +14,43 @@ for (const [name, distance, speed, count] of [
         await perf.setup("alpha");
         const scroller = page.locator(timeline("alpha"));
         let released = 0;
-        // Adaptive prefetch can reach beyond the head even on a short gesture.
-        const older = scroller.locator(":scope > div:first-child button");
-        for (let pageIndex = 0; pageIndex < 30; pageIndex++) {
-          while (released < app.pending.length)
-            app.pending[released++].release();
-          // Response delivery is not completion: verification yields between
-          // batches. On the final page the loading control disappears instead
-          // of returning to its ready label.
-          await expect
-            .poll(
-              () =>
-                scroller.evaluate((element) => {
-                  const edge = element.querySelector(
-                    ":scope > div:first-child",
-                  );
-                  const button = edge.querySelector("button");
-                  return button
-                    ? !button.disabled &&
-                        button.textContent === "Load older messages"
-                    : !edge.querySelector('[role="status"]');
-                }),
-              { message: "older page completes or exhausts history" },
-            )
-            .toBe(true);
-          await perf.settle("alpha");
-          if (!(await older.count())) break;
-          await expect(older).toHaveText("Load older messages");
-          await older.evaluate((button) => button.click());
-          await expect.poll(() => app.pending.length).toBeGreaterThan(released);
+        if (name === "scroll-long") {
+          const older = scroller.locator(":scope > div:first-child button");
+          for (let pageIndex = 0; pageIndex < 30; pageIndex++) {
+            while (released < app.pending.length)
+              app.pending[released++].release();
+            // Response delivery is not completion: verification yields between
+            // batches. On the final page the loading control disappears instead
+            // of returning to its ready label.
+            await expect
+              .poll(
+                () =>
+                  scroller.evaluate((element) => {
+                    const edge = element.querySelector(
+                      ":scope > div:first-child",
+                    );
+                    const button = edge.querySelector("button");
+                    return button
+                      ? !button.disabled &&
+                          button.textContent === "Load older messages"
+                      : !edge.querySelector('[role="status"]');
+                  }),
+                { message: "older page completes or exhausts history" },
+              )
+              .toBe(true);
+            await perf.settle("alpha");
+            if (!(await older.count())) break;
+            await expect(older).toHaveText("Load older messages");
+            await older.evaluate((button) => button.click());
+            await expect
+              .poll(() => app.pending.length)
+              .toBeGreaterThan(released);
+          }
+          await expect(older).toHaveCount(0);
+          await expect(
+            scroller.getByText("History window limit reached", { exact: true }),
+          ).toHaveCount(0);
         }
-        await expect(older).toHaveCount(0);
-        await expect(
-          scroller.getByText("History window limit reached", { exact: true }),
-        ).toHaveCount(0);
         await perf.settle("alpha");
         const before = await scroller.evaluate((element) => ({
           top: element.scrollTop,

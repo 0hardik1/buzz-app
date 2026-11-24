@@ -1,8 +1,13 @@
 name: CI
 
 on:
-  # Manual dispatch runs only Windows; automatic checks include macOS recording.
+  # Manual dispatch runs Windows, with optional Linux and Windows FFmpeg checks.
   workflow_dispatch:
+    inputs:
+      ffmpeg_acceptance:
+        description: Exercise FFmpeg recovery with the hosted Windows and Linux package managers
+        type: boolean
+        default: false
   # Sunday's preview (release.yml) calls this to rebuild main's caches.
   workflow_call:
   pull_request:
@@ -113,7 +118,7 @@ jobs:
           retention-days: 7
 
   native:
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch' || inputs.ffmpeg_acceptance
     name: Rust and tool integration
     # Select one runner class, shared by native and browser jobs below.
     # Use the PR author so rerunning a bot PR keeps standard runners.
@@ -173,6 +178,11 @@ jobs:
       # --workspace includes Tauri, unlike the default Cargo member selection.
       - name: All Rust tests and doctests
         run: ./bin/cargo test --workspace --locked
+      - name: Exercise FFmpeg recovery on the Linux host
+        if: github.event_name == 'workflow_dispatch' && inputs.ffmpeg_acceptance
+        run: |
+          sudo apt-get install --no-install-recommends -y packagekit-tools
+          ./bin/cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
       - name: Bundled buzz CLI
         run: ./bin/node scripts/test-buzz-cli.mjs --prebuilt
       - name: FI Builderlab build and grant tests
@@ -224,6 +234,10 @@ jobs:
         run: cargo clippy -p Buzz -p buzz-agent-controller -p buzz-credential-store -p buzz-mesh-compute --locked --all-targets -- -D warnings
       - name: All native package tests
         run: cargo test -p Buzz -p buzz-agent-controller -p buzz-credential-store -p buzz-mesh-compute --locked --no-fail-fast
+
+      - name: Exercise FFmpeg recovery on the Windows host
+        if: inputs.ffmpeg_acceptance
+        run: cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
 
   measurements:
     if: github.event_name != 'workflow_dispatch'

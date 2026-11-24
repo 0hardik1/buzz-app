@@ -36,7 +36,7 @@ errors before trusting a number.
 | `channel-open-cold` | Clicking a channel never opened or hovered |
 | `channel-open-hover` | The same, after a 150ms hover head start |
 | `channel-open-cold-markdown` | The cold case with Markdown-heavy messages |
-| `scroll-short` | 800px upward through the newest messages of a preloaded 120-message channel |
+| `scroll-short` | 800px upward within the loaded head of a 120-message channel |
 | `scroll-long` | 12,000px upward through 360 fully loaded messages |
 | `scroll-paging-fast` | Scrolling to the oldest of 640 messages while older pages arrive after 100ms |
 | `scroll-paging-delayed` | The same with 500ms page delays |
