@@ -393,9 +393,10 @@ export function createHuddles(
         return;
       }
       if (event.type === "audio") {
-        if (attempt.localPlayout.get(event.peer)?.playing) return;
-        activity(event.peer, event.samples);
-        attempt.audio?.play(event.peer, event.samples);
+        if (!attempt.localPlayout.get(event.peer)?.playing) {
+          activity(event.peer, event.samples);
+          attempt.audio?.play(event.peer, event.samples);
+        }
         if (
           snapshot.transcriptDestination &&
           snapshot.participants.includes(event.peer)

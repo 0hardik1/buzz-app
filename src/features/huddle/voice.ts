@@ -26,7 +26,12 @@ export function createHuddleVoices(
     Huddles,
     "snapshot" | "subscribe" | "voiceListening" | "voiceThinking"
   > &
-    Partial<Pick<Huddles, "subscribePeerAudio" | "openLocalPlayout" | "subscribeLocalMicrophone">> & {
+    Partial<
+      Pick<
+        Huddles,
+        "subscribePeerAudio" | "openLocalPlayout" | "subscribeLocalMicrophone"
+      >
+    > & {
       voiceAgent?(): string | undefined;
     },
   agents: Pick<Agents, "snapshot" | "subscribe" | "types" | "reserveVoice">,
@@ -69,14 +74,6 @@ export function createHuddleVoices(
         call,
         `${agent.name}: ${error instanceof Error ? error.message : error || "Voice disconnected"}. Leave and rejoin the Huddle to retry.`,
       );
-    };
-    const input = (samples: number[]) => {
-      if (abort.signal.aborted) return;
-      try {
-        connection?.input(samples);
-      } catch (error) {
-        fail(error);
-      }
     };
     const sender = createPcmSender(
       (samples) => bridge.send(id, samples),
