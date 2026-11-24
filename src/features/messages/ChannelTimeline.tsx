@@ -1335,13 +1335,27 @@ function Timeline({
     hold: holdTarget,
   });
   const withdrawnFor = useRef<AbortSignal>(undefined);
+  const [withdrawnSignal, setWithdrawnSignal] = useState<AbortSignal>();
+  const willWithdraw =
+    targetHidden &&
+    !!requestedId &&
+    !!targetSignal &&
+    !targetSignal.aborted &&
+    revealedSignal !== targetSignal &&
+    withdrawnSignal !== targetSignal;
   useLayoutEffect(() => {
-    if (!targetHidden || !targetSignal || revealedSignal === targetSignal)
+    if (
+      !targetHidden ||
+      !targetSignal ||
+      targetSignal.aborted ||
+      revealedSignal === targetSignal
+    )
       return;
     if (withdrawnFor.current === targetSignal)
       navigation?.complete({ status: "opened" });
     else {
       withdrawnFor.current = targetSignal;
+      setWithdrawnSignal(targetSignal);
       arrangement?.withdraw();
     }
   }, [targetHidden, targetSignal, revealedSignal, navigation, arrangement]);
@@ -1517,25 +1531,7 @@ function Timeline({
     arrangement !== undefined,
     display,
     rows,
-    {
-      pendingRevealId:
-        requestedId &&
-        targetSignal &&
-        !targetSignal.aborted &&
-        revealedSignal !== targetSignal
-          ? requestedId
-          : undefined,
-      onScroll: () => {
-        const element = scroller.current;
-        if (!element) return;
-        follow.current =
-          element.scrollHeight - element.clientHeight - element.scrollTop < 80;
-        savedPosition.current = {
-          ...positionAt(element),
-          bottom: follow.current,
-        };
-      },
-    },
+    willWithdraw ? requestedId : undefined,
   );
   // Shift keeps the distance from the end, so it holds the reader only while
   // the rows from their first visible item to the end are kept. Relay pages
@@ -2849,6 +2845,7 @@ function Timeline({
               session={queries}
               scope={scope}
               channelId={channelId}
+              linkedMessageId={requestedId}
               canOpen={(target) => canOpenLink?.(target) ?? false}
               open={onOpenLink}
             />

@@ -967,3 +967,38 @@ it("skips membership notice rows when recovering focus after a presented row dis
   h.present({ ids: [notice.id], events: [] });
   expect(document.activeElement).toBe(scroller());
 });
+
+it("keeps focus on a linked row when the first hiding presentation withdraws, then recovers to a presented neighbor on a second hiding presentation", () => {
+  const firstNav = navigationTo(h1.id);
+  const first = mount({ props: { navigation: firstNav } });
+  expect(first.latest.current?.linkedMessageId).toBe(h1.id);
+  frame();
+  frame();
+  expect(document.activeElement).toBe(row(h1));
+  first.present({ ids: [p0.id, p1.id] });
+  expect(first.latest.current?.presentation).toBe("none");
+  expect(firstNav.complete).not.toHaveBeenCalled();
+  for (let pass = 0; pass < 4; pass++) frame();
+  expect(firstNav.complete).toHaveBeenCalledExactlyOnceWith({
+    status: "opened",
+  });
+  expect(document.activeElement).toBe(row(h1));
+  first.unmount();
+
+  const secondNav = navigationTo(h1.id);
+  const second = mount({ props: { navigation: secondNav } });
+  frame();
+  frame();
+  expect(document.activeElement).toBe(row(h1));
+  second.present({ ids: [p0.id, p1.id] });
+  expect(second.latest.current?.presentation).toBe("none");
+  frame();
+  frame();
+  expect(document.activeElement).toBe(row(h1));
+  second.present({ ids: [p0.id, p1.id] });
+  expect(second.latest.current?.presentation).toBe("shown");
+  expect(secondNav.complete).toHaveBeenCalledExactlyOnceWith({
+    status: "opened",
+  });
+  expect(document.activeElement).toBe(row(p0));
+});

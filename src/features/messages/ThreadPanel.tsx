@@ -738,8 +738,8 @@ function ThreadMessages({
     navigation.target.threadRootId === messageId;
   const positionedVisit = rootTarget || returning;
   const [inlineReveal, setInlineReveal] = useState<AbortSignal>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each reveal request needs its own signal.
   useEffect(() => {
-    void revealRequest;
     if (!revealSelected) return;
     const request = new AbortController();
     setInlineReveal(request.signal);
@@ -1063,7 +1063,7 @@ function ThreadMessages({
           container.scrollTop
       : undefined;
   }, [selectedRow]);
-  const revealSignal = targetHidden && !willWithdraw ? undefined : requested;
+  const revealSignal = targetHidden ? undefined : requested;
   const revealSignalRef = useRef(revealSignal);
   revealSignalRef.current = revealSignal;
   const completeTarget = useCallback(() => {
@@ -1635,6 +1635,7 @@ function ThreadMessages({
       targetHidden &&
       active &&
       requested &&
+      !requested.aborted &&
       revealed.current !== requested &&
       withdrawnFor.current !== requested
     ) {
@@ -1739,6 +1740,7 @@ function ThreadMessages({
           .find((row) => row);
       if (anchor && !row) {
         revealed.current = undefined;
+        setRevealedSignal(undefined);
         setLostPlace(navigation.signal);
         return;
       }
@@ -2040,15 +2042,6 @@ function ThreadMessages({
   useLayoutEffect(() => {
     const element = scroller.current;
     if (arrangement?.snapshot() !== display) return;
-    if (
-      active &&
-      requested &&
-      !requested.aborted &&
-      revealed.current !== requested
-    ) {
-      place.cancel();
-      return;
-    }
     const shown = new Set(shownReplies.map((reply) => reply.id));
     const at = place.take((id) => shown.has(id), display ? "start" : "end");
     if (!element || !at) return;
@@ -2073,9 +2066,6 @@ function ThreadMessages({
   }, [
     arrangement,
     display,
-    active,
-    requested,
-    revealed,
     shownReplies,
     tree,
     expanded,
@@ -2087,18 +2077,6 @@ function ThreadMessages({
     arrangement !== undefined,
     display,
     shownReplies,
-    {
-      pendingRevealId:
-        exactPending && messageId !== resolvedRoot ? messageId : undefined,
-      onScroll: () => {
-        const element = scroller.current;
-        if (!element) return;
-        follow.current =
-          element.scrollHeight - element.clientHeight - element.scrollTop < 80;
-        lineTop.current = undefined;
-        captureResizePosition();
-      },
-    },
   );
   const jumpToLatest = () => {
     const element = scroller.current;
@@ -2560,6 +2538,12 @@ function ThreadMessages({
             scope={scope}
             channelId={channelId}
             threadRootId={resolvedRoot}
+            linkedMessageId={
+              messageId !== resolvedRoot &&
+              (revealSelected || (!!navigation && !positionedVisit))
+                ? messageId
+                : undefined
+            }
             canOpen={(target) => canOpenLink?.(target) ?? false}
             open={openViewLink}
           />

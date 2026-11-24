@@ -718,44 +718,13 @@ function focusMessageRow(row: HTMLElement) {
   target.focus({ preventScroll: true });
 }
 
-function revealRecoveredRow(scroller: HTMLElement, row: HTMLElement) {
-  const scrollerRect = scroller.getBoundingClientRect();
-  const rowRect = row.getBoundingClientRect();
-  if (
-    scrollerRect.height <= 0 ||
-    rowRect.height <= 0 ||
-    (rowRect.bottom > scrollerRect.top && rowRect.top < scrollerRect.bottom)
-  )
-    return false;
-  const style = getComputedStyle(scroller);
-  const topEdge =
-    scrollerRect.top + (Number.parseFloat(style.scrollPaddingTop) || 0);
-  const bottomEdge =
-    scrollerRect.bottom - (Number.parseFloat(style.scrollPaddingBottom) || 0);
-  const delta =
-    rowRect.bottom <= scrollerRect.top
-      ? rowRect.top - topEdge
-      : Math.min(rowRect.bottom - bottomEdge, rowRect.top - topEdge);
-  if (!delta) return false;
-  const before = scroller.scrollTop;
-  scroller.scrollTop += delta;
-  return scroller.scrollTop !== before;
-}
-
 export function usePresentedFocusRecovery(
   scroller: RefObject<HTMLElement | null>,
   enabled: boolean,
   display: Display | undefined,
   rows: readonly { id: string; membership?: unknown }[],
-  options?: {
-    pendingRevealId?: string | undefined;
-    onScroll?: (() => void) | undefined;
-  },
+  pendingRevealId?: string,
 ) {
-  const pendingRevealId = options?.pendingRevealId;
-  const notifyScroll = useEffectEvent(() => {
-    options?.onScroll?.();
-  });
   const focused = useRef<{ id: string; node: HTMLElement } | undefined>(
     undefined,
   );
@@ -865,12 +834,6 @@ export function usePresentedFocusRecovery(
     if (nextId !== undefined && nextRow) {
       focusMessageRow(nextRow);
       focused.current = { id: nextId, node: nextRow };
-      if (
-        doc.activeElement &&
-        nextRow.contains(doc.activeElement) &&
-        revealRecoveredRow(element, nextRow)
-      )
-        notifyScroll();
     } else {
       focused.current = undefined;
       element.focus({ preventScroll: true });

@@ -842,6 +842,7 @@ it("transfers focus when a presentation or live deletion removes the focused rep
     );
 
   const h = mount({ replies: [a, b, c] });
+  expect(h.latest.current?.linkedMessageId).toBeUndefined();
   const initial = rowBox(a) as HTMLElement;
   initial.tabIndex = -1;
   initial.focus();
@@ -861,6 +862,7 @@ it("transfers focus when a presentation or live deletion removes the focused rep
       ],
     }),
   );
+  scrolled = 0;
   act(() => {
     h.receive([dropB], { phase: "live", channelId: "c" });
   });
@@ -872,6 +874,7 @@ it("transfers focus when a presentation or live deletion removes the focused rep
   });
   expect(drawn()).toEqual(["root", "c"]);
   expect(document.activeElement).toBe(rowBox(c));
+  expect(scrolled).toBe(0);
 
   h.present({ ids: [] });
   expect(document.activeElement).toBe(scroller());
@@ -922,152 +925,55 @@ it("transfers focus when removing a collapsed reply branch or its nested replies
   expect(document.activeElement).toBe(rowBox(d));
 });
 
-it("scrolls only the thread scroller just enough when focus recovers to an offscreen row, leaving visible survivors in place", () => {
-  vi.useFakeTimers();
-  const rowBox = (event: EventData) =>
-    document.querySelector<HTMLElement>(
-      `[data-message-id="${event.id}"] > [data-layout]`,
-    );
-  const extra = Array.from({ length: 5 }, (_, index) =>
-    replyEvent(`e${index}`, T + 20 + index),
-  );
-  const all = [a, b, c, d, ...extra];
-  const h = mount({ replies: all });
-  h.present({ ids: all.map((row) => row.id), events: [root, ...all] });
-
-  const focusA = rowBox(a) as HTMLElement;
-  focusA.tabIndex = -1;
-  focusA.focus();
-  scrolled = 0;
-  act(() => {
-    h.receive(
-      [
-        eventDto(
-          signed(other, {
-            kind: 5,
-            content: "",
-            created_at: T + 60,
-            tags: [
-              ["h", "c"],
-              ["e", a.id],
-            ],
-          }),
-        ),
-      ],
-      { phase: "live", channelId: "c" },
-    );
-  });
-  focusA.dispatchEvent(
-    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
-  );
-  act(() => {
-    vi.advanceTimersToNextFrame();
-  });
-  expect(document.activeElement).toBe(rowBox(b));
-  expect(scrolled).toBe(0);
-
-  scrolled = 1500;
-  act(() => {
-    h.receive(
-      [
-        eventDto(
-          signed(other, {
-            kind: 5,
-            content: "",
-            created_at: T + 61,
-            tags: [
-              ["h", "c"],
-              ["e", b.id],
-            ],
-          }),
-        ),
-      ],
-      { phase: "live", channelId: "c" },
-    );
-  });
-  rowBox(b)?.dispatchEvent(
-    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
-  );
-  act(() => {
-    vi.advanceTimersToNextFrame();
-  });
-  expect(document.activeElement).toBe(rowBox(c));
-  expect(scrolled).toBe(100);
-
-  const far = extra[3] as EventData;
-  const farNext = extra[4] as EventData;
-  const focusFar = rowBox(far) as HTMLElement;
-  focusFar.tabIndex = -1;
-  focusFar.focus();
-  scrolled = 0;
-  act(() => {
-    h.receive(
-      [
-        eventDto(
-          signed(other, {
-            kind: 5,
-            content: "",
-            created_at: T + 62,
-            tags: [
-              ["h", "c"],
-              ["e", far.id],
-            ],
-          }),
-        ),
-      ],
-      { phase: "live", channelId: "c" },
-    );
-  });
-  focusFar.dispatchEvent(
-    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
-  );
-  act(() => {
-    vi.advanceTimersToNextFrame();
-  });
-  expect(document.activeElement).toBe(rowBox(farNext));
-  expect(scrolled).toBe(50);
-});
-
-it("keeps focus on a pending linked reply when a hiding presentation withdraws, then recovers on a later deletion", async () => {
+it("keeps uninterrupted focus on a pending linked reply through withdrawal and missing-anchor fallback, while recovering on pending deletion", () => {
   const rowEl = (event: EventData) =>
     document.querySelector<HTMLElement>(`[data-message-id="${event.id}"]`);
   const rowBox = (event: EventData) =>
     document.querySelector<HTMLElement>(
       `[data-message-id="${event.id}"] > [data-layout]`,
     );
-  const navigation = navigationTo(d.id);
-  const h = mount({
+
+  const rootNav = navigationTo(root.id);
+  const rootOpen = mount({
     replies: [a, d, b],
-    navigation,
+    navigation: rootNav,
+    props: { messageId: root.id },
+  });
+  expect(rootOpen.latest.current?.linkedMessageId).toBeUndefined();
+  rootOpen.unmount();
+
+  const linked = mount({
+    replies: [a, d, b],
+    navigation: navigationTo(d.id),
     props: { messageId: d.id },
     snapshot: { targetStatus: "loading" },
   });
+  expect(linked.latest.current?.linkedMessageId).toBe(d.id);
   const targetBefore = rowEl(d) as HTMLElement;
   targetBefore.tabIndex = -1;
   targetBefore.focus();
-  expect(document.activeElement).toBe(targetBefore);
-
-  h.present({ ids: [a.id, b.id] });
-  expect(h.latest.current?.presentation).toBe("none");
+  linked.present({ ids: [a.id, b.id] });
+  expect(linked.latest.current?.presentation).toBe("none");
   expect(rowEl(d)).toBe(targetBefore);
   expect(document.activeElement).toBe(targetBefore);
+  linked.unmount();
 
-  h.publish({ targetStatus: "ready", target: rowOf(h, d) });
-  await waitFor(() =>
-    expect(navigation.complete).toHaveBeenCalledExactlyOnceWith({
-      status: "opened",
-    }),
-  );
-
-  h.present({ ids: [a.id, d.id, b.id] });
+  vi.useFakeTimers();
+  const pendingDelete = mount({
+    replies: [a, b],
+    navigation: navigationTo(d.id),
+    props: { messageId: d.id },
+    snapshot: { targetStatus: "loading" },
+  });
+  pendingDelete.present({
+    ids: [a.id, d.id, b.id],
+    events: [root, a, d, b],
+  });
   const focusedD = rowBox(d) as HTMLElement;
   focusedD.tabIndex = -1;
   focusedD.focus();
-  expect(document.activeElement).toBe(focusedD);
-
-  vi.useFakeTimers();
   act(() => {
-    h.receive(
+    pendingDelete.receive(
       [
         eventDto(
           signed(other, {
@@ -1090,5 +996,49 @@ it("keeps focus on a pending linked reply when a hiding presentation withdraws, 
   act(() => {
     vi.advanceTimersToNextFrame();
   });
+  pendingDelete.publish({ targetStatus: "unavailable", target: undefined });
   expect(document.activeElement).toBe(rowBox(b));
+  pendingDelete.unmount();
+  vi.useRealTimers();
+
+  const savedNav = navigationTo(d.id);
+  const restored = mount({
+    replies: [a, d, b],
+    navigation: {
+      ...savedNav,
+      traversal: true,
+      position: (key) =>
+        key === "thread"
+          ? { anchor: { id: a.id, top: 0, ancestors: [] } }
+          : undefined,
+    },
+    props: { messageId: d.id },
+    snapshot: { targetStatus: "ready", target: undefined },
+  });
+  expect(restored.latest.current?.linkedMessageId).toBeUndefined();
+  restored.unmount();
+
+  const missingAnchorNav = navigationTo(d.id);
+  const fallback = mount({
+    replies: [a, d, b],
+    navigation: {
+      ...missingAnchorNav,
+      traversal: true,
+      position: (key) =>
+        key === "thread"
+          ? { anchor: { id: c.id, top: 0, ancestors: [] } }
+          : undefined,
+    },
+    props: { messageId: d.id },
+    snapshot: { targetStatus: "loading" },
+  });
+  fallback.publish({ targetStatus: "ready", target: rowOf(fallback, d) });
+  expect(fallback.latest.current?.linkedMessageId).toBe(d.id);
+  const fallbackBefore = rowEl(d) as HTMLElement;
+  fallbackBefore.tabIndex = -1;
+  fallbackBefore.focus();
+  fallback.present({ ids: [a.id, b.id] });
+  expect(fallback.latest.current?.presentation).toBe("none");
+  expect(rowEl(d)).toBe(fallbackBefore);
+  expect(document.activeElement).toBe(fallbackBefore);
 });
