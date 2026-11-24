@@ -1,0 +1,409 @@
+/* The welcome tour's card: a paged card inside the shared popover surface. */
+.card {
+  position: relative;
+  display: grid;
+  gap: var(--space-3);
+  cursor: grab;
+  user-select: none;
+}
+.card:active {
+  cursor: grabbing;
+}
+.close {
+  position: absolute;
+  inset-block-start: var(--space-1);
+  inset-inline-end: var(--space-1);
+}
+.copy {
+  display: grid;
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
+  text-wrap: pretty;
+}
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-inline-start: var(--space-1);
+}
+.dots {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.dot {
+  inline-size: var(--space-1h);
+  block-size: var(--space-1h);
+  border-radius: var(--radius-pill);
+  background: var(--border-standard);
+  transition:
+    inline-size var(--duration-state) var(--ease-settle),
+    background-color var(--duration-state) var(--ease-state);
+}
+.dot[data-active] {
+  inline-size: var(--space-4);
+  background: var(--affordance-accent-prominent);
+}
+/* A last-page choice: two equal answers under the copy. */
+.choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+/* The tour's forward action carries the person's accent, like Send. */
+.choice,
+.actions {
+  --affordance-prominent: var(--affordance-accent-prominent);
+  --affordance-prominent-hover: var(--affordance-accent-prominent-hover);
+  --affordance-prominent-pressed: var(--affordance-accent-prominent-pressed);
+  --text-on-prominent: var(--text-on-accent);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* A ring around the part of Buzz a moved card names. It never takes a click. */
+.spotlight {
+  position: fixed;
+  z-index: var(--layer-popover);
+  border: 2px solid var(--affordance-accent-prominent);
+  pointer-events: none;
+  transition:
+    top var(--duration-state) var(--ease-settle),
+    left var(--duration-state) var(--ease-settle),
+    width var(--duration-state) var(--ease-settle),
+    height var(--duration-state) var(--ease-settle);
+}
+
+/*
+ * Drawings: decorative sketches of a conversation, a list or the search field.
+ * Every part shares one looping timeline so a drawing reads as one gesture:
+ *   0–12% rest · 12–56% arrive · 56–88% hold · 88–100% fade.
+ * The loop is a drawing rhythm, not an interaction duration, so it stays here.
+ */
+.scene {
+  --loop: 4.8s;
+  --row: var(--space-3);
+  --gap: var(--space-1);
+  --pad: var(--space-1h);
+  --delay: 0s;
+  --state: running;
+  display: grid;
+  align-content: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-container);
+  background: var(--surface-inset);
+  padding-block: var(--space-5);
+  padding-inline: var(--space-16);
+  pointer-events: none;
+  user-select: none;
+}
+.stage {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  animation: stage var(--loop) linear var(--delay) infinite both var(--state);
+}
+/* A still drawing never loops. */
+.scene[data-still] .stage {
+  animation: none;
+}
+.sketch {
+  display: grid;
+  gap: var(--gap);
+  padding: var(--pad);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-chip);
+  background: var(--surface-panel);
+  color: var(--border-standard);
+}
+.header {
+  display: flex;
+  align-items: center;
+  block-size: var(--row);
+  padding-inline: var(--space-1);
+}
+.bar {
+  flex: 1;
+  max-inline-size: 60%;
+  block-size: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+.header > .bar {
+  color: var(--text-subtle);
+  max-inline-size: 40%;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1h);
+  block-size: var(--row);
+  flex-shrink: 0;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-pill);
+  color: var(--border-standard);
+}
+.row[data-tone="accent"] {
+  background: var(--surface-sidebar-selected);
+  color: var(--text-sidebar-selected);
+}
+.row[data-enter] {
+  animation: enter-1 var(--loop) var(--ease-enter) var(--delay) infinite both
+    var(--state);
+}
+.row[data-enter="2"] {
+  animation-name: enter-2;
+}
+.row[data-enter="3"] {
+  animation-name: enter-3;
+}
+.lead {
+  flex-shrink: 0;
+  inline-size: var(--space-2);
+  block-size: var(--space-2);
+  background: currentColor;
+  border-radius: var(--space-half);
+}
+.lead[data-lead="person"] {
+  border-radius: var(--radius-pill);
+}
+/* Agents are squircles and people circles, as their avatars are. At these
+   sizes a rounded square reads the same as the avatar mask. */
+.lead[data-lead="agent"] {
+  border-radius: 30%;
+}
+.trail {
+  display: flex;
+  margin-inline-start: auto;
+}
+
+/* The bell sits before the header's title, as on the Activity page. */
+.bell {
+  order: -1;
+  flex-shrink: 0;
+  inline-size: var(--space-3);
+  block-size: var(--space-3);
+  margin-inline-end: var(--space-1h);
+  color: var(--text-standard);
+  transform-origin: 50% 0;
+  animation: ring var(--loop) var(--ease-state) var(--delay) infinite both
+    var(--state);
+}
+
+.switch {
+  position: relative;
+  display: block;
+  inline-size: var(--space-4);
+  block-size: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--border-standard);
+}
+.knob {
+  position: absolute;
+  inset-block-start: 1px;
+  inset-inline-start: 1px;
+  inline-size: var(--space-1h);
+  block-size: var(--space-1h);
+  border-radius: var(--radius-pill);
+  background: var(--text-subtle);
+}
+.switch[data-state="on"] {
+  background: var(--affordance-accent-prominent);
+}
+.switch[data-state="on"] .knob {
+  translate: var(--space-2) 0;
+  background: var(--text-on-accent);
+}
+.switch[data-state="flip"] {
+  animation: switch-track var(--loop) var(--ease-state) var(--delay) infinite
+    both var(--state);
+}
+.switch[data-state="flip"] .knob {
+  animation: switch-knob var(--loop) var(--ease-state) var(--delay) infinite
+    both var(--state);
+}
+
+.search {
+  --hairline: 1px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1h);
+  block-size: calc(var(--row) + var(--pad) * 2);
+  padding-inline: var(--space-2);
+  border: var(--hairline) solid var(--border-standard);
+  border-radius: var(--radius-pill);
+  background: var(--surface-panel);
+}
+.face {
+  flex-shrink: 0;
+  inline-size: var(--space-3);
+  block-size: var(--space-3);
+  border-radius: 30%;
+  background: var(--affordance-accent-prominent);
+}
+.typed {
+  flex: 1;
+  max-inline-size: 55%;
+  block-size: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--text-subtle);
+  animation: type var(--loop) steps(6, end) var(--delay) infinite both
+    var(--state);
+}
+/* The answer's mark sits under the face, and its bar starts with the typed
+   one: the pill's padding plus its border. */
+.search + .row {
+  --hairline: 1px;
+  gap: var(--space-2);
+  padding-inline-start: calc(
+    var(--space-2) +
+    var(--space-half) +
+    var(--hairline)
+  );
+}
+.search[data-agent="false"] + .row {
+  padding-inline-start: calc(var(--space-2) + var(--hairline));
+}
+
+/* Reduced motion holds the finished frame of every part. */
+@media (prefers-reduced-motion: reduce) {
+  .scene {
+    --delay: calc(var(--loop) * -0.7);
+    --state: paused;
+  }
+  .dot,
+  .spotlight {
+    transition: none;
+  }
+}
+
+@keyframes stage {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  88% {
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes enter-1 {
+  0%,
+  12% {
+    opacity: 0;
+    translate: calc(var(--space-2) * -1) 0;
+    background: var(--surface-sidebar-selected);
+    color: var(--text-sidebar-selected);
+  }
+  22%,
+  40% {
+    opacity: 1;
+    translate: 0 0;
+    background: var(--surface-sidebar-selected);
+    color: var(--text-sidebar-selected);
+  }
+  56%,
+  100% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes enter-2 {
+  0%,
+  22% {
+    opacity: 0;
+    translate: calc(var(--space-2) * -1) 0;
+    background: var(--surface-sidebar-selected);
+    color: var(--text-sidebar-selected);
+  }
+  32%,
+  48% {
+    opacity: 1;
+    translate: 0 0;
+    background: var(--surface-sidebar-selected);
+    color: var(--text-sidebar-selected);
+  }
+  64%,
+  100% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes enter-3 {
+  0%,
+  32% {
+    opacity: 0;
+    translate: calc(var(--space-2) * -1) 0;
+    background: var(--surface-sidebar-selected);
+    color: var(--text-sidebar-selected);
+  }
+  42%,
+  56% {
+    opacity: 1;
+    translate: 0 0;
+    background: var(--surface-sidebar-selected);
+    color: var(--text-sidebar-selected);
+  }
+  72%,
+  100% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes ring {
+  0%,
+  12%,
+  24%,
+  100% {
+    rotate: 0deg;
+  }
+  15% {
+    rotate: 10deg;
+  }
+  18% {
+    rotate: -8deg;
+  }
+  21% {
+    rotate: 4deg;
+  }
+}
+@keyframes switch-track {
+  0%,
+  22% {
+    background: var(--border-standard);
+  }
+  30%,
+  100% {
+    background: var(--affordance-accent-prominent);
+  }
+}
+@keyframes switch-knob {
+  0%,
+  22% {
+    translate: 0 0;
+    background: var(--text-subtle);
+  }
+  30%,
+  100% {
+    translate: var(--space-2) 0;
+    background: var(--text-on-accent);
+  }
+}
+@keyframes type {
+  0%,
+  12% {
+    max-inline-size: 0%;
+  }
+  30%,
+  100% {
+    max-inline-size: 55%;
+  }
+}
