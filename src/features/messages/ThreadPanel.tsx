@@ -38,6 +38,7 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -70,6 +71,7 @@ import { useListedChannel } from "../relay/listed-channel";
 import type { CSSProperties } from "react";
 import styles from "./Messages.module.css";
 import { Reading, readingPositioned } from "./use-reading";
+import { SheetCoveredContext } from "./ComposerSheet";
 import { useMessageReveal } from "./use-message-reveal";
 import { usePendingRequest } from "./use-pending-request";
 import {
@@ -815,6 +817,8 @@ function ThreadMessages({
   const profiles = useRowProfiles(session.profiles, rows);
   const agentPubkeys = useKnownAgentPubkeys(session, profiles);
   const scroller = useRef<HTMLElement>(null);
+  // Details stacked over an inline thread hide its history.
+  const covered = useContext(SheetCoveredContext);
   const positioned = useRef(false);
   const positionedLatestRequest = useRef<AbortSignal | undefined>(undefined);
   const shown = useRef(active);
@@ -2347,6 +2351,7 @@ function ThreadMessages({
         className={styles.threadHistoryFrame}
         data-thread-history-frame=""
         data-jump-visible={showJumpToLatest || undefined}
+        inert={covered}
       >
         <section
           ref={scroller}

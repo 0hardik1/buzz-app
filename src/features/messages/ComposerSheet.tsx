@@ -121,6 +121,10 @@ const CoveredSheetContext = createContext<
   ((height: number | undefined) => void) | undefined
 >(undefined);
 
+/** Details cover the thread's sheet: its history can't be seen, so it takes
+ * no focus and nothing in it is read. The reply box stays usable. */
+export const SheetCoveredContext = createContext(false);
+
 /** Reports what the details read at to the sheet they are stacked over: their
  * header, text and the composer's space, not their box, which stretches to
  * cover that sheet. A panel doesn't report; the page sets `tall` for it. */
@@ -704,7 +708,9 @@ export function ComposerSheet({
                 <CoveredSheetContext
                   value={containsComposer ? report : undefined}
                 >
-                  {children}
+                  <SheetCoveredContext value={covering !== undefined}>
+                    {children}
+                  </SheetCoveredContext>
                 </CoveredSheetContext>
               </div>
             </div>

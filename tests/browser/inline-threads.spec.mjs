@@ -348,6 +348,15 @@ test.describe("Inline", () => {
     // The header's controls can't be pressed there, so they take no focus.
     for (const label of ["Close", "Move to side panel"])
       expect(await takesFocus(headerControl(page, label))).toBe(false);
+    // Nor does the history they hide, which reads nothing while hidden.
+    const history = sheet(page).getByRole("region", {
+      name: "Thread messages",
+      includeHidden: true,
+    });
+    expect(
+      await history.evaluate((element) => !!element.closest("[inert]")),
+    ).toBe(true);
+    expect(await takesFocus(history)).toBe(false);
     // They read whole, taller than the thread was, without scrolling.
     expect(await height(reader)).toBeGreaterThan(short);
     expect(await room(reader)).toBeGreaterThan(1);
@@ -366,6 +375,7 @@ test.describe("Inline", () => {
     await close(reader).click();
     await expect(reader).toHaveCount(0);
     await expect.poll(() => height(sheet(page))).toBeLessThanOrEqual(short + 1);
+    expect(await takesFocus(history)).toBe(true);
     expect(await takesFocus(headerControl(page, "Close"))).toBe(true);
     // Longer than a sheet may be, they stop at the limit and scroll.
     findings(app, "Longest findings", 40, root);
