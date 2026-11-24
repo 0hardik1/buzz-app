@@ -64,8 +64,6 @@ export function createHuddleVoices(
     let starting: Promise<void> | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let release: (() => void) | undefined;
-    let speech = Promise.resolve();
-    let queuedSpeech = 0;
     let localPlayout: ReturnType<Huddles["openLocalPlayout"]>;
     const fail = (error?: unknown) => {
       if (abort.signal.aborted) return;
@@ -147,7 +145,6 @@ export function createHuddleVoices(
         heartbeat = setInterval(() => {
           void bridge.touch(id).catch(fail);
         }, 5000);
-        const speak = bridge.speak;
         const opened = await voice({
           agent,
           conversation: transcriptDestination ?? { channelId: room },
@@ -155,25 +152,6 @@ export function createHuddleVoices(
             transcriptDestination,
             streamTranscript: () =>
               huddles.snapshot().routing?.liveTranscript === true,
-            ...(speak && {
-              speakText: (text: string) => {
-                if (abort.signal.aborted || queuedSpeech >= 3) return;
-                // Keep native input bounded. The full answer stays in the chat.
-                const summary = Array.from(text).slice(0, 750).join("");
-                queuedSpeech++;
-                speech = speech
-                  .then(async () => {
-                    if (!abort.signal.aborted) await speak(id, summary);
-                  })
-                  .catch((error) => {
-                    if (!abort.signal.aborted)
-                      report(call, `${agent.name}: ${String(error)}`);
-                  })
-                  .finally(() => {
-                    queuedSpeech--;
-                  });
-              },
-            }),
             resumeOnClose: () => {
               const current = huddles.snapshot();
               const relayState = relay.snapshot();

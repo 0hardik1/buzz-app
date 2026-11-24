@@ -338,7 +338,6 @@ type Lane = {
     loaded: Loaded;
     signal: AbortSignal;
     origin?: Readonly<{ channelId: string; root?: string }>;
-    speakText?: (text: string) => void;
     restore(): Promise<void>;
     rejectedSpeechClosing?: Promise<void>;
     /** Ends the seat, and tells its owner why. */
@@ -522,7 +521,7 @@ function restoreNotes(request: Request) {
 function noteOf(
   request: Request,
   continuation?: VoiceContinuation,
-  speaking = false,
+  postHuddleReply = false,
 ) {
   request.notes ??=
     request.agent.notes?.(
@@ -539,8 +538,8 @@ function noteOf(
       : request.resumed
         ? RESUMED_PROMPT
         : undefined,
-    speaking
-      ? "For this request in the Huddle, put your answer in your final response so the voice session can speak it. Buzz posts that same reply in this conversation. Use send only for separate messages the user explicitly requests."
+    postHuddleReply
+      ? "For this request in the Huddle, put your answer in your final response. Buzz posts that same reply in this conversation. Use send only for separate messages the user explicitly requests."
       : undefined,
     ...request.notes,
     turnNote(
@@ -2352,7 +2351,6 @@ export class CodexRuntime {
           loaded,
           signal,
           ...(inOrigin && { origin: seat.conversation }),
-          ...(seat.speakText && { speakText: seat.speakText }),
           end(error) {
             void close();
             seat.ended(error);
@@ -4555,7 +4553,7 @@ export class CodexRuntime {
     let explain: (() => string | undefined) | undefined;
     let turnFailed = false;
     let continuing = false;
-    let speaking = false;
+    let postHuddleReply = false;
     let turnMayBeRunning = adopted !== undefined;
     /** The voice seat whose thread this turn runs on, if any. */
     let seat: Lane["voice"];
@@ -4745,9 +4743,8 @@ export class CodexRuntime {
               .filter(Boolean)
               .join("\n\n") + "\n\n";
         active.threadId = threadId;
-        speaking =
-          !!seat?.speakText &&
-          seat.origin?.channelId === request.conversation.channelId &&
+        postHuddleReply =
+          seat?.origin?.channelId === request.conversation.channelId &&
           seat.origin.root === request.replyRoot &&
           !seat.signal.aborted;
         const turnParams = {
@@ -4763,7 +4760,7 @@ export class CodexRuntime {
                 ]
                   .filter(Boolean)
                   .join("\n\n")) ??
-              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request, continuation, speaking), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
+              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request, continuation, postHuddleReply), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
           ),
           model,
           effort,
@@ -4881,10 +4878,8 @@ export class CodexRuntime {
           (taken) => taken.finalDelivery instanceof Error,
         )?.finalDelivery;
         if (failed instanceof Error) throw failed;
-        if (speaking && textReply && request.finalDelivery !== true) {
+        if (postHuddleReply && textReply && request.finalDelivery !== true)
           await this.publish(request, textReply);
-          if (!seat?.signal.aborted) seat?.speakText?.(textReply);
-        }
         // A turn may end without a reply when there is nothing new to say.
         for (const taken of active.requests) taken.answered();
         this.status(agent.key, key, "Idle", notice);

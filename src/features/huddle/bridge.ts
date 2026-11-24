@@ -27,7 +27,6 @@ export type HuddleBridge = {
   touch(id: string): Promise<void>;
   send(id: string, samples: number[]): Promise<void>;
   recognize?(id: string, samples: number[]): Promise<string>;
-  speak?(id: string, text: string): Promise<void>;
 };
 export const nativeHuddles: HuddleBridge = {
   available: isTauri(),
@@ -51,5 +50,4 @@ export const nativeHuddles: HuddleBridge = {
   touch: (id) => invoke("huddle_touch", { id }),
   send: (id, samples) => invoke("huddle_pcm", { id, samples }),
   recognize: (id, samples) => invoke("huddle_recognize", { id, samples }),
-  speak: (id, text) => invoke("huddle_speak", { id, text }),
 };

@@ -642,29 +642,6 @@ pub(crate) async fn huddle_recognize(
 }
 
 #[tauri::command]
-pub(crate) async fn huddle_speak(
-    huddles: tauri::State<'_, Huddles>,
-    id: String,
-    text: String,
-) -> Result<()> {
-    if text.trim().is_empty() || text.len() > 3200 {
-        return Err("Invalid Huddle reply length".into());
-    }
-    let (mut stop, pcm) = huddles
-        .0
-        .lock()
-        .map_err(|_| "Huddle unavailable")?
-        .get(&id)
-        .filter(|call| call.agent.is_some() && !*call.stop.borrow())
-        .map(|call| (call.stop.subscribe(), call.pcm.clone()))
-        .ok_or("The agent’s Huddle seat has ended")?;
-    tokio::select! {
-        _ = stop.changed() => Ok(()),
-        result = speech::synthesize(text, pcm) => result,
-    }
-}
-
-#[tauri::command]
 pub(crate) fn huddle_pcm(
     huddles: tauri::State<'_, Huddles>,
     id: String,

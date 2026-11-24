@@ -1086,8 +1086,6 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
     conversation: Readonly<{ channelId: string; root?: string }>;
     /** Continue in text when the host ends a conversation's Huddle. */
     resumeOnClose?(): boolean;
-    /** Play an existing text reply into this Huddle under the agent’s seat. */
-    speakText?(text: string): void;
     signal: AbortSignal;
     /** Agent speech fragments in the host-selected conversation. */
     transcriptDelta?(delta: string): void;

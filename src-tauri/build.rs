@@ -75,7 +75,6 @@ fn main() {
             "huddle_close",
             "huddle_pcm",
             "huddle_recognize",
-            "huddle_speak",
             "huddle_touch",
             "pairing_account",
             "pairing_start",
@@ -406,28 +405,6 @@ fn federated_identity_servers(
     .unwrap_or_else(|error| panic!("{error}"))
 }
 
-#[cfg(test)]
-mod tests {
-    /// Tauri's metadata in each build mode: `tauri dev` builds without
-    /// `custom-protocol`; `tauri build`, `--debug` or not, builds with it.
-    #[test]
-    fn pinned_viewer_turns_off_nip_fi_only_in_tauri_dev() {
-        let directory = tempfile::tempdir().unwrap();
-        let local = directory.path().join(".env.local");
-        std::fs::write(&local, "BUZZ_DEV_VIEWER=viewer.example\n").unwrap();
-        for (mode, tauri_dev, fi) in [
-            ("dev", "true", &[][..]),
-            ("packaged debug", "false", &["bb-public"][..]),
-            ("packaged release", "false", &["bb-public"][..]),
-        ] {
-            let env = |key: &str| (key == "DEP_TAURI_DEV").then(|| tauri_dev.to_string());
-            let servers = super::federated_identity_servers(&local, env);
-            let ids: Vec<_> = servers.iter().map(|config| config.id.as_str()).collect();
-            assert_eq!(ids, fi, "{mode}");
-        }
-    }
-}
-
 fn build_huddle_speech() {
     let source = "src/relay/huddle/speech.m";
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
@@ -465,4 +442,26 @@ fn build_huddle_speech() {
     println!("cargo:rustc-link-lib=static=huddle_speech");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=Speech");
+}
+
+#[cfg(test)]
+mod tests {
+    /// Tauri's metadata in each build mode: `tauri dev` builds without
+    /// `custom-protocol`; `tauri build`, `--debug` or not, builds with it.
+    #[test]
+    fn pinned_viewer_turns_off_nip_fi_only_in_tauri_dev() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join(".env.local");
+        std::fs::write(&local, "BUZZ_DEV_VIEWER=viewer.example\n").unwrap();
+        for (mode, tauri_dev, fi) in [
+            ("dev", "true", &[][..]),
+            ("packaged debug", "false", &["bb-public"][..]),
+            ("packaged release", "false", &["bb-public"][..]),
+        ] {
+            let env = |key: &str| (key == "DEP_TAURI_DEV").then(|| tauri_dev.to_string());
+            let servers = super::federated_identity_servers(&local, env);
+            let ids: Vec<_> = servers.iter().map(|config| config.id.as_str()).collect();
+            assert_eq!(ids, fi, "{mode}");
+        }
+    }
 }
