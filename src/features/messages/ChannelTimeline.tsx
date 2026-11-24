@@ -1,5 +1,6 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The history region must support keyboard scrolling.
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
+import { type MediaReviewOrigin, useComposerScope } from "./composer-overlay";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
 import { ActivityGroupPreview } from "./ActivityGroupPreview";
 import { RelayedRunPreview } from "./RelayedRunPreview";
@@ -286,6 +287,7 @@ export type ChannelTimelineProps = {
     seconds: number,
     hasComments?: boolean,
     initialAttachments?: readonly Attachment[],
+    opening?: MediaReviewOrigin,
   ): void;
 };
 
@@ -326,6 +328,21 @@ function Timeline({
   chatPresentation = false,
   startsThreads = true,
 }: ChannelTimelineProps) {
+  // Links outside a message row, such as profiles in a membership notice or an
+  // activity preview, open over this conversation's view, as a row's do.
+  const composerView = useComposerScope();
+  const inView = !!composerView;
+  const viewRoot = composerView?.rootId;
+  const openViewLink = useCallback(
+    (url: string, rootId: string | undefined) =>
+      onOpenLink(
+        url,
+        rootId
+          ? { rootId, ...(inView && { view: { rootId: viewRoot } }) }
+          : undefined,
+      ),
+    [onOpenLink, inView, viewRoot],
+  );
   useMessageSelectionCopy();
   const [arrangement, display] = useArrangement({
     session: queries,
@@ -2703,13 +2720,17 @@ function Timeline({
                         onToggle={toggleDisclosure}
                         extensions={extensions}
                         scope={scope}
-                        onOpenLink={onOpenLink}
+                        onOpenLink={(url) =>
+                          openViewLink(url, disclosure.ids[0])
+                        }
                       />
                     ) : (
                       <ActivityGroupPreview
                         session={queries}
                         group={disclosure}
-                        openActivity={onOpenLink}
+                        openActivity={(url) =>
+                          openViewLink(url, disclosure.ids[0])
+                        }
                         canOpenActivity={canOpenLink}
                         renderHistory={(entry) => renderMessage(entry, true)}
                         profiles={profiles}
@@ -2737,7 +2758,7 @@ function Timeline({
                       media={queries.media}
                       agentPubkeys={agentPubkeys}
                       day={day}
-                      onOpenLink={onOpenLink}
+                      onOpenLink={(url) => openViewLink(url, row.id)}
                       canOpenLink={canOpenLink}
                     />
                   ) : (
