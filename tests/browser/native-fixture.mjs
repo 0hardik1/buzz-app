@@ -5,6 +5,14 @@ import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./run-command.mjs";
 
+// Import-time validation also catches native dependencies in imported suites or
+// shared fixtures during --list, before ordinary runners execute any tests.
+assert.notEqual(
+  process.env.BUZZ_BROWSER_NATIVE_TESTS,
+  "exclude",
+  "Native browser dependencies must be classified in playwright.ci.config.mjs",
+);
+
 const root = fileURLToPath(new URL("../../", import.meta.url));
 /** CI consumes a same-run immutable build; each test still supplies its own home. */
 export function verifiedFixture(directory, revision, name = "fixture-bridge") {
