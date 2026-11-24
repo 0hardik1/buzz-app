@@ -121,10 +121,11 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
       target: row("Activity"),
       visual: (
         <Scene>
-          {/* Newest on top: the later arrival is the first row. */}
+          {/* An agent mentions you, then someone replies in your thread;
+              the bell rings for each. Newest on top. */}
           <Sketch header={<Bell />}>
-            <Row lead="person" enter={2} />
-            <Row lead="agent" enter={1} />
+            <Row lead="person" kind="reply" enter={2} />
+            <Row lead="agent" kind="mention" enter={1} />
             <Row lead="person" />
           </Sketch>
         </Scene>

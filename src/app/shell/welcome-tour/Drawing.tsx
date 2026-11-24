@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import {
+  AtIcon,
   BellIcon,
   HashIcon,
   LockIcon,
   PlugIcon,
   RobotIcon,
+  ThreadIcon,
   UserIcon,
 } from "../../../shared/design-system/icons";
 import styles from "./WelcomeTour.module.css";
@@ -72,6 +74,7 @@ export function Row({
   lead = "plugin",
   tone = "neutral",
   enter,
+  kind,
   trail,
 }: {
   /** The leading mark: a plugin (rounded square), a person (circle) or an agent (squircle). */
@@ -80,6 +83,8 @@ export function Row({
   tone?: "neutral" | "accent";
   /** Arrive on the timeline; the step staggers rows that arrive together. */
   enter?: 1 | 2 | 3;
+  /** What it is, shown before its text: a mention (@) or a thread reply. */
+  kind?: "mention" | "reply";
   /** A control at the row's end, such as a Switch. */
   trail?: ReactNode;
 }) {
@@ -91,6 +96,11 @@ export function Row({
         </span>
       ) : (
         <Mark lead={lead} />
+      )}
+      {kind != null && (
+        <span className={styles.kind}>
+          {kind === "mention" ? <AtIcon /> : <ThreadIcon />}
+        </span>
       )}
       <span className={styles.bar} />
       {trail != null && <span className={styles.trail}>{trail}</span>}
@@ -173,8 +183,14 @@ export function Lock() {
 }
 
 /** The bell before a title, ringing once as the first item arrives. */
+/** The Activity bell; it rings, and shows a dot, as things arrive. */
 export function Bell() {
-  return <BellIcon className={styles.bell} />;
+  return (
+    <span className={styles.bell}>
+      <BellIcon />
+      <span className={styles.badge} />
+    </span>
+  );
 }
 
 /** An on/off switch; flip turns on during the loop. */
