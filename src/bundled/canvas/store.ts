@@ -178,6 +178,7 @@ export function createCanvasChannel(options: {
       enqueue(async () => {
         for (let attempt = 0; ; attempt++) {
           const scene = update(saved.scene);
+          if (scene === saved.scene) return;
           set({ status: "ready", scene });
           try {
             saved = await saveScene(

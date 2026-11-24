@@ -9,6 +9,7 @@ import { createCanvasChannel } from "./store";
 import { memoryCanvasRelay } from "./testing";
 import { canvasTools } from "./tools";
 import { createCanvasViews } from "./view";
+import { positionNow, videoView } from "./views/video";
 
 afterEach(cleanup);
 
@@ -82,6 +83,60 @@ it("a follower sees what the driver does and can look around alone without chang
   // Taking control makes Ada the follower.
   await user.click(ben.getByRole("button", { name: "Take control" }));
   expect(await ada.findByRole("status")).toHaveTextContent("Following Ben.");
+});
+
+it("a follower cannot switch views for everyone", async () => {
+  const user = userEvent.setup();
+  const { seat } = setup();
+  const ada = seat(ADA, "Ada's screen");
+  const ben = seat(BEN, "Ben's screen");
+  await user.click(await ada.findByRole("button", { name: "Take control" }));
+  await user.click(ada.getByRole("button", { name: "Counter" }));
+  await user.click(ada.getByRole("button", { name: "Add a view" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Counter" }));
+  const tabs = await ben.findAllByRole("tab");
+  expect(tabs).toHaveLength(2);
+  expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+
+  await user.click(tabs[0] as HTMLElement);
+  expect(ben.getAllByRole("tab")[1]).toHaveAttribute("aria-selected", "true");
+  expect(ada.getAllByRole("tab")[1]).toHaveAttribute("aria-selected", "true");
+});
+
+it("taking control after looking around keeps what others added meanwhile", async () => {
+  const user = userEvent.setup();
+  const { seat } = setup();
+  const ada = seat(ADA, "Ada's screen");
+  const ben = seat(BEN, "Ben's screen");
+  await user.click(await ada.findByRole("button", { name: "Take control" }));
+  await user.click(ada.getByRole("button", { name: "Counter" }));
+  await user.click(await ben.findByRole("button", { name: "Stop following" }));
+  await user.click(ben.getByRole("button", { name: "Count 0" }));
+
+  await user.click(ada.getByRole("button", { name: "Add a view" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Counter" }));
+  expect(await ada.findAllByRole("tab")).toHaveLength(2);
+  expect(ben.getAllByRole("tab")).toHaveLength(1);
+
+  // Ben's own change and Ada's new view are both there, on his view.
+  await user.click(ben.getByRole("button", { name: "Take control" }));
+  expect(await ada.findByRole("status")).toHaveTextContent("Following Ben.");
+  expect(ada.getAllByRole("tab")).toHaveLength(2);
+  expect(ada.getAllByRole("tab")[0]).toHaveAttribute("aria-selected", "true");
+  expect(ada.getByRole("button", { name: "Count 1" })).toBeVisible();
+});
+
+it("a video that has been playing is further along for someone who joins late", () => {
+  const state = videoView.parse({
+    url: "https://media.example/demo.webm",
+    time: 10,
+    playing: true,
+    at: 1_000_000,
+  });
+  expect(state && positionNow(state, 1_060_000)).toBe(70);
+  expect(state && positionNow({ ...state, playing: false }, 1_060_000)).toBe(
+    10,
+  );
 });
 
 it("an agent opens and reads views, and waits its turn while a person drives", async () => {

@@ -22,6 +22,18 @@ import type { CanvasChannel } from "./store";
 import type { CanvasViews } from "./view";
 import styles from "./CanvasPanel.module.css";
 
+type Edit = (scene: CanvasScene) => CanvasScene;
+
+/** Applies each edit that still makes sense: a view it changed may be gone. */
+const replay = (scene: CanvasScene, edits: readonly Edit[]) =>
+  edits.reduce((current, edit) => {
+    try {
+      return edit(current);
+    } catch {
+      return current;
+    }
+  }, scene);
+
 /** A channel's canvas: the views on it, who is driving, and whether this
  * viewer follows them. Following is this viewer's own choice and is never
  * saved; everything else is the shared scene. */
@@ -38,25 +50,45 @@ export function CanvasPanel({
 }) {
   const shared = useSyncExternalStore(channel.subscribe, channel.snapshot);
   const types = useSyncExternalStore(views.subscribe, views.list);
-  // Set while this viewer looks around alone instead of following the driver.
-  const [own, setOwn] = useState<CanvasScene>();
+  // Set while this viewer looks around alone instead of following the driver:
+  // the scene they left, and what they have done to it since.
+  const [own, setOwn] = useState<{ base: CanvasScene; edits: Edit[] }>();
   const driver = shared.scene.driver;
   const driving = driver === viewer;
   const led = !!driver && !driving;
   if (own && !led) setOwn(undefined);
   const roaming = led && !!own;
   const following = led && !own;
-  const scene = roaming && own ? own : shared.scene;
-  const change = (update: (scene: CanvasScene) => CanvasScene) => {
-    if (roaming) setOwn((current) => current && update(current));
-    // The channel shows why a save failed; nothing more to do with it here.
-    else void channel.change(update).catch(() => {});
+  const scene = roaming && own ? replay(own.base, own.edits) : shared.scene;
+  const change = (update: Edit) => {
+    if (following) return;
+    if (roaming)
+      setOwn(
+        (current) =>
+          current && { ...current, edits: [...current.edits, update] },
+      );
+    else
+      void channel
+        // Someone may have taken control while this change waited its turn.
+        .change((latest) =>
+          latest.driver && latest.driver !== viewer ? latest : update(latest),
+        )
+        // The channel shows why a save failed; nothing more to do with it here.
+        .catch(() => {});
   };
   const takeControl = () => {
-    const mine = scene;
+    // Followers are taken to the view this viewer was looking at alone.
+    const looking = roaming ? scene.active : undefined;
+    const edits = [
+      ...(own?.edits ?? []),
+      ...(looking
+        ? [(latest: CanvasScene) => activateItem(latest, looking)]
+        : []),
+    ];
     setOwn(undefined);
     void channel
-      .change((latest) => setDriver(roaming ? mine : latest, viewer))
+      // Onto the latest scene, so what others added meanwhile survives.
+      .change((latest) => setDriver(replay(latest, edits), viewer))
       .catch(() => {});
   };
   const driverName = driver ? name(driver) : "";
@@ -109,7 +141,7 @@ export function CanvasPanel({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setOwn(shared.scene)}
+            onClick={() => setOwn({ base: shared.scene, edits: [] })}
           >
             Stop following
           </Button>
