@@ -109,9 +109,7 @@ for (const width of [480, 390]) {
     });
     // Keyboard highlight uses the same danger fill as pointer highlight.
     // Base UI ignores WebKit's zero-delta synthetic hover events.
-    await page
-      .getByRole("menuitem", { name: "Open message", exact: true })
-      .focus();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).focus();
     await page.keyboard.press("ArrowDown");
     await expect(cancel).toHaveAttribute("data-highlighted", "");
     const danger = await cancel.evaluate((el) => ({
