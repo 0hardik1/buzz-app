@@ -5,7 +5,7 @@ export type PendingSnapshot =
   | Readonly<{ typed: string; shown: boolean }>
   | undefined;
 
-/** Neovim's `timeoutlen` in the owner's config: show the menu after a pause. */
+/** About Neovim's `timeoutlen`: show the menu after a pause. */
 export const SHOW_AFTER_MS = 300;
 /** Marks the which-key menu, whose own clicks and keys belong to the sequence. */
 export const WHICH_KEY = "data-vim-which-key";

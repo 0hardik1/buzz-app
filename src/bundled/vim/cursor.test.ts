@@ -5,7 +5,7 @@ import {
   type MessageList,
 } from "../../features/messages/message-selection";
 import type { ChannelMessage } from "../../features/relay/contracts";
-import { CURSOR, currentCursor, trackCursor } from "./cursor";
+import { claim, CURSOR, currentCursor, trackCursor } from "./cursor";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -212,4 +212,20 @@ test("a dialog keeps focus, and stopping clears the marks and pins", async () =>
   stop();
   expect(marked()).toEqual([]);
   expect(pins).toEqual([]);
+});
+
+test("turning the plugin off and on keeps the cursor when the old stop runs last", async () => {
+  const { box, marked, pins } = conversation();
+  const stopOld = trackCursor();
+  await frame();
+  // Disabling finishes after a render, so the re-enable starts first.
+  cleanups.push(trackCursor());
+  stopOld();
+  await frame();
+  expect(marked()).toEqual(["three"]);
+  expect(pins).toEqual(["three"]);
+  // Enter into a thread claims focus through the live tracker.
+  claim(() => box("one"));
+  await frame();
+  expect(document.activeElement).toBe(box("one"));
 });

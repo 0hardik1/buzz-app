@@ -3,7 +3,14 @@
  * their own arrow-key behavior: a move is that arrow, pressed on the focus.
  * Only what nothing handles falls back to scrolling.
  */
-import { currentCursor, cursorRow, messageRows } from "./cursor";
+import {
+  currentCursor,
+  cursorRow,
+  messageRows,
+  ROW,
+  TYPING,
+  UNAVAILABLE,
+} from "./cursor";
 import { WHICH_KEY } from "./pending";
 import {
   activeMessageList,
@@ -25,15 +32,16 @@ import {
 } from "../channels/conversation-rows";
 import { lineItem, sameLine } from "./lines";
 
-const ROW = "[data-message-id]";
 const MODAL = '[aria-modal="true"], dialog[open]';
-const UNAVAILABLE = '[hidden], [inert], [aria-hidden="true"]';
-const TYPING =
-  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
 const LINE = 64;
 /** A menu or a choice list (an open Select): its keys move between options. */
 export const POPUP_LIST = '[role="menu"], [role="listbox"]';
 export const SIDEBAR = 'aside[aria-label="Sidebar"]';
+/** An open menu, not the which-key menu; focus reaches it a frame later. */
+export const openMenu = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="menu"][data-open]')].find(
+    (menu) => !menu.closest(`[${WHICH_KEY}]`),
+  );
 /** What j and k can walk to, fields included (see `FIELD_SELECTED`). */
 const ITEM =
   'a[href], button, summary, input, textarea, select, [contenteditable="true"], [tabindex]';
@@ -41,7 +49,7 @@ const ITEM =
  * The host's mark for a field that holds keyboard focus without being edited:
  * where j and k land on one, until i or Enter edits it.
  */
-export const FIELD_SELECTED = "data-field-selected";
+const FIELD_SELECTED = "data-field-selected";
 /** Fields that take text, so a selected one swallows other keys. */
 export const TEXT_FIELD =
   'input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
@@ -114,7 +122,7 @@ function inView(element: HTMLElement, frame?: DOMRect) {
 }
 
 /** Messages showing in `root`, oldest first. */
-export function visibleMessages(root: ParentNode | undefined) {
+function visibleMessages(root: ParentNode | undefined) {
   if (!root) return [];
   return [...root.querySelectorAll<HTMLElement>(ROW)].filter(
     (row) => !!row.dataset.messageId && inView(row),
@@ -407,7 +415,7 @@ const PART =
  * The focused message, then its parts in order; undefined when the focus is
  * not in a message or it has no parts. Its hover toolbar is left to `go`.
  */
-export function messageStops() {
+function messageStops() {
   const origin = focused();
   const row = origin?.closest<HTMLElement>(ROW);
   if (!origin || !row || origin.matches(TYPING)) return;
@@ -586,9 +594,7 @@ export function openActions() {
   // WebKit can leave focus on the item; the menu's keys need it inside.
   let frames = 10;
   const settle = () => {
-    const menu = [
-      ...document.querySelectorAll<HTMLElement>('[role="menu"][data-open]'),
-    ].find((popup) => !popup.closest(`[${WHICH_KEY}]`));
+    const menu = openMenu();
     if (menu?.contains(document.activeElement)) return;
     if (menu) menu.focus();
     else if (--frames > 0) requestAnimationFrame(settle);

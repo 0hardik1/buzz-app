@@ -32,6 +32,7 @@ import {
   top,
   focused,
   typing,
+  openMenu,
   POPUP_LIST,
   SIDEBAR,
   editField,
@@ -216,9 +217,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       const origin = focused();
       // A just-opened menu owns its keys before focus reaches it, so an
       // item's key typed at once (go, then r) runs that item.
-      const opening = [
-        ...document.querySelectorAll<HTMLElement>('[role="menu"][data-open]'),
-      ].find((menu) => !menu.closest(`[${WHICH_KEY}]`));
+      const opening = openMenu();
       if (
         opening &&
         event.key.length === 1 &&

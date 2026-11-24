@@ -1,7 +1,7 @@
 # Vim keys
 
-Move around Buzz and act on what you select with Vim-style keys. Keys never
-fire while you type in a field or a terminal.
+Move around Buzz and act on what you select with Vim-style keys. Apart from
+Escape, keys never fire while you type in a field or a terminal.
 
 ## Getting started
 

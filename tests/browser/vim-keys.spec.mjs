@@ -271,11 +271,17 @@ test("a selection stays visible through its menus, and Tab and j reach people an
   // j and k step between sidebar rows, which have no arrow keys of their own.
   await page.keyboard.press("\\");
   const nav = page.getByRole("navigation", { name: "Subscribed channels" });
-  await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+  await expect(
+    nav.getByRole("button", { name: "Alpha", exact: true }),
+  ).toBeFocused();
   await page.keyboard.press("j");
-  await expect(nav.getByRole("button", { name: "Beta" })).toBeFocused();
+  await expect(
+    nav.getByRole("button", { name: "Beta", exact: true }),
+  ).toBeFocused();
   await page.keyboard.press("k");
-  await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+  await expect(
+    nav.getByRole("button", { name: "Alpha", exact: true }),
+  ).toBeFocused();
 });
 
 // Real focus handoffs (the host's composer autofocus, Base UI's return
@@ -323,7 +329,9 @@ test.describe("the cursor", () => {
 
     await page.keyboard.press("\\");
     const nav = page.getByRole("navigation", { name: "Subscribed channels" });
-    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    await expect(
+      nav.getByRole("button", { name: "Alpha", exact: true }),
+    ).toBeFocused();
     await expect(cursor(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
@@ -374,7 +382,7 @@ test.describe("the cursor", () => {
     await page.keyboard.press("b");
     await expect(box(page, 38)).toBeFocused();
     // So does a click in the sidebar.
-    await nav.getByRole("button", { name: "Beta" }).click();
+    await nav.getByRole("button", { name: "Beta", exact: true }).click();
     await expect(box(page, 2, "beta")).toBeFocused();
     await expect(composer(page, "Beta")).not.toBeFocused();
   });
@@ -424,7 +432,9 @@ test.describe("the cursor", () => {
     const nav = page.getByRole("navigation", { name: "Subscribed channels" });
     const sidebar = page.locator('aside[aria-label="Sidebar"]');
     await page.keyboard.press("\\");
-    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    await expect(
+      nav.getByRole("button", { name: "Alpha", exact: true }),
+    ).toBeFocused();
     // Headings are stops too; h and l reach their buttons on the same line.
     await page.keyboard.press("k");
     const team = nav.locator("summary").filter({ hasText: "Team" });
@@ -881,7 +891,9 @@ test.describe("with an unread conversation", () => {
     // So the pane keys work again, rather than editing the draft.
     await page.keyboard.press(apple ? "Control+h" : "Alt+h");
     const nav = page.getByRole("navigation", { name: "Subscribed channels" });
-    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    await expect(
+      nav.getByRole("button", { name: "Alpha", exact: true }),
+    ).toBeFocused();
     await expect(alpha).toHaveText("hello");
   });
 });

@@ -17,15 +17,16 @@ import {
 } from "../../features/messages/message-selection";
 
 export const CURSOR = "data-message-cursor";
-const ROW = "[data-message-id]";
+export const ROW = "[data-message-id]";
+export const UNAVAILABLE = '[hidden], [inert], [aria-hidden="true"]';
 const WORKSPACE = "[data-channel-workspace]";
-const TYPING =
+export const TYPING =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
 /** Surfaces that own focus while open or closing, until they return it. */
 const OVERLAY =
   '[aria-modal="true"]:not([data-closed]), [role="dialog"]:not([aria-modal="false"]), dialog[open], [role="menu"], [data-vim-which-key]';
 /** Clicks in the sidebar's conversations leave focus on the cursor. */
-const SIDEBAR = `nav[aria-label="${CONVERSATION_LIST_LABEL}"]`;
+const CONVERSATION_NAV = `nav[aria-label="${CONVERSATION_LIST_LABEL}"]`;
 
 type Cursor = {
   id: string;
@@ -45,7 +46,7 @@ export const messageRows = (list: HTMLElement) =>
     (row) =>
       !!row.dataset.messageId &&
       messageListOf(row)?.element === list &&
-      !row.closest('[inert], [hidden], [aria-hidden="true"]'),
+      !row.closest(UNAVAILABLE),
   );
 
 function keyOf(list: HTMLElement) {
@@ -252,21 +253,30 @@ export function trackCursor() {
     pointing = event.type === "pointerdown";
     if (!overlayOpen()) claimed = undefined;
   };
-  claimFocus = (find) => {
+  const claim = (find: () => HTMLElement | undefined) => {
     claimed = find;
     schedule();
   };
+  claimFocus = claim;
   const pointerdown = (event: PointerEvent) => {
     choose(event);
     focusin(event);
   };
   const click = (event: MouseEvent) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (target && (target.closest(SIDEBAR) || messageListOf(target)))
+    if (target && (target.closest(CONVERSATION_NAV) || messageListOf(target)))
       clicked = true;
     schedule();
   };
-  const observer = new MutationObserver(schedule);
+  // A message's own content, such as a streaming reply, can't move a cursor;
+  // rows added, removed or re-keyed can.
+  const insideRow = (node: Node) =>
+    !!(
+      node instanceof Element ? node : node.parentElement
+    )?.parentElement?.closest(ROW);
+  const observer = new MutationObserver((records) => {
+    if (!records.every((record) => insideRow(record.target))) schedule();
+  });
   observer.observe(document.body, {
     childList: true,
     subtree: true,
@@ -290,6 +300,9 @@ export function trackCursor() {
     removeEventListener("keydown", choose, true);
     removeEventListener("focus", schedule);
     removeEventListener("blur", schedule);
+    // Disabling finishes after a render, so a re-enable may already own the
+    // shared state; leave it to that tracker.
+    if (claimFocus !== claim) return;
     claimFocus = undefined;
     for (const cursor of cursors.values()) cursor.release?.();
     cursors.clear();
