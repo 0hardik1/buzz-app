@@ -104,7 +104,9 @@ async function returnedFocus(page) {
 }
 
 const visibleInSettings = {
-  closeUnderToast: true,
+  // The stack starts below the header's controls, now the Settings close
+  // button's row, so it no longer covers that button.
+  closeUnderToast: false,
   inSettings: true,
   ring: "solid 2px 2px",
   toastsOverRing: 0,
@@ -131,10 +133,10 @@ async function reachOverSettings(page, app) {
   expect(noticeBox.x + noticeBox.width).toBeGreaterThan(
     closeBox.x + closeBox.width,
   );
-  expect(noticeBox.y).toBeLessThan(closeBox.y);
-  expect(noticeBox.y + noticeBox.height).toBeGreaterThan(
-    closeBox.y + closeBox.height,
-  );
+  // The notice stacks over Settings itself, clear of the close button's row.
+  const settingsBox = await settingsDialog(page).boundingBox();
+  expect(noticeBox.y).toBeGreaterThanOrEqual(settingsBox.y);
+  expect(noticeBox.y).toBeGreaterThanOrEqual(closeBox.y + closeBox.height);
   await page.keyboard.press("F6");
   await expect(card).toBeFocused();
   await expect(card).toHaveCSS("outline-style", "solid");

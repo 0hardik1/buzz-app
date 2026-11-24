@@ -956,10 +956,9 @@ it.each(["sidebar", "topbar"] as const)(
       expect(
         within(nav).getByRole(role, { name: "Inbox" }),
       ).not.toHaveAttribute("aria-haspopup");
-      expect(within(nav).getByRole(role, { name: "Inbox" })).toHaveAttribute(
-        "title",
-        "Inbox",
-      );
+      expect(
+        within(nav).getByRole(role, { name: "Inbox" }),
+      ).not.toHaveAttribute("title");
       view.unmount();
 
       // Devices without hover never get one.

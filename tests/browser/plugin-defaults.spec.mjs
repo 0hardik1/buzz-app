@@ -119,8 +119,8 @@ test("an untouched client profile keeps its defaults and can opt in to Docs", as
     await closeSettings(upgraded);
   }
   const docs = upgraded
-    .getByRole("navigation", { name: "Apps dock" })
-    .getByRole("tab", { name: "Docs", exact: true });
+    .getByRole("navigation", { name: "Pages", exact: true })
+    .getByRole("button", { name: "Docs", exact: true });
   await expect(docs).toHaveCount(0);
   await plugins(upgraded);
   const action = pluginAction(upgraded, "Docs");

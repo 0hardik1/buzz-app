@@ -163,6 +163,9 @@ test.describe("workspace heading resize", () => {
       for (const width of ["Home", "End"]) {
         await handle.press(width);
         const label = heading.getByText(title, { exact: true });
+        // The Plugins card above can push this workspace below the fold, and
+        // hovering would scroll it into view; measure it where it will stay.
+        await heading.scrollIntoViewIfNeeded();
         const resting = await label.boundingBox();
         await heading.hover();
         await expect(arrow).toBeVisible();
@@ -309,8 +312,9 @@ test("channel sidebar resizes from the full gutter and persists", async ({
   expect(new Set(geometry.padding).size).toBe(1);
   expect(geometry.padding[0]).toBeGreaterThan(0);
   expect(geometry.rowRadius).toBe(geometry.rowRadiusToken);
+  // PanelFrame wraps the page card: frame > page > panel.
   const conversation = await page
-    .locator("#main-content > .panel")
+    .locator("#main-content > div > div > .panel")
     .boundingBox();
   // The floating sidebar and conversation card sit 4px apart.
   expect(geometry.panelGap).toBe(geometry.sidebarGapToken);
@@ -674,7 +678,8 @@ test("a reveal while the narrow drawer is closed runs when the drawer opens", as
   app,
 }) => {
   await open(page, app);
-  await page.setViewportSize({ width: 600, height: 700 });
+  // Cards clip at seven rows, so the list only scrolls far in a short window.
+  await page.setViewportSize({ width: 600, height: 520 });
   const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
   // Role queries skip the hidden drawer; this locator does not.
   const alpha = page.locator(

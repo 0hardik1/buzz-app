@@ -131,12 +131,12 @@ test("compact sidenav keeps its geometry across persistent page navigation", asy
     });
     expect(visual.scrollbarWidth).toBe(visual.offsetWidth - visual.clientWidth);
     // Cards scroll without a visible scrollbar, so rows sit the card's inset
-    // from both edges and their fill is a further 4px inside the row.
+    // from both edges and their fill fills the row, reaching the card's padding.
     expect(visual.scrollbarWidth).toBe(0);
     expect(visual.cardInset).toBeGreaterThan(0);
     expect(visual.leftContentInset).toBe(visual.cardInset);
     expect(visual.rightContentInset).toBe(visual.cardInsetEnd);
-    expect(visual.fillInset).toBe(4 + visual.cardInsetEnd);
+    expect(visual.fillInset).toBe(visual.cardInsetEnd);
     expect(Number.parseFloat(visual.radius)).toBeGreaterThan(0);
     expect(visual.overflow).toBe("visible");
   };

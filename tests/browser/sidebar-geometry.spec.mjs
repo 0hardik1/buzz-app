@@ -106,7 +106,8 @@ test("working badges align in their rows and clear the Solo actions button", asy
             };
           }),
         )
-        .toEqual({ center: 0, inset: 0.625 });
+        // Trailing content ends on the shared row inset, 0.75rem.
+        .toEqual({ center: 0, inset: 0.75 });
     }
     const restingWidth = await titleWidth();
     await expect.poll(labelMask).toBe("none");
@@ -298,7 +299,7 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
     await expect
       .poll(() => drafts.evaluate(columnsAgainstChannelRow))
       .toEqual({
-        inset: 0.5,
+        inset: 0.75,
         start: 0,
         icon: 0,
         label: 0,

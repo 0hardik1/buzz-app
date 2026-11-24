@@ -337,20 +337,21 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   );
   const ordinary = row(page, "beta");
   const ordinaryState = ordinary.locator("[data-channel-unread]");
-  const directed = row(page, "dm-090").locator("[data-channel-priority]");
-  await expect(ordinaryState).toHaveAttribute("data-priority", "false");
+  // A DM waits on the viewer, so its row carries the needs-you dot.
+  const directed = row(page, "dm-090").locator("[data-channel-needs-you]");
   await expect(ordinaryState).toHaveAttribute(
     "aria-label",
     /observed unread messages/,
   );
-  await expect(ordinary.locator("[data-channel-priority]")).toHaveCount(0);
+  await expect(ordinary.locator("[data-channel-needs-you]")).toHaveCount(0);
   const ordinaryLabel = ordinary.getByText("Beta", { exact: true });
   await expect(ordinaryLabel).toHaveCSS("font-weight", "600");
   await expect(directed).toBeVisible();
   await expect(directed).toHaveCSS("width", "6px");
-  await expect(
-    row(page, "dm-090").locator("[data-channel-unread]"),
-  ).toHaveAttribute("data-priority", "true");
+  // Needing you replaces the observed count in the row's spoken status.
+  await expect(row(page, "dm-090").getByRole("img")).toHaveAccessibleName(
+    /^\d+ unread$/,
+  );
   await expect(
     row(page, "dm-090").locator("[data-channel-dm-avatar]"),
   ).toHaveCount(0);
@@ -651,15 +652,13 @@ test("session changes discard the previous sidebar targets and manual unread alo
     await cue(page, "above").click();
     await expect.poll(() => inView(page, "beta")).toBe(true);
     await expect(
-      row(page, "beta").locator("[data-channel-waiting]"),
+      row(page, "beta").locator("[data-channel-needs-you]"),
     ).toBeAttached();
     await expect(
-      row(page, "alpha").locator(
-        '[data-channel-unread][data-priority="false"]',
-      ),
+      row(page, "alpha").locator("[data-channel-unread]"),
     ).toBeAttached();
     await expect(
-      row(page, "alpha").locator("[data-channel-waiting]"),
+      row(page, "alpha").locator("[data-channel-needs-you]"),
     ).toHaveCount(0);
   } finally {
     release();
@@ -668,12 +667,14 @@ test("session changes discard the previous sidebar targets and manual unread alo
   }
 });
 
-test("priority dots stay aligned and use the prominent mark color in both modes", async ({
+test("needs-you dots stay aligned and use the prominent mark color in both modes", async ({
   page,
   app,
 }, info) => {
   await open(page, app);
-  const dot = row(page, "dm-030").locator("[data-channel-priority]");
+  // dm-030 sits past the Direct messages card's default edge.
+  await showAllRows(page);
+  const dot = row(page, "dm-030").locator("[data-channel-needs-you]");
   await expect(dot).toBeAttached();
   // Browser layout must center the visible dot, reserve label space, and keep
   // it inside the inset row highlight at both supported sidebar widths.
@@ -963,7 +964,7 @@ test.describe("DM preview wiring", () => {
       ),
     ).toBeAttached();
     await expect(
-      row(page, "padding-11").locator("[data-channel-waiting]"),
+      row(page, "padding-11").locator("[data-channel-needs-you]"),
     ).toHaveCount(0);
     await action.click({ trial: true });
     await below.click();

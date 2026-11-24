@@ -36,9 +36,11 @@ test("Activity restores its conversation after visiting Messages and another pag
   await expect(reader).toBeVisible();
   // Messages is the owner of every page listed in its sidebar, so "visiting
   // Messages" is opening a conversation and Reminders is another listed row.
+  // Alpha has unread replies, so its row's name ends with the count; the
+  // channel id names it either way.
   const alpha = page
     .getByRole("navigation", { name: "Subscribed channels" })
-    .getByRole("button", { name: "Alpha", exact: true });
+    .locator('button[data-channel-id="alpha"]');
   const reminders = page
     .getByRole("navigation", { name: "Pages", exact: true })
     .getByRole("button", { name: "Reminders", exact: true });

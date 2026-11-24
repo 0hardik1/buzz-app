@@ -30,7 +30,7 @@ for (const cachedStartup of [false, true]) {
       page,
       app,
     }) => {
-      // Cards clip at ten rows, so the list only scrolls in a short window.
+      // Cards clip at seven rows, so the list only scrolls in a short window.
       await page.setViewportSize({ width: 1440, height: 480 });
       await open(page, app);
       const sidebar = page.getByRole("navigation", {

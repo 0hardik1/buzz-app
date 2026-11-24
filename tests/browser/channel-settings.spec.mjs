@@ -29,7 +29,9 @@ test("channel settings owns its responsive side panel and returns keyboard focus
   });
   await openChannelDetails(page);
   await expect(panel).toBeVisible();
-  // The panel is its own card with the panel radius and a token-based header divider.
+  // The panel is a flush region of its flat joined side card: that card owns
+  // the container radius, the panel adds no edge, and the header divider is
+  // token-based.
   const tokens = await page.addStyleTag({
     content: `:root, :root[data-color-mode] {
       --surface-panel: rgb(23, 45, 67);
@@ -39,8 +41,12 @@ test("channel settings owns its responsive side panel and returns keyboard focus
   });
   try {
     await expect(panel).toHaveCSS("background-color", "rgb(23, 45, 67)");
-    await expect(panel).toHaveCSS("border-top-width", "1px");
-    await expect(panel).toHaveCSS("border-radius", "19px");
+    await expect(panel).toHaveCSS("border-top-width", "0px");
+    await expect(panel).toHaveCSS("border-radius", "0px");
+    await expect(panel.locator("xpath=ancestor::*[@data-joined][1]")).toHaveCSS(
+      "border-radius",
+      "19px",
+    );
     expect(
       await workspace
         .locator("header.panel-header")

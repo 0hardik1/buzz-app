@@ -824,7 +824,8 @@ test.describe("distant channel motion", () => {
 // Native details/menu nesting, submenu focus/viewport placement and row reorder
 // through the built app + real broker are browser contracts. Matrices live below.
 test.describe("section sort persistence", () => {
-  // Both cards start on an explicit A–Z; Recent is the default and is stored as absence.
+  // Both cards start on an explicit A–Z. An unsaved card reads as A–Z, so A–Z is
+  // stored as absence and Recent as an explicit choice.
   test.use({
     initialSidebarSort: { channels: "alpha", "section:work": "alpha" },
   });
@@ -854,7 +855,7 @@ test.describe("section sort persistence", () => {
     await expect(rows.first()).toBeVisible();
     const alphaOrder = await order();
     expect(alphaOrder.length).toBeGreaterThan(2);
-    // Cards default to Recent, so activity is read once per channel at startup,
+    // Solo reads as Recent, so activity is read once per channel at startup,
     // whatever the saved sort; choosing a sort adds no further read.
     const activity = () =>
       app.report.queries
@@ -991,7 +992,10 @@ test.describe("section sort persistence", () => {
     );
     await closeMenus(page);
     await expect(workMenu).not.toBeVisible();
-    expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({});
+    expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({
+      channels: "recent",
+      "section:work": "recent",
+    });
     await expect.poll(order).toEqual(recentOrder);
     await openSort();
     await confirmedSort(() =>
@@ -1001,7 +1005,7 @@ test.describe("section sort persistence", () => {
     await expect(menu).not.toBeVisible();
     await expect.poll(order).toEqual(alphaOrder);
     expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({
-      channels: "alpha",
+      "section:work": "recent",
     });
     await page.reload();
     await expect.poll(order).toEqual(alphaOrder);
@@ -1104,9 +1108,7 @@ test.describe("activity read failures", () => {
     try {
       await failRecent(1);
       await expect(
-        notifications.getByText(
-          "Activity filters and Recent sorting may be out of date.",
-        ),
+        notifications.getByText("Recent sorting may be out of date."),
       ).toBeVisible();
       await setSort("A–Z");
       await expect(warning).toHaveCount(0);

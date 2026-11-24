@@ -103,7 +103,7 @@ test("joined header seams, drag feedback, and pointer-only overlay motion", asyn
   await close.click();
   await expect(dock).toHaveCount(0);
 
-  // The hit target starts at the conversation card's edge, after the panel gap
+  // The hit target starts at the conversation card's edge, after the gap
   // that separates it from the sidebar; the painted capsule stays centered on
   // it. This keeps the sidebar's scrollbar and actions clear of the target.
   const navigation = page.getByRole("navigation", {
@@ -114,20 +114,25 @@ test("joined header seams, drag feedback, and pointer-only overlay motion", asyn
   const sidebarBounds = await page
     .getByRole("complementary", { name: "Sidebar", exact: true })
     .boundingBox();
-  const mainBounds = await page.locator("#main-content > .panel").boundingBox();
+  // The page's card is the first surface inside the main region.
+  const mainBounds = await page
+    .locator("#main-content [data-buzz-surface]")
+    .first()
+    .boundingBox();
+  // Cards float one --space-1 apart, the sidebar's gap to the conversation too.
   const gap = await page
     .locator(".shell-content")
     .evaluate(
       (element) =>
         Number.parseFloat(
-          getComputedStyle(element).getPropertyValue("--space-panel-gap"),
+          getComputedStyle(element).getPropertyValue("--space-1"),
         ) *
         Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
     );
   expect(mainBounds.x).toBeCloseTo(sidebarBounds.x + sidebarBounds.width + gap);
   const railCenter = resizeBounds.x;
   expect(railCenter).toBeCloseTo(mainBounds.x);
-  // The scrollport reaches the sidebar's edge, a panel gap before the target.
+  // The scrollport reaches the sidebar's edge, a card gap before the target.
   expect(scrollBounds.x + scrollBounds.width).toBeCloseTo(
     sidebarBounds.x + sidebarBounds.width,
   );
@@ -277,14 +282,25 @@ for (const destination of ["Messages", "Workflows"]) {
     });
     const initial = await dock.boundingBox();
     const grip = await handle.boundingBox();
-    // The capsule aligns to the dock's 1px leading divider.
+    // The capsule sits centred in the gap between the cards, with no divider.
+    const gap = await page
+      .locator(".shell-content")
+      .evaluate(
+        (element) =>
+          Number.parseFloat(
+            getComputedStyle(element).getPropertyValue("--space-1"),
+          ) *
+          Number.parseFloat(
+            getComputedStyle(document.documentElement).fontSize,
+          ),
+      );
     expect(
       await handle.evaluate(
         (el) =>
           el.getBoundingClientRect().left +
           Number.parseFloat(getComputedStyle(el, "::after").left),
       ),
-    ).toBeCloseTo(initial.x + 0.5);
+    ).toBeCloseTo(initial.x - gap / 2);
     await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
     await page.mouse.down();
     try {
