@@ -11,6 +11,8 @@ pub(super) struct Memory {
     pub(super) denied: AtomicBool,
     /// `remove` marks the refusal, then finds secure storage busy.
     pub(super) busy: AtomicBool,
+    /// `load` finds secure storage busy.
+    pub(super) load_busy: AtomicBool,
     reads: AtomicUsize,
 }
 impl Store for Memory {
@@ -44,6 +46,9 @@ impl Store for Memory {
         Ok(())
     }
     fn load(&self) -> Result<store::LoadedRecord, &'static str> {
+        if self.load_busy.load(Ordering::SeqCst) {
+            return Err("storage-busy");
+        }
         Ok((self.read()?, self.refusal.lock().unwrap().clone()))
     }
     fn remove(&self, expected: &[u8], revision: &str) -> Result<(), &'static str> {
