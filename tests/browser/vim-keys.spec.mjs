@@ -112,6 +112,19 @@ test.describe("the message box's modes", () => {
   const value = (box) => box.evaluate((element) => element.value);
   const caret = (box) => box.evaluate((element) => element.selectionStart);
   const status = (page) => page.getByText(/^-- [A-Z ]+ --$/);
+  /** The character the block cursor covers, "" for a block with none under
+   * it, or null without one. */
+  const blockCursor = (page) =>
+    page.evaluate(() => {
+      const [range] = CSS.highlights.get("vim-block-cursor") ?? [];
+      if (range) return range.toString();
+      const block = document.querySelector("[data-vim-block-cursor]");
+      return block && !block.hidden && block.getBoundingClientRect().height
+        ? ""
+        : null;
+    });
+  const caretColor = (box) =>
+    box.evaluate((element) => getComputedStyle(element).caretColor);
   async function typeLines(page, ...lines) {
     for (const [index, line] of lines.entries()) {
       if (index) await page.keyboard.press("Shift+Enter");
@@ -145,6 +158,18 @@ test.describe("the message box's modes", () => {
     await expect(
       page.getByRole("status").filter({ hasText: /^Normal mode$/ }),
     ).toHaveCount(1);
+    // A block cursor covers the last character typed, in place of the caret.
+    await expect.poll(() => blockCursor(page)).toBe("x");
+    await expect.poll(() => caretColor(alpha)).toBe("rgba(0, 0, 0, 0)");
+    // u right away undoes the whole insert, however the editor split it, and
+    // stays in normal mode; Ctrl-r redoes it.
+    await page.keyboard.press("u");
+    await expect.poll(() => value(alpha)).toBe("");
+    await expect(alpha).toBeFocused();
+    await expect(status(page)).toHaveText("-- NORMAL --");
+    await page.keyboard.press("Control+r");
+    await expect.poll(() => value(alpha)).toBe("one two three\nfour five\nsix");
+    await expect(alpha).toBeFocused();
     // Nothing types in normal mode, not even a key Vim does not use.
     await page.keyboard.press("q");
     await page.keyboard.press("Enter");
@@ -178,6 +203,24 @@ test.describe("the message box's modes", () => {
     await expect(status(page)).toHaveText("-- INSERT --");
     await page.keyboard.type("!");
     await expect.poll(() => value(alpha)).toBe("four five!\nsix");
+    // On a new, empty line the block has no character under it.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("o");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => blockCursor(page)).toBe("");
+    await page.keyboard.press("u");
+    await expect.poll(() => value(alpha)).toBe("four five!\nsix");
+    // o and what is typed after it are one undo step.
+    await page.keyboard.press("o");
+    await page.keyboard.type("new");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => value(alpha)).toBe("four five!\nnew\nsix");
+    await page.keyboard.press("u");
+    await expect.poll(() => value(alpha)).toBe("four five!\nsix");
+    // Insert mode has the editor's own caret back.
+    await page.keyboard.press("Shift+A");
+    await expect.poll(() => blockCursor(page)).toBe(null);
+    await expect.poll(() => caretColor(alpha)).not.toBe("rgba(0, 0, 0, 0)");
 
     // Escape in normal mode leaves for the selected message, keeping the draft.
     await page.keyboard.press("Escape");
@@ -223,6 +266,13 @@ test.describe("the message box's modes", () => {
     await page.keyboard.press("Escape");
     await expect(status(page)).toHaveText("-- NORMAL --");
     await expect(alpha).toBeFocused();
+    // yyp puts a copy of the line below; u takes it back and Ctrl-r redoes.
+    for (const key of ["y", "y", "p"]) await page.keyboard.press(key);
+    await expect.poll(() => value(alpha)).toBe("b\nb");
+    await page.keyboard.press("u");
+    await expect.poll(() => value(alpha)).toBe("b");
+    await page.keyboard.press("Control+r");
+    await expect.poll(() => value(alpha)).toBe("b\nb");
   });
 
   test("Space n starts a new chat, channel, DM or workspace from Buzz's New menu", async ({
@@ -941,6 +991,31 @@ test.describe("with a thread", () => {
       panel(page).getByRole("tab", { name: "Thread root 1", exact: true }),
     ).toBeVisible();
     await expect(box).toHaveText("hello");
+  });
+
+  test("clicking a thread's summary also enters it at its newest message, and Space i types there", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const root = app.histories
+      .get("primary/alpha")
+      .find((event) => event.content === "Thread root 1");
+    await page
+      .locator(
+        `[data-channel-timeline] [data-message-id="${root.id}"] button[data-thread-summary]`,
+      )
+      .click();
+    await expect(
+      panel(page).getByRole("tab", { name: "Thread root 1", exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => focusedText(page)).toContain("Unread reply 1");
+    const box = panel(page).getByRole("textbox");
+    await expect(box).not.toBeFocused();
+    await insert(page);
+    await expect(box).toBeFocused();
+    await expect(page.getByText("-- INSERT --")).toBeVisible();
   });
 
   test("there is only ever one cursor, and it is where focus is", async ({

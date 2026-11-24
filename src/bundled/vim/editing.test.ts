@@ -25,14 +25,11 @@ function vim(
     const result = press(
       state,
       { text, atoms },
-      key === "<Esc>" ? "Escape" : key,
+      key === "<Esc>" ? "Escape" : key === "<C-r>" ? REDO : key,
       register,
     );
-    if (result.edit)
-      text =
-        text.slice(0, result.edit.start) +
-        result.edit.text +
-        text.slice(result.edit.end);
+    for (const edit of [...(result.edits ?? [])].reverse())
+      text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
     if (result.history)
       history.push(
         `${result.history.redo ? "redo" : "undo"}×${result.history.times}`,
@@ -52,51 +49,72 @@ function vim(
     history,
   };
 }
+const text = (start: string, keys: string) => vim(start, keys).text;
 
 test("motions move by characters, words and lines, with counts", () => {
-  expect(vim("|hello world", "l").text).toBe("h|ello world");
-  expect(vim("|hello world", "5l").text).toBe("hello| world");
-  expect(vim("|hello world", "20l").text).toBe("hello worl|d");
-  expect(vim("hel|lo", "h0").text).toBe("|hello");
-  expect(vim("  |hi there", "$").text).toBe("  hi ther|e");
-  expect(vim("  hi th|ere", "^").text).toBe("  |hi there");
-  expect(vim("|one two, three", "w").text).toBe("one |two, three");
-  expect(vim("|one two, three", "2w").text).toBe("one two|, three");
-  expect(vim("one two, |three", "b").text).toBe("one two|, three");
-  expect(vim("|one two", "e").text).toBe("on|e two");
-  expect(vim("|one two", "2e").text).toBe("one tw|o");
-  // Down and up keep the column, short lines clamp it.
-  expect(vim("ab|cd\nx\nefgh", "j").text).toBe("abcd\n|x\nefgh");
-  expect(vim("ab|cd\nx\nefgh", "2j").text).toBe("abcd\nx\nef|gh");
-  expect(vim("abcd\nx\nef|gh", "2k").text).toBe("ab|cd\nx\nefgh");
-  expect(vim("a\n  b\n|c", "gg").text).toBe("|a\n  b\nc");
-  expect(vim("|a\n  b\nc", "G").text).toBe("a\n  b\n|c");
-  expect(vim("|a\n  b\nc", "2G").text).toBe("a\n  |b\nc");
+  expect(text("|hello world", "l")).toBe("h|ello world");
+  expect(text("|hello world", "5l")).toBe("hello| world");
+  expect(text("|hello world", "20l")).toBe("hello worl|d");
+  expect(text("hel|lo", "h")).toBe("he|llo");
+  expect(text("hel|lo", "9h")).toBe("|hello");
+  expect(text("hel|lo", "0")).toBe("|hello");
+  expect(text("  |hi there", "$")).toBe("  hi ther|e");
+  expect(text("|a\nbc\nde", "2$")).toBe("a\nb|c\nde");
+  expect(text("  hi th|ere", "^")).toBe("  |hi there");
+  expect(text("|one two, three", "w")).toBe("one |two, three");
+  expect(text("|one two, three", "2w")).toBe("one two|, three");
+  expect(text("one two, |three", "b")).toBe("one two|, three");
+  expect(text("one two, |three", "2b")).toBe("one |two, three");
+  expect(text("|one two", "e")).toBe("on|e two");
+  expect(text("|one two", "2e")).toBe("one tw|o");
+  // WORDs are runs of non-blanks.
+  expect(text("|a.b c.d", "W")).toBe("a.b |c.d");
+  expect(text("a.b c.|d", "B")).toBe("a.b |c.d");
+  expect(text("|a.b c.d", "E")).toBe("a.|b c.d");
+  // Down and up keep the column; short lines clamp it.
+  expect(text("ab|cd\nx\nefgh", "j")).toBe("abcd\n|x\nefgh");
+  expect(text("ab|cd\nx\nefgh", "2j")).toBe("abcd\nx\nef|gh");
+  expect(text("abcd\nx\nef|gh", "2k")).toBe("ab|cd\nx\nefgh");
+  expect(text("a|b\ncdef", "$k")).toBe("a|b\ncdef");
+  expect(text("a\n  b\n|c", "gg")).toBe("|a\n  b\nc");
+  expect(text("|a\n  b\nc", "G")).toBe("a\n  b\n|c");
+  expect(text("|a\n  b\nc", "2G")).toBe("a\n  |b\nc");
+  expect(text("a\n  b\n|c", "2gg")).toBe("a\n  |b\nc");
   // w crosses lines and stops on an empty one.
-  expect(vim("|ab\n\ncd", "w").text).toBe("ab\n|\ncd");
+  expect(text("|ab\n\ncd", "w")).toBe("ab\n|\ncd");
 });
 
-test("operators delete and yank over motions, lines and counts", () => {
+test("d, c and y act on a motion, with counts on either side", () => {
   expect(vim("|one two three", "dw")).toMatchObject({
     text: "|two three",
     register: "one ",
   });
-  expect(vim("|one two three", "d2w").text).toBe("|three");
-  expect(vim("|one two three", "2dw").text).toBe("|three");
+  expect(text("|one two three four", "d2w")).toBe("|three four");
+  expect(text("|one two three four", "3dw")).toBe("|four");
+  expect(text("|a b c d e f g", "2d3w")).toBe("|g");
   // dw on a line's last word keeps the line break.
-  expect(vim("one |two\nthree", "dw").text).toBe("one| \nthree");
-  expect(vim("one |two three", "d$").text).toBe("one| ");
-  expect(vim("one |two three", "D").text).toBe("one| ");
-  expect(vim("|abc", "dl").text).toBe("|bc");
-  expect(vim("|abcdef", "3x")).toMatchObject({ text: "|def", register: "abc" });
-  expect(vim("ab|c", "x").text).toBe("a|b");
-  expect(vim("a\n|b\nc\nd", "dd")).toMatchObject({
-    text: "a\n|c\nd",
-    register: "b\n",
+  expect(text("one |two\nthree", "dw")).toBe("one| \nthree");
+  expect(text("one |two three", "d$")).toBe("one| ");
+  expect(text("one |two three", "de")).toBe("one | three");
+  expect(text("one two |three", "db")).toBe("one |three");
+  expect(text("one |two", "d0")).toBe("|two");
+  expect(text("|abc", "dl")).toBe("|bc");
+  expect(text("a\n|b\nc", "dj")).toBe("|a");
+  expect(text("a\nb\n|c", "dk")).toBe("|a");
+  expect(text("a\n|b\nc", "dG")).toBe("|a");
+  expect(text("a\n|b\nc", "dgg")).toBe("|c");
+  // An unknown target cancels the operator.
+  expect(vim("|one two", "dqw")).toMatchObject({ text: "one |two" });
+  expect(text("|one two", "d<Esc>w")).toBe("one |two");
+  // c deletes and types; cw stops at the word's end, as Vim's does.
+  expect(vim("|one two", "cw")).toMatchObject({
+    text: "| two",
+    mode: "insert",
+    register: "one",
   });
-  expect(vim("a\n|b\nc\nd", "3dd").text).toBe("|a");
-  expect(vim("a\nb\n|c", "dd").text).toBe("a\n|b");
-  expect(vim("a\n|b\nc", "dj").text).toBe("|a");
+  expect(text("|one two three", "c2w")).toBe("| three");
+  expect(text("one |two", "c$")).toBe("one |");
+  expect(text("one |two", "cb")).toBe("|two");
   expect(vim("one |two", "yw")).toMatchObject({
     text: "one |two",
     register: "two",
@@ -105,30 +123,130 @@ test("operators delete and yank over motions, lines and counts", () => {
     text: "|one two",
     register: "one ",
   });
+  expect(vim("o|ne two", "y$")).toMatchObject({ register: "ne two" });
+});
+
+test("dd, cc and yy act on whole lines, and the shorthands are operators", () => {
+  expect(vim("a\n|b\nc\nd", "dd")).toMatchObject({
+    text: "a\n|c\nd",
+    register: "b\n",
+  });
+  expect(text("a\n|b\nc\nd", "3dd")).toBe("|a");
+  expect(text("a\nb\n|c", "dd")).toBe("a\n|b");
+  expect(text("|  a\nb", "dd")).toBe("|b");
+  expect(vim("a\n  |b c\nd", "cc")).toMatchObject({
+    text: "a\n  |\nd",
+    mode: "insert",
+    register: "  b c\n",
+  });
+  expect(text("a\n|b\nc\nd", "2cc")).toBe("a\n|\nd");
+  expect(vim("a\nb|c", "yy")).toMatchObject({
+    text: "a\nb|c",
+    register: "bc\n",
+  });
+  expect(vim("|a\nb\nc", "2yy")).toMatchObject({ register: "a\nb\n" });
+  expect(vim("|abcdef", "3x")).toMatchObject({ text: "|def", register: "abc" });
+  expect(text("ab|c", "x")).toBe("a|b");
+  expect(text("ab|c", "X")).toBe("a|c");
+  expect(text("one |two three", "D")).toBe("one| ");
+  expect(vim("one |two", "C")).toMatchObject({
+    text: "one |",
+    mode: "insert",
+  });
+  expect(vim("|abc", "s")).toMatchObject({ text: "|bc", mode: "insert" });
+  expect(vim("a\n|bc\nd", "S")).toMatchObject({
+    text: "a\n|\nd",
+    mode: "insert",
+  });
+  expect(vim("a|b\nc", "Y")).toMatchObject({ register: "ab\n" });
+});
+
+test("iw and aw select words, and the blanks around them", () => {
+  expect(vim("one t|wo three", "diw")).toMatchObject({
+    text: "one | three",
+    register: "two",
+  });
+  expect(vim("one t|wo three", "daw")).toMatchObject({
+    text: "one |three",
+    register: "two ",
+  });
+  // With no blank after, aw takes the one before.
+  expect(text("one t|wo", "daw")).toBe("on|e");
+  expect(text("on|e  two", "diw")).toBe("|  two");
+  // On blanks, iw is the blanks and aw adds the word after.
+  expect(text("one | two", "diw")).toBe("one|two");
+  expect(text("one | two x", "daw")).toBe("one| x");
+  expect(text("f|oo.bar", "diw")).toBe("|.bar");
+  expect(text("f|oo.bar baz", "diW")).toBe("| baz");
+  expect(text("f|oo.bar baz", "daW")).toBe("|baz");
+  // Counts take more words; iw counts the blanks between.
+  expect(text("|one two three", "d2aw")).toBe("|three");
+  expect(text("|one two three", "d3iw")).toBe("| three");
+  expect(vim("one t|wo three", "ciw")).toMatchObject({
+    text: "one | three",
+    mode: "insert",
+  });
+  expect(vim("one t|wo three", "yiw")).toMatchObject({
+    text: "one |two three",
+    register: "two",
+  });
+  // Words stay on their line; an empty line has none.
+  expect(text("ab\nc|d\nef", "diw")).toBe("ab\n|\nef");
+  expect(text("a\n|\nb", "diw")).toBe("a\n|\nb");
+});
+
+test("quote and bracket objects select inside or around a pair", () => {
+  expect(text('say "h|ello there" now', 'di"')).toBe('say "|" now');
+  expect(text('say "h|ello" now', 'da"')).toBe("say |now");
+  expect(text("say 'h|i'", "di'")).toBe("say '|'");
+  expect(text("run `l|s` now", "ci`")).toBe("run `|` now");
+  // Before a pair on the line, the next pair.
+  expect(text('|x = "a b"', 'di"')).toBe('x = "|"');
+  expect(text("f(a, (|b))", "di(")).toBe("f(a, (|))");
+  expect(text("f(a, (|b))", "d2i(")).toBe("f(|)");
+  expect(text("f(a, (|b))", "da)")).toBe("f(a, |)");
+  expect(text("f(a, (b|))", "dib")).toBe("f(a, (|))");
+  expect(text("x [a |b] y", "di[")).toBe("x [|] y");
+  expect(text("x {\n  |a\n} y", "diB")).toBe("x {|} y");
+  expect(text("x <a|b> y", "da<")).toBe("x | y");
+  // Nothing around the cursor: nothing happens.
+  expect(text("a|b", "di(")).toBe("a|b");
+  // c on an empty pair types inside it.
+  expect(vim("f(|)", "ci(")).toMatchObject({ text: "f(|)", mode: "insert" });
 });
 
 test("p and P put the register after and before, by character or line", () => {
-  expect(vim("|one two", "dwP").text).toBe("one| two");
-  expect(vim("|ab", "xp").text).toBe("b|a");
-  expect(vim("|a\nb", "yyp").text).toBe("a\n|a\nb");
-  expect(vim("|a\nb", "yyjP").text).toBe("a\n|a\nb");
-  expect(vim("|a\nb", "dd2p").text).toBe("b\n|a\na");
-  expect(vim("|a", "p").text).toBe("|a");
+  expect(text("|one two", "dwP")).toBe("one| two");
+  expect(text("|ab", "xp")).toBe("b|a");
+  expect(text("|a\nb", "yyp")).toBe("a\n|a\nb");
+  expect(text("|a\nb", "yyjP")).toBe("a\n|a\nb");
+  expect(text("|a\nb", "dd2p")).toBe("b\n|a\na");
+  expect(text("|a", "p")).toBe("|a");
+});
+
+test("J joins lines with one space", () => {
+  expect(text("o|ne\n   two", "J")).toBe("one| two");
+  expect(text("|a\nb\nc\nd", "3J")).toBe("a b| c\nd");
+  expect(text("|a \nb", "J")).toBe("a |b");
+  expect(text("|f(\n)", "J")).toBe("f(|)");
+  expect(text("|a\n\nb", "J")).toBe("a|\nb");
+  expect(text("a\n|b", "J")).toBe("a\n|b");
 });
 
 test("i, a, I, A, o and O enter insert mode where Vim does", () => {
   expect(vim("ab|c", "i")).toMatchObject({ text: "ab|c", mode: "insert" });
-  expect(vim("ab|c", "a").text).toBe("abc|");
-  expect(vim("  a|bc", "I").text).toBe("  |abc");
-  expect(vim("a|bc\nd", "A").text).toBe("abc|\nd");
-  expect(vim("a|bc\nd", "o").text).toBe("abc\n|\nd");
-  expect(vim("abc\n|d", "O").text).toBe("abc\n|\nd");
+  expect(text("ab|c", "a")).toBe("abc|");
+  expect(text("a\n|\nb", "a")).toBe("a\n|\nb");
+  expect(text("  a|bc", "I")).toBe("  |abc");
+  expect(text("a|bc\nd", "A")).toBe("abc|\nd");
+  expect(text("a|bc\nd", "o")).toBe("abc\n|\nd");
+  expect(text("abc\n|d", "O")).toBe("abc\n|\nd");
   // Escape leaves insert mode one character back, as Vim does.
   expect(vim("abc|", "<Esc>", { mode: "insert" })).toMatchObject({
     text: "ab|c",
     mode: "normal",
   });
-  expect(vim("a\n|b", "<Esc>", { mode: "insert" }).text).toBe("a\n|b");
+  expect(text("a\n|b", "<Esc>")).toBe("a\n|b");
   // Other keys in insert mode are the editor's.
   expect(
     press({ ...normal(0), mode: "insert" }, { text: "", atoms: [] }, "x")
@@ -136,17 +254,20 @@ test("i, a, I, A, o and O enter insert mode where Vim does", () => {
   ).toBe(false);
 });
 
-test("u and Ctrl-r use the editor's history; Escape cancels a command", () => {
+test("u and Ctrl-r undo and redo commands, with counts", () => {
   expect(vim("|a", "u").history).toEqual(["undo×1"]);
-  expect(vim("|a", `3u${REDO}`).history).toEqual(["undo×3", "redo×1"]);
-  expect(vim("|one two", "d<Esc>w").text).toBe("one |two");
+  expect(vim("|a", "3u<C-r>").history).toEqual(["undo×3", "redo×1"]);
+  expect(vim("|a\nb", "yypu<C-r>")).toMatchObject({
+    history: ["undo×1", "redo×1"],
+    mode: "normal",
+  });
   // Escape with nothing pending is not Vim's: it leaves the field.
   expect(press(normal(0), { text: "", atoms: [] }, "Escape").handled).toBe(
     false,
   );
 });
 
-test("visual modes select, extend with motions, delete and yank", () => {
+test("visual modes select, extend, take text objects and operate", () => {
   expect(vim("|one two", "vw")).toMatchObject({
     mode: "visual",
     selected: "one t",
@@ -156,17 +277,33 @@ test("visual modes select, extend with motions, delete and yank", () => {
     mode: "normal",
     register: "one t",
   });
-  expect(vim("one |two", "vhhx").text).toBe("on|wo");
+  expect(text("one |two", "vhhx")).toBe("on|wo");
   expect(vim("|one two", "vey")).toMatchObject({
     text: "|one two",
     register: "one",
   });
+  expect(vim("one t|wo", "vc")).toMatchObject({
+    text: "one t|o",
+    mode: "insert",
+  });
+  expect(vim("one t|wo three", "viw")).toMatchObject({
+    selected: "two",
+    mode: "visual",
+  });
+  expect(vim("one t|wo three", "vaw")).toMatchObject({ selected: "two " });
+  expect(vim("f(a |b)", "vi(")).toMatchObject({ selected: "a b" });
+  expect(text("a|b cd", "viwd")).toBe("| cd");
   expect(vim("a\n|b\nc", "Vj")).toMatchObject({
     mode: "visual-line",
     selected: "b\nc",
   });
-  expect(vim("a\n|b\nc", "Vjd").text).toBe("|a");
+  expect(text("a\n|b\nc", "Vjd")).toBe("|a");
   expect(vim("a\n|b\nc", "Vy")).toMatchObject({ register: "b\n" });
+  expect(vim("a\n|b\nc", "Vc")).toMatchObject({
+    text: "a\n|\nc",
+    mode: "insert",
+  });
+  expect(vim("|ab", "vlo")).toMatchObject({ text: "|ab", selected: "ab" });
   expect(vim("a|b", "v<Esc>").mode).toBe("normal");
   expect(vim("a|b", "vV").mode).toBe("visual-line");
   expect(vim("a|b", "Vv").mode).toBe("visual");
@@ -183,12 +320,14 @@ test("J and K in visual line mode move the lines and keep them selected", () => 
     text: "c\na\n|b\nd",
     selected: "a\nb",
   });
-  expect(vim("a\nb\n|c", "VK").selected).toBe("c");
-  expect(vim("a\nb\n|c", "VK").text).toBe("a\n|c\nb");
-  expect(vim("a\nb\n|c", "V2K").text).toBe("|c\na\nb");
+  expect(vim("a\nb\n|c", "VK")).toMatchObject({
+    text: "a\n|c\nb",
+    selected: "c",
+  });
+  expect(text("a\nb\n|c", "V2K")).toBe("|c\na\nb");
   // At the edge they stay put.
-  expect(vim("a\n|b", "VJ").text).toBe("a\n|b");
-  expect(vim("|a\nb", "VK").text).toBe("|a\nb");
+  expect(text("a\n|b", "VJ")).toBe("a\n|b");
+  expect(text("|a\nb", "VK")).toBe("|a\nb");
 });
 
 test("an atom such as a mention chip moves and deletes as a whole", () => {
@@ -197,4 +336,5 @@ test("an atom such as a mention chip moves and deletes as a whole", () => {
   expect(vim("hi @alice| ok", "h", { atoms }).text).toBe("hi |@alice ok");
   expect(vim("hi |@alice ok", "x", { atoms }).text).toBe("hi | ok");
   expect(vim("h|i @alice ok", "d3l", { atoms }).text).toBe("h| ok");
+  expect(vim("hi @al|ice ok", "diw", { atoms }).text).toBe("hi | ok");
 });

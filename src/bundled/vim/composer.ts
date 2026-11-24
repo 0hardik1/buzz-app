@@ -2,8 +2,10 @@
  * Vim's modes in the message box. The editor's own text, selection, edits
  * and undo (`ComposerInputElement`) carry them out; `editing.ts` decides.
  * Focus entering the message box starts in insert mode, where every key is
- * the editor's. Escape there is normal mode, where no key types; Escape in
- * normal mode leaves, as before. The mode shows beside Send.
+ * the editor's. Escape there is normal mode, with a block cursor, where no
+ * key types; Escape in normal mode leaves, as before. The mode shows beside
+ * Send. Each Vim command, including an insert from `o` or `c` to Escape, is
+ * one undo step, however many steps it took in the editor.
  */
 import type { ComposerInputElement } from "../../features/messages/composer-dom";
 import { setComposerStatus } from "../../features/messages/composer-status";
@@ -18,6 +20,7 @@ import {
   settle,
   type Vim,
 } from "./editing";
+import { blockCursor } from "./block-cursor";
 import { WHICH_KEY } from "./pending";
 
 const STATUS: Record<Mode, string> = {
@@ -68,6 +71,28 @@ const head = (input: ComposerInputElement) =>
     : input.selectionEnd;
 const visual = (mode: Mode) => mode === "visual" || mode === "visual-line";
 
+/** The editor's undo steps each Vim command took, newest last; `depth` is
+ * the editor's undo depth when they were last counted. */
+type Steps = { done: number[]; undone: number[]; depth: number };
+const stepsOf = new WeakMap<ComposerInputElement, Steps>();
+/** Count the editor's steps since the last count as one command. */
+function count(input: ComposerInputElement) {
+  const depth = input.undoDepth;
+  const steps = stepsOf.get(input);
+  if (!steps) stepsOf.set(input, { done: [], undone: [], depth });
+  else if (depth < steps.depth) {
+    // Undone outside Vim, or the history was cut: start counting again.
+    // ponytail: past the editor's 100-step history, a new step can leave
+    // the depth unchanged and go uncounted; count events if that bites.
+    stepsOf.set(input, { done: [], undone: [], depth });
+  } else if (depth > steps.depth) {
+    steps.done.push(depth - steps.depth);
+    steps.undone = [];
+    steps.depth = depth;
+  }
+  return stepsOf.get(input) as Steps;
+}
+
 export function composerModes({
   apple,
   announce,
@@ -83,17 +108,28 @@ export function composerModes({
   /** The selection a visual mode last showed, to notice a click moving it. */
   let shown: { start: number; end: number } | undefined;
   let register: Register | undefined;
+  /** The block cursor, in normal mode. */
+  let block: ReturnType<typeof blockCursor> | undefined;
 
   const set = (input: ComposerInputElement, vim: Vim) => {
     const before = active?.input === input ? active.vim.mode : undefined;
+    if (before === undefined) count(input);
     active = { input, vim };
     setComposerStatus(input, STATUS[vim.mode]);
     if (before && before !== vim.mode) announce(SPOKEN[vim.mode]);
   };
   const show = (input: ComposerInputElement, vim: Vim) => {
+    if (vim.mode !== "normal") {
+      block?.stop();
+      block = undefined;
+    }
     if (!visual(vim.mode)) {
       shown = undefined;
       input.setSelectionRange(vim.cursor, vim.cursor);
+      if (vim.mode === "normal") {
+        block ??= blockCursor(input);
+        block.draw();
+      }
       return;
     }
     const range = selection(vim, buffer(input));
@@ -105,6 +141,8 @@ export function composerModes({
     shown = { start: input.selectionStart, end: input.selectionEnd };
   };
   const reset = () => {
+    block?.stop();
+    block = undefined;
     if (active) setComposerStatus(active.input, undefined);
     active = undefined;
     shown = undefined;
@@ -178,14 +216,25 @@ export function composerModes({
   function run(input: ComposerInputElement, vim: Vim, key: string) {
     const result = press(vim, buffer(input), key, register);
     if (result.register) register = result.register;
-    if (result.edit) {
-      const { start, end, text } = result.edit;
+    // What came before, such as an insert ending with this Escape, is one
+    // command; this key's edits are the next.
+    const steps = count(input);
+    // From the end, so each range is still where the engine saw it.
+    for (const { start, end, text } of [...(result.edits ?? [])].sort(
+      (a, b) => b.start - a.start,
+    ))
       input.insertText(text, undefined, { start, end });
-    }
     let next = result.vim;
+    // An insert after an edit, as `o` and `c` start, joins it: Escape counts.
+    if (next.mode !== "insert") count(input);
     if (result.history) {
-      for (let time = 0; time < result.history.times; time++)
-        input.undo(result.history.redo);
+      const { redo, times } = result.history;
+      for (let time = 0; time < times; time++) {
+        const editorSteps = (redo ? steps.undone : steps.done).pop() ?? 1;
+        for (let step = 0; step < editorSteps; step++) input.undo(redo);
+        (redo ? steps.done : steps.undone).push(editorSteps);
+      }
+      steps.depth = input.undoDepth;
       next = { ...next, cursor: input.selectionStart };
     }
     // An edit the editor refused leaves the cursor where the text allows.
@@ -236,6 +285,7 @@ export function composerModes({
       const input = composerEditor(document.activeElement);
       if (!input) return;
       const vim = insert(head(input));
+      count(input);
       set(input, vim);
       show(input, vim);
     },

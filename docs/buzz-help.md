@@ -212,8 +212,9 @@ enters a message's thread or opens a choice; `go` opens the actions under the
 cursor, each with a key; Space starts leader keys, such as `Space i` to type
 a message and `Space n` to start a new chat, channel, DM or workspace. The
 message box has Vim's normal, insert and visual modes: Escape goes to normal
-mode, where `hjkl`, `w`, `dd`, `yy`, `p`, `u` and the rest edit, and a second
-Escape leaves. Its keys select other text fields without typing; `i` or Enter
+mode, with a block cursor, where motions, `d`/`c`/`y`, text objects such as
+`ciw`, `p` and `u` edit, and a second Escape leaves. Opening a conversation
+or thread selects its newest message; `Space i` types there. Its keys select other text fields without typing; `i` or Enter
 edits one. The plugin's page in **Settings → Plugins** is its manual.
 
 ## Docs

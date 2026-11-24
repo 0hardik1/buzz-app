@@ -43,7 +43,7 @@ import {
   stepPart,
   threadSummary,
 } from "./motion";
-import { claim, newestRow, trackCursor } from "./cursor";
+import { trackCursor } from "./cursor";
 import { composerModes } from "./composer";
 import { createPending, SHOW_AFTER_MS, WHICH_KEY } from "./pending";
 import { LEADER, type Sequence, type SequenceGroup } from "./sequences";
@@ -484,12 +484,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     "open-thread",
     "Open the selected message's thread",
     { key: "Enter" },
-    () => {
-      threadSummary()?.click();
-      // The thread's newest message, not its message box, takes focus, also
-      // as its replies load.
-      claim(() => newestRow(document.querySelector("[data-panel-workspace]")));
-    },
+    () => threadSummary()?.click(),
     { when: () => !!threadSummary() },
   );
   key(

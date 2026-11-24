@@ -1,12 +1,16 @@
 /*
- * Vim's modes over plain text: a pure engine that reads a key and returns
- * the next state and, at most, one edit. Each edit is one undo step in the
- * editor. Positions are offsets in the text; in normal mode the cursor is on
- * the character at its offset, as Vim's block cursor is.
+ * Vim's modes over plain text, modelled on Neovim's normal.c and ops.c. One
+ * key table maps keys to motions, operators, text objects and commands. A
+ * motion or a text object gives a range, an operator acts on that range, and
+ * counts multiply (`2d3w` deletes six words). `press` is pure: it reads one
+ * key and returns the next state and the edits for the editor. The adapter
+ * makes each command one undo step. Positions are offsets in the text; in
+ * normal mode the cursor is on the character at its offset, as Vim's block
+ * cursor is.
  */
 export type Mode = "normal" | "insert" | "visual" | "visual-line";
 export type Range = Readonly<{ start: number; end: number }>;
-/** The unnamed register: what `d`, `x` and `y` saved, for `p` and `P`. */
+/** The unnamed register: what `d`, `c`, `x` and `y` saved, for `p` and `P`. */
 export type Register = Readonly<{ text: string; linewise: boolean }>;
 export type Vim = Readonly<{
   mode: Mode;
@@ -14,42 +18,41 @@ export type Vim = Readonly<{
   /** Where a visual selection began; the cursor is its moving end. */
   anchor: number;
   /** Keys of a command still being typed, such as `3d`. */
-  typed: readonly string[];
+  typed: string;
   /** The column `j` and `k` keep, as Vim's curswant; Infinity after `$`. */
   column?: number | undefined;
 }>;
 /** The text and its atoms: ranges such as mention chips that move and
  * delete only as a whole. */
 export type Buffer = Readonly<{ text: string; atoms: readonly Range[] }>;
+export type Edit = Range & Readonly<{ text: string }>;
 export type Result = Readonly<{
   vim: Vim;
-  /** Replace `start`..`end` with `text`. The cursor is already after it. */
-  edit?: Range & { text: string };
-  /** Run the editor's own undo or redo this many times. */
+  /** Replace each range with its text; ranges are in the text before the
+   * key and never overlap. The cursor is already where it ends. */
+  edits?: readonly Edit[];
+  /** Undo or redo this many commands. */
   history?: Readonly<{ redo: boolean; times: number }>;
   register?: Register;
   /** False: the key is not Vim's here, so it keeps its usual meaning. */
   handled: boolean;
 }>;
 
-export const REDO = "<C-r>";
-const MOTIONS = new Set(["h", "l", "j", "k", "w", "b", "e", "0", "^", "$"]);
-const OPERATORS = new Set(["d", "y"]);
-type Kind = "exclusive" | "inclusive" | "linewise";
+/** Ctrl-r, as the control character it types. */
+export const REDO = "\x12";
 
 export const normal = (cursor = 0): Vim => ({
   mode: "normal",
   cursor,
   anchor: cursor,
-  typed: [],
+  typed: "",
 });
 export const insert = (cursor: number): Vim => ({
+  ...normal(cursor),
   mode: "insert",
-  cursor,
-  anchor: cursor,
-  typed: [],
 });
 
+// Lines.
 const lineStart = (text: string, at: number) =>
   text.lastIndexOf("\n", at - 1) + 1;
 const lineEnd = (text: string, at: number) => {
@@ -68,45 +71,47 @@ const lineOf = (text: string, at: number) =>
 /** The last character of the line, or its start when it is empty. */
 const lastChar = (text: string, at: number) =>
   Math.max(lineStart(text, at), lineEnd(text, at) - 1);
+const blank = (char: string | undefined) => char === " " || char === "\t";
 const firstNonBlank = (text: string, at: number) => {
   const end = lineEnd(text, at);
   let index = lineStart(text, at);
-  while (index < end && (text[index] === " " || text[index] === "\t")) index++;
+  while (index < end && blank(text[index])) index++;
   return Math.min(index, lastChar(text, at));
 };
 
-/** Word classes: blank, keyword and other punctuation, as Vim's `w`. */
-const kind = (char: string | undefined) =>
+/** Character classes: blank, keyword and punctuation, as Vim's `w`; a WORD
+ * (`W`) is any run of non-blanks. */
+const classOf = (char: string | undefined, big = false) =>
   char === undefined || /\s/.test(char)
     ? 0
-    : /[\p{L}\p{N}_]/u.test(char)
+    : big || /[\p{L}\p{N}_]/u.test(char)
       ? 1
       : 2;
 /** An empty line is a word of its own. */
 const emptyLine = (text: string, at: number) =>
   text[at] === "\n" && (at === 0 || text[at - 1] === "\n");
 
-function wordForward(text: string, from: number) {
+function wordForward(text: string, from: number, big: boolean) {
   let at = from;
-  const start = kind(text[at]);
-  if (start) while (at < text.length && kind(text[at]) === start) at++;
+  const start = classOf(text[at], big);
+  if (start) while (at < text.length && classOf(text[at], big) === start) at++;
   else if (text[at] === "\n") at++;
-  while (at < text.length && !kind(text[at]) && !emptyLine(text, at)) at++;
+  while (at < text.length && !classOf(text[at]) && !emptyLine(text, at)) at++;
   return at;
 }
-function wordBackward(text: string, from: number) {
+function wordBackward(text: string, from: number, big: boolean) {
   let at = from - 1;
-  while (at > 0 && !kind(text[at]) && !emptyLine(text, at)) at--;
+  while (at > 0 && !classOf(text[at]) && !emptyLine(text, at)) at--;
   if (at <= 0) return 0;
-  const start = kind(text[at]);
-  if (start) while (at > 0 && kind(text[at - 1]) === start) at--;
+  const start = classOf(text[at], big);
+  if (start) while (at > 0 && classOf(text[at - 1], big) === start) at--;
   return at;
 }
-function wordEnd(text: string, from: number) {
+function wordEnd(text: string, from: number, big: boolean) {
   let at = from + 1;
-  while (at < text.length && !kind(text[at])) at++;
-  const start = kind(text[at]);
-  while (at + 1 < text.length && kind(text[at + 1]) === start) at++;
+  while (at < text.length && !classOf(text[at])) at++;
+  const start = classOf(text[at], big);
+  while (at + 1 < text.length && classOf(text[at + 1], big) === start) at++;
   return Math.min(at, Math.max(0, text.length - 1));
 }
 
@@ -132,178 +137,475 @@ function whole(buffer: Buffer, range: Range): Range {
   return { start, end };
 }
 
-type Motion = { at: number; kind: Kind; column?: number | undefined };
-
-/** Where a motion goes from the cursor, `count` times. */
-function motion(
-  buffer: Buffer,
-  vim: Vim,
-  key: string,
-  count: number | undefined,
-  operator?: string,
-): Motion {
-  const { text } = buffer;
-  const from = vim.cursor;
-  const times = count ?? 1;
-  const start = lineStart(text, from);
-  const end = lineEnd(text, from);
-  switch (key) {
-    case "h":
-      return { at: Math.max(start, from - times), kind: "exclusive" };
-    case "l":
-      return { at: Math.min(end, from + times), kind: "exclusive" };
-    case "0":
-      return { at: start, kind: "exclusive" };
-    case "^":
-      return { at: firstNonBlank(text, from), kind: "exclusive" };
-    case "$": {
-      const starts = lineStarts(text);
-      const line = Math.min(lineOf(text, from) + times - 1, starts.length - 1);
-      return {
-        at: lineEnd(text, starts[line] ?? 0),
-        kind: "exclusive",
-        column: Number.POSITIVE_INFINITY,
-      };
-    }
-    case "w": {
-      let at = from;
-      for (let step = 0; step < times; step++) {
-        const next = wordForward(text, at);
-        // `dw` on a line's last word stops at the line's end.
-        if (
-          operator &&
-          step === times - 1 &&
-          lineStart(text, next) !== lineStart(text, at)
-        )
-          return { at: Math.max(at, lineEnd(text, at)), kind: "exclusive" };
-        at = next;
-      }
-      return { at, kind: "exclusive" };
-    }
-    case "b": {
-      let at = from;
-      for (let step = 0; step < times; step++) at = wordBackward(text, at);
-      return { at, kind: "exclusive" };
-    }
-    case "e": {
-      let at = from;
-      for (let step = 0; step < times; step++) at = wordEnd(text, at);
-      return { at, kind: "inclusive" };
-    }
-    case "j":
-    case "k":
-    case "gg":
-    case "G": {
-      const starts = lineStarts(text);
-      const current = lineOf(text, from);
-      const line = Math.max(
-        0,
-        Math.min(
-          starts.length - 1,
-          key === "j"
-            ? current + times
-            : key === "k"
-              ? current - times
-              : count !== undefined
-                ? count - 1
-                : key === "gg"
-                  ? 0
-                  : starts.length - 1,
-        ),
-      );
-      const target = starts[line] ?? 0;
-      if (key === "gg" || key === "G")
-        return { at: firstNonBlank(text, target), kind: "linewise" };
-      const column = vim.column ?? from - start;
-      return {
-        at: Math.min(target + column, lastChar(text, target)),
-        kind: "linewise",
-        column,
-      };
-    }
+// Motions: where the cursor goes, and how an operator takes the range to it.
+type Kind = "exclusive" | "inclusive" | "linewise";
+type Target = { at: number; kind: Kind; column?: number | undefined };
+type MotionArgs = {
+  text: string;
+  from: number;
+  /** As typed: `G` and `gg` tell no count from 1. */
+  count: number | undefined;
+  times: number;
+  column: number | undefined;
+  operator: string | undefined;
+};
+const repeat = (times: number, from: number, step: (at: number) => number) => {
+  let at = from;
+  for (let index = 0; index < times; index++) at = step(at);
+  return at;
+};
+function forwardWords(
+  { text, from, times, operator }: MotionArgs,
+  big: boolean,
+): Target {
+  // cw changes to the end of the word, not to the next one, as Vim does.
+  if (operator === "c" && classOf(text[from]))
+    return {
+      at: repeat(times, from - 1, (at) => wordEnd(text, at, big)),
+      kind: "inclusive",
+    };
+  let at = from;
+  for (let step = 0; step < times; step++) {
+    const next = wordForward(text, at, big);
+    // An operator on a line's last word stops at the line's end.
+    if (
+      operator &&
+      step === times - 1 &&
+      lineOf(text, next) !== lineOf(text, at)
+    )
+      return { at: Math.max(at, lineEnd(text, at)), kind: "exclusive" };
+    at = next;
   }
-  return { at: from, kind: "exclusive" };
+  return { at, kind: "exclusive" };
+}
+function verticalLines(
+  { text, from, column }: MotionArgs,
+  line: number,
+  keepColumn: boolean,
+): Target {
+  const starts = lineStarts(text);
+  const target = starts[Math.max(0, Math.min(starts.length - 1, line))] ?? 0;
+  if (!keepColumn) return { at: firstNonBlank(text, target), kind: "linewise" };
+  const want = column ?? from - lineStart(text, from);
+  return {
+    at: Math.min(target + want, lastChar(text, target)),
+    kind: "linewise",
+    column: want,
+  };
+}
+const MOTIONS: Record<string, (args: MotionArgs) => Target> = {
+  h: ({ text, from, times }) => ({
+    at: Math.max(lineStart(text, from), from - times),
+    kind: "exclusive",
+  }),
+  l: ({ text, from, times }) => ({
+    at: Math.min(lineEnd(text, from), from + times),
+    kind: "exclusive",
+  }),
+  "0": ({ text, from }) => ({ at: lineStart(text, from), kind: "exclusive" }),
+  "^": ({ text, from }) => ({
+    at: firstNonBlank(text, from),
+    kind: "exclusive",
+  }),
+  $: ({ text, from, times }) => {
+    const starts = lineStarts(text);
+    const line = Math.min(lineOf(text, from) + times - 1, starts.length - 1);
+    return {
+      at: lineEnd(text, starts[line] ?? 0),
+      kind: "exclusive",
+      column: Number.POSITIVE_INFINITY,
+    };
+  },
+  w: (args) => forwardWords(args, false),
+  W: (args) => forwardWords(args, true),
+  b: ({ text, from, times }) => ({
+    at: repeat(times, from, (at) => wordBackward(text, at, false)),
+    kind: "exclusive",
+  }),
+  B: ({ text, from, times }) => ({
+    at: repeat(times, from, (at) => wordBackward(text, at, true)),
+    kind: "exclusive",
+  }),
+  e: ({ text, from, times }) => ({
+    at: repeat(times, from, (at) => wordEnd(text, at, false)),
+    kind: "inclusive",
+  }),
+  E: ({ text, from, times }) => ({
+    at: repeat(times, from, (at) => wordEnd(text, at, true)),
+    kind: "inclusive",
+  }),
+  j: (args) =>
+    verticalLines(args, lineOf(args.text, args.from) + args.times, true),
+  k: (args) =>
+    verticalLines(args, lineOf(args.text, args.from) - args.times, true),
+  gg: (args) => verticalLines(args, (args.count ?? 1) - 1, false),
+  G: (args) =>
+    verticalLines(
+      args,
+      (args.count ?? lineStarts(args.text).length) - 1,
+      false,
+    ),
+};
+
+// Text objects: a range around the cursor, after an operator or in visual
+// mode, as Neovim's textobject.c.
+type ObjectArgs = { text: string; at: number; times: number; around: boolean };
+/** `iw` / `aw` (`iW` / `aW`): words, and the blanks around them, in the line. */
+function words({ text, at, times, around }: ObjectArgs, big: boolean) {
+  const start = lineStart(text, at);
+  const end = lineEnd(text, at);
+  if (start === end) return undefined;
+  const runEnd = (from: number) => {
+    const kind = classOf(text[from], big);
+    let index = from;
+    while (index < end && classOf(text[index], big) === kind) index++;
+    return index;
+  };
+  let from = at;
+  const kind = classOf(text[at], big);
+  while (from > start && classOf(text[from - 1], big) === kind) from--;
+  let to = runEnd(at);
+  if (!around) {
+    // Each count takes the next run, blank or not.
+    for (let step = 1; step < times && to < end; step++) to = runEnd(to);
+    return { start: from, end: to };
+  }
+  // On a blank, `aw` is the blank and the word after it.
+  if (!kind) return { start: from, end: to < end ? runEnd(to) : to };
+  // Each count takes the blanks and the word after.
+  for (let step = 1; step < times && to < end; step++) {
+    if (!classOf(text[to])) to = runEnd(to);
+    if (to < end) to = runEnd(to);
+  }
+  // The blanks after the word, or else the ones before it.
+  if (to < end && !classOf(text[to])) to = runEnd(to);
+  else while (from > start && blank(text[from - 1])) from--;
+  return { start: from, end: to };
+}
+/** `i"` / `a"`: a quoted string in the line, as Vim pairs quotes from the
+ * line's start; on none around the cursor, the next one. */
+function quoted({ text, at, around }: ObjectArgs, quote: string) {
+  const start = lineStart(text, at);
+  const end = lineEnd(text, at);
+  const marks: number[] = [];
+  for (let index = start; index < end; index++)
+    if (text[index] === quote && text[index - 1] !== "\\") marks.push(index);
+  for (let pair = 0; pair + 1 < marks.length; pair += 2) {
+    const open = marks[pair] ?? 0;
+    const close = marks[pair + 1] ?? 0;
+    if (close < at) continue;
+    if (!around) return { start: open + 1, end: close };
+    let from = open;
+    let to = close + 1;
+    if (blank(text[to])) while (blank(text[to])) to++;
+    else while (from > start && blank(text[from - 1])) from--;
+    return { start: from, end: to };
+  }
+  return undefined;
+}
+/** `i(` / `a(` and the other pairs: the `times`th pair around the cursor. */
+function bracketed(
+  { text, at, times, around }: ObjectArgs,
+  open: string,
+  close: string,
+) {
+  let from = text[at] === close ? at - 1 : at;
+  let opening = -1;
+  for (let level = 0; level < times; level++) {
+    let depth = 0;
+    for (; from >= 0; from--) {
+      if (text[from] === close) depth++;
+      else if (text[from] === open && depth-- === 0) break;
+    }
+    if (from < 0) return undefined;
+    opening = from--;
+  }
+  let depth = 0;
+  for (let index = opening + 1; index < text.length; index++) {
+    if (text[index] === open) depth++;
+    else if (text[index] === close && depth-- === 0)
+      return around
+        ? { start: opening, end: index + 1 }
+        : { start: opening + 1, end: index };
+  }
+  return undefined;
+}
+const OBJECTS: Record<string, (args: ObjectArgs) => Range | undefined> = {
+  w: (args) => words(args, false),
+  W: (args) => words(args, true),
+  '"': (args) => quoted(args, '"'),
+  "'": (args) => quoted(args, "'"),
+  "`": (args) => quoted(args, "`"),
+};
+for (const [open, close, ...names] of [
+  ["(", ")", "b"],
+  ["[", "]"],
+  ["{", "}", "B"],
+  ["<", ">"],
+])
+  for (const name of [open, close, ...names])
+    if (open && close && name)
+      OBJECTS[name] = (args) => bracketed(args, open, close);
+
+// Commands. An alias is the keys it stands for, as `:help x` says.
+const ALIASES: Record<string, string> = {
+  x: "dl",
+  X: "dh",
+  D: "d$",
+  C: "c$",
+  s: "cl",
+  S: "cc",
+  Y: "yy",
+};
+const OPERATORS = new Set(["d", "c", "y"]);
+type Command = (args: {
+  vim: Vim;
+  buffer: Buffer;
+  count: number | undefined;
+  register: Register | undefined;
+}) => Result;
+const COMMANDS: Record<string, Command> = {
+  i: ({ vim }) => done(vim, insert(vim.cursor)),
+  a: ({ vim, buffer }) => {
+    const { text } = buffer;
+    const empty = lineStart(text, vim.cursor) === lineEnd(text, vim.cursor);
+    return done(
+      vim,
+      insert(empty ? vim.cursor : land(buffer, vim.cursor + 1, true, "insert")),
+    );
+  },
+  I: ({ vim, buffer: { text } }) => {
+    let at = lineStart(text, vim.cursor);
+    while (blank(text[at])) at++;
+    return done(vim, insert(at));
+  },
+  A: ({ vim, buffer: { text } }) =>
+    done(vim, insert(lineEnd(text, vim.cursor))),
+  o: ({ vim, buffer: { text } }) => {
+    const end = lineEnd(text, vim.cursor);
+    return done(vim, insert(end + 1), {
+      edits: [{ start: end, end, text: "\n" }],
+    });
+  },
+  O: ({ vim, buffer: { text } }) => {
+    const start = lineStart(text, vim.cursor);
+    return done(vim, insert(start), {
+      edits: [{ start, end: start, text: "\n" }],
+    });
+  },
+  v: ({ vim }) => done(vim, { mode: "visual", anchor: vim.cursor }),
+  V: ({ vim }) => done(vim, { mode: "visual-line", anchor: vim.cursor }),
+  u: ({ vim, count }) =>
+    done(vim, {}, { history: { redo: false, times: count ?? 1 } }),
+  [REDO]: ({ vim, count }) =>
+    done(vim, {}, { history: { redo: true, times: count ?? 1 } }),
+  p: (args) => put(args, true),
+  P: (args) => put(args, false),
+  J: ({ vim, buffer: { text }, count }) => join(vim, text, count),
+};
+
+const done = (
+  vim: Vim,
+  next: Partial<Vim>,
+  extra: Partial<Result> = {},
+): Result => ({ vim: { ...vim, typed: "", ...next }, handled: true, ...extra });
+
+/** `p` / `P`: put the register after or before the cursor, or its line. */
+function put(
+  { vim, buffer, count, register }: Parameters<Command>[0],
+  after: boolean,
+): Result {
+  if (!register) return done(vim, {});
+  const { text } = buffer;
+  const start = lineStart(text, vim.cursor);
+  const end = lineEnd(text, vim.cursor);
+  const times = count ?? 1;
+  if (register.linewise) {
+    const body = Array(times).fill(register.text.replace(/\n$/, "")).join("\n");
+    const at = after ? end : start;
+    const inserted = after ? `\n${body}` : `${body}\n`;
+    const next = text.slice(0, at) + inserted + text.slice(at);
+    return done(vim, normal(firstNonBlank(next, after ? at + 1 : at)), {
+      edits: [{ start: at, end: at, text: inserted }],
+    });
+  }
+  const body = register.text.repeat(times);
+  const at = land(
+    buffer,
+    after && end > start ? vim.cursor + 1 : vim.cursor,
+    true,
+    "insert",
+  );
+  return done(vim, normal(Math.max(at, at + body.length - 1)), {
+    edits: [{ start: at, end: at, text: body }],
+  });
 }
 
-/** The whole lines from `from`'s to `to`'s, and the range that deletes them. */
+/** `J`: join `count` lines (at least two), as Vim does: one space between
+ * them, none before a `)` or after a blank. */
+function join(vim: Vim, text: string, count: number | undefined): Result {
+  const starts = lineStarts(text);
+  const first = lineOf(text, vim.cursor);
+  const last = Math.min(
+    starts.length - 1,
+    first + Math.max(1, (count ?? 2) - 1),
+  );
+  const edits: Edit[] = [];
+  let cursor = vim.cursor;
+  let removed = 0;
+  for (let line = first + 1; line <= last; line++) {
+    const start = (starts[line] ?? 0) - 1;
+    let end = start + 1;
+    while (blank(text[end])) end++;
+    const space =
+      end === lineEnd(text, end) || text[end] === ")" || blank(text[start - 1])
+        ? ""
+        : " ";
+    edits.push({ start, end, text: space });
+    cursor = start - removed;
+    removed += end - start - space.length;
+  }
+  return done(vim, normal(cursor), edits.length ? { edits } : {});
+}
+
+/** The whole lines from `from`'s to `to`'s: their text, as a register, and
+ * the range that deletes them with one line break. */
 function lines(text: string, from: number, to: number) {
   const start = lineStart(text, Math.min(from, to));
   const end = lineEnd(text, Math.max(from, to));
-  const register: Register = {
-    text: `${text.slice(start, end)}\n`,
-    linewise: true,
-  };
-  const range =
-    end < text.length
-      ? { start, end: end + 1 }
-      : { start: Math.max(0, start - 1), end };
-  return { start, end, range, register };
-}
-
-const splice = (text: string, range: Range, insert = "") =>
-  text.slice(0, range.start) + insert + text.slice(range.end);
-
-/** Delete or yank a range; the cursor ends at its start, on its line. */
-function operate(
-  buffer: Buffer,
-  vim: Vim,
-  operator: string,
-  range: Range,
-  register: Register,
-  linewise: boolean,
-  cursorAfterYank = range.start,
-): Result {
-  if (operator === "y")
-    return {
-      vim: { ...normal(cursorAfterYank) },
-      register,
-      handled: true,
-    };
-  const text = splice(buffer.text, range);
-  // After deleting the last lines, the range starts at the end of the line
-  // above, which is where the cursor goes.
-  const at = Math.min(range.start, text.length);
-  const cursor = linewise
-    ? firstNonBlank(text, at)
-    : Math.min(at, lastChar(text, at));
   return {
-    vim: { ...vim, ...normal(cursor) },
-    edit: { ...range, text: "" },
-    register,
-    handled: true,
+    start,
+    end,
+    register: { text: `${text.slice(start, end)}\n`, linewise: true },
+    delete:
+      end < text.length
+        ? { start, end: end + 1 }
+        : { start: Math.max(0, start - 1), end },
   };
 }
 
-/** A count, then the rest of the command, or undefined while it is typed. */
-function parse(typed: readonly string[]) {
-  let index = 0;
-  let digits = "";
-  while (
-    /^[0-9]$/.test(typed[index] ?? "") &&
-    !(digits === "" && typed[index] === "0")
-  )
-    digits += typed[index++];
+/** Apply operator `d`, `c` or `y` to a range, or to whole lines. */
+function operate(
+  vim: Vim,
+  buffer: Buffer,
+  operator: string,
+  target: Range,
+  linewise: boolean,
+): Result {
+  const { text } = buffer;
+  if (linewise) {
+    const span = lines(text, target.start, target.end);
+    if (operator === "y") {
+      const cursor =
+        lineOf(text, span.start) === lineOf(text, vim.cursor)
+          ? vim.cursor
+          : firstNonBlank(text, span.start);
+      return done(vim, normal(cursor), { register: span.register });
+    }
+    if (operator === "c") {
+      // The lines become one empty line that keeps the first one's indent.
+      let indent = span.start;
+      while (blank(text[indent])) indent++;
+      return done(vim, insert(indent), {
+        ...(indent < span.end && {
+          edits: [{ start: indent, end: span.end, text: "" }],
+        }),
+        register: span.register,
+      });
+    }
+    const next = text.slice(0, span.delete.start) + text.slice(span.delete.end);
+    return done(
+      vim,
+      normal(firstNonBlank(next, Math.min(span.delete.start, next.length))),
+      { edits: [{ ...span.delete, text: "" }], register: span.register },
+    );
+  }
+  const range = whole(buffer, target);
+  const register = {
+    text: text.slice(range.start, range.end),
+    linewise: false,
+  };
+  const empty = range.end <= range.start;
+  if (operator === "y")
+    return done(vim, normal(range.start), empty ? {} : { register });
+  const edits = empty ? [] : [{ ...range, text: "" }];
+  const extra = empty ? {} : { edits, register };
+  if (operator === "c") return done(vim, insert(range.start), extra);
+  const next = text.slice(0, range.start) + text.slice(range.end);
+  return done(
+    vim,
+    normal(Math.min(range.start, lastChar(next, range.start))),
+    extra,
+  );
+}
+
+/** Leading digits as a count; a leading `0` is the motion. */
+function counted(keys: string) {
+  const digits = /^[1-9][0-9]*/.exec(keys)?.[0] ?? "";
   return {
     count: digits ? Number(digits) : undefined,
-    rest: typed.slice(index),
+    rest: keys.slice(digits.length),
   };
 }
-
-/** The motion at the start of `keys`: complete, partial (`g`) or none. */
-function readMotion(keys: readonly string[]) {
-  const [first, second] = keys;
-  if (first === undefined) return { pending: true } as const;
-  if (MOTIONS.has(first) || first === "G")
-    return { key: first, length: 1 } as const;
-  if (first === "g") {
-    if (second === undefined) return { pending: true } as const;
-    if (second === "g") return { key: "gg", length: 2 } as const;
-  }
-  return {} as const;
-}
-
 const multiply = (a?: number, b?: number) =>
   a === undefined && b === undefined ? undefined : (a ?? 1) * (b ?? 1);
+
+/** The entry of `table` that `keys` starts with: the key and what follows
+ * it; "pending" when `keys` may still become one. */
+function lookup(table: object, keys: string) {
+  for (const key of Object.keys(table))
+    if (keys.startsWith(key)) return { key, rest: keys.slice(key.length) };
+  return Object.keys(table).some((key) => key.startsWith(keys))
+    ? ("pending" as const)
+    : undefined;
+}
+
+/** A motion or a text object after an operator or in visual mode: its range,
+ * and whether it takes whole lines. */
+function target(
+  vim: Vim,
+  buffer: Buffer,
+  keys: string,
+  count: number | undefined,
+  operator: string | undefined,
+):
+  | "pending"
+  | { range: Range; linewise: boolean; to: Target | undefined }
+  | undefined {
+  const { text } = buffer;
+  const from = vim.cursor;
+  const object =
+    /^[ia]/.exec(keys) &&
+    (keys.length === 1 ? "pending" : OBJECTS[keys[1] ?? ""]);
+  if (object === "pending") return "pending";
+  if (object) {
+    const range = object({
+      text,
+      at: from,
+      times: count ?? 1,
+      around: keys[0] === "a",
+    });
+    return range && { range, linewise: false, to: undefined };
+  }
+  const found = lookup(MOTIONS, keys);
+  if (found === "pending" || !found) return found;
+  const to = MOTIONS[found.key]?.({
+    text,
+    from,
+    count,
+    times: count ?? 1,
+    column: vim.column,
+    operator,
+  });
+  if (!to) return undefined;
+  const start = Math.min(from, to.at);
+  const end = Math.max(from, to.at) + (to.kind === "inclusive" ? 1 : 0);
+  return {
+    range: { start, end: Math.min(end, text.length) },
+    linewise: to.kind === "linewise",
+    to,
+  };
+}
 
 /** Feed one key to the engine. `register` is the unnamed register. */
 export function press(
@@ -314,265 +616,132 @@ export function press(
 ): Result {
   if (vim.mode === "insert") {
     if (key !== "Escape") return { vim, handled: false };
+    // Escape steps back over the last character typed, as Vim does.
     const back = Math.max(lineStart(buffer.text, vim.cursor), vim.cursor - 1);
-    return { vim: normal(land(buffer, back, false, "normal")), handled: true };
+    return done(vim, normal(land(buffer, back, false, "normal")));
   }
-  if (vim.mode === "normal") return normalKey(vim, buffer, key, register);
-  return visualKey(vim, buffer, key);
+  if (key === "Escape") {
+    if (vim.mode !== "normal") return done(vim, normal(vim.cursor));
+    return { vim: { ...vim, typed: "" }, handled: vim.typed.length > 0 };
+  }
+  return vim.mode === "normal"
+    ? normalKey(vim, buffer, vim.typed + key, register)
+    : visualKey(vim, buffer, vim.typed + key);
 }
 
 function normalKey(
   vim: Vim,
   buffer: Buffer,
-  key: string,
-  register?: Register,
+  typed: string,
+  register: Register | undefined,
 ): Result {
-  const { text } = buffer;
-  if (key === "Escape")
-    return { vim: { ...vim, typed: [] }, handled: vim.typed.length > 0 };
-  const typed = [...vim.typed, key];
-  const { count, rest } = parse(typed);
-  const done = (next: Partial<Vim>, extra: Partial<Result> = {}): Result => ({
-    vim: { ...vim, typed: [], ...next },
-    handled: true,
-    ...extra,
-  });
   const waiting = { vim: { ...vim, typed }, handled: true };
-  const [command, ...after] = rest;
-  if (command === undefined) return waiting;
-  const cursor = vim.cursor;
-  const start = lineStart(text, cursor);
-  const end = lineEnd(text, cursor);
+  let { count, rest } = counted(typed);
+  const alias = ALIASES[rest[0] ?? ""];
+  if (alias) rest = alias + rest.slice(1);
+  const first = rest[0];
+  if (first === undefined) return waiting;
 
-  if (command !== undefined && OPERATORS.has(command)) {
-    const inner = parse(after);
+  if (OPERATORS.has(first)) {
+    const inner = counted(rest.slice(1));
     const total = multiply(count, inner.count);
-    if (inner.rest[0] === command) {
-      // dd, yy: whole lines.
-      const starts = lineStarts(text);
-      const last =
-        starts[
-          Math.min(lineOf(text, cursor) + (total ?? 1) - 1, starts.length - 1)
-        ] ?? 0;
-      const span = lines(text, cursor, last);
+    if (!inner.rest) return waiting;
+    // dd, cc, yy: `total` whole lines.
+    if (inner.rest === first) {
+      const last = lineStarts(buffer.text)[
+        Math.min(
+          lineOf(buffer.text, vim.cursor) + (total ?? 1) - 1,
+          lineStarts(buffer.text).length - 1,
+        )
+      ];
       return operate(
-        buffer,
         vim,
-        command,
-        span.range,
-        span.register,
+        buffer,
+        first,
+        { start: vim.cursor, end: last ?? vim.cursor },
         true,
-        cursor,
       );
     }
-    const found = readMotion(inner.rest);
-    if ("pending" in found) return waiting;
-    if (!("key" in found)) return done({});
-    const moved = motion(buffer, vim, found.key, total, command);
-    if (moved.kind === "linewise") {
-      const span = lines(text, cursor, moved.at);
-      return operate(
-        buffer,
-        vim,
-        command,
-        span.range,
-        span.register,
-        true,
-        Math.min(cursor, moved.at),
-      );
-    }
-    const range = whole(buffer, {
-      start: Math.min(cursor, moved.at),
-      end: Math.max(cursor, moved.at) + (moved.kind === "inclusive" ? 1 : 0),
-    });
-    if (range.end <= range.start) return done({});
-    return operate(
-      buffer,
-      vim,
-      command,
-      range,
-      {
-        text: text.slice(range.start, range.end),
-        linewise: false,
-      },
-      false,
-    );
+    const found = target(vim, buffer, inner.rest, total, first);
+    if (found === "pending") return waiting;
+    if (!found) return done(vim, {});
+    return operate(vim, buffer, first, found.range, found.linewise);
   }
 
-  const found = readMotion(rest);
-  if ("pending" in found) return waiting;
-  if ("key" in found) {
-    const moved = motion(buffer, vim, found.key, count);
-    return done({
-      cursor: land(buffer, moved.at, moved.at > cursor, "normal"),
-      column: moved.column,
-    });
-  }
-
-  switch (command) {
-    case "x":
-    case "D": {
-      const range = whole(buffer, {
-        start: cursor,
-        end: command === "D" ? end : Math.min(end, cursor + (count ?? 1)),
-      });
-      if (range.end <= range.start) return done({});
-      return operate(
-        buffer,
-        vim,
-        "d",
-        range,
-        {
-          text: text.slice(range.start, range.end),
-          linewise: false,
-        },
-        false,
-      );
-    }
-    case "p":
-    case "P": {
-      if (!register) return done({});
-      const times = count ?? 1;
-      if (register.linewise) {
-        const body = Array(times)
-          .fill(register.text.replace(/\n$/, ""))
-          .join("\n");
-        const at = command === "p" ? end : start;
-        const insertText = command === "p" ? `\n${body}` : `${body}\n`;
-        const next = splice(text, { start: at, end: at }, insertText);
-        const line = command === "p" ? at + 1 : at;
-        return done(normal(firstNonBlank(next, line)), {
-          edit: { start: at, end: at, text: insertText },
-        });
-      }
-      const body = register.text.repeat(times);
-      const at = land(
-        buffer,
-        command === "p" && end > start ? cursor + 1 : cursor,
-        true,
-        "insert",
-      );
-      return done(normal(Math.max(at, at + body.length - 1)), {
-        edit: { start: at, end: at, text: body },
-      });
-    }
-    case "u":
-      return done({}, { history: { redo: false, times: count ?? 1 } });
-    case REDO:
-      return done({}, { history: { redo: true, times: count ?? 1 } });
-    case "i":
-      return done(insert(cursor));
-    case "a":
-      return done(
-        insert(end > start ? land(buffer, cursor + 1, true, "insert") : cursor),
-      );
-    case "I": {
-      let first = start;
-      while (first < end && (text[first] === " " || text[first] === "\t"))
-        first++;
-      return done(insert(first));
-    }
-    case "A":
-      return done(insert(end));
-    case "o":
-      return done(insert(end + 1), { edit: { start: end, end, text: "\n" } });
-    case "O":
-      return done(insert(start), { edit: { start, end: start, text: "\n" } });
-    case "v":
-    case "V":
-      return done({
-        mode: command === "v" ? "visual" : "visual-line",
-        anchor: cursor,
+  const motion = lookup(MOTIONS, rest);
+  if (motion === "pending") return waiting;
+  if (motion) {
+    const to = target(vim, buffer, rest, count, undefined);
+    if (to && to !== "pending" && to.to)
+      return done(vim, {
+        cursor: land(buffer, to.to.at, to.to.at > vim.cursor, "normal"),
+        column: to.to.column,
       });
   }
+  const command = COMMANDS[first];
   // Anything else does nothing, as Vim beeps.
-  return done({});
+  return command ? command({ vim, buffer, count, register }) : done(vim, {});
 }
 
-/** The selection a visual mode shows, and what `d` and `y` act on. */
+/** The selection a visual mode shows, and what an operator acts on. */
 export function selection(vim: Vim, buffer: Buffer) {
-  const { text } = buffer;
   const from = Math.min(vim.anchor, vim.cursor);
   const to = Math.max(vim.anchor, vim.cursor);
   if (vim.mode === "visual-line") {
-    const span = lines(text, from, to);
-    return {
-      start: span.start,
-      end: span.end,
-      delete: span.range,
-      register: span.register,
-    };
+    const span = lines(buffer.text, from, to);
+    return { start: span.start, end: span.end };
   }
-  const range = whole(buffer, {
+  return whole(buffer, {
     start: from,
-    end: Math.min(text.length, to + 1),
+    end: Math.min(buffer.text.length, to + 1),
   });
-  return {
-    ...range,
-    delete: range,
-    register: { text: text.slice(range.start, range.end), linewise: false },
-  };
 }
 
-function visualKey(vim: Vim, buffer: Buffer, key: string): Result {
-  const { text } = buffer;
-  const done = (next: Partial<Vim>, extra: Partial<Result> = {}): Result => ({
-    vim: { ...vim, typed: [], ...next },
-    handled: true,
-    ...extra,
-  });
-  if (key === "Escape") return done(normal(vim.cursor));
-  const typed = [...vim.typed, key];
-  const { count, rest } = parse(typed);
-  const found = readMotion(rest);
-  if ("pending" in found) return { vim: { ...vim, typed }, handled: true };
-  if ("key" in found) {
-    const moved = motion(buffer, vim, found.key, count);
-    return done({
-      cursor: land(buffer, moved.at, moved.at > vim.cursor, "normal"),
-      column: moved.column,
+function visualKey(vim: Vim, buffer: Buffer, typed: string): Result {
+  const { count, rest } = counted(typed);
+  const linewise = vim.mode === "visual-line";
+  const first = rest[0];
+  if (first === undefined) return { vim: { ...vim, typed }, handled: true };
+  const operator = first === "x" ? "d" : first === "s" ? "c" : first;
+  if (OPERATORS.has(operator))
+    return operate(
+      { ...vim, cursor: Math.min(vim.anchor, vim.cursor) },
+      buffer,
+      operator,
+      selection(vim, buffer),
+      linewise,
+    );
+  const found = target(vim, buffer, rest, count, undefined);
+  if (found === "pending") return { vim: { ...vim, typed }, handled: true };
+  if (found?.to)
+    return done(vim, {
+      cursor: land(buffer, found.to.at, found.to.at > vim.cursor, "normal"),
+      column: found.to.column,
+    });
+  if (found) {
+    // A text object selects itself, by characters.
+    const range = whole(buffer, found.range);
+    if (range.end <= range.start) return done(vim, {});
+    return done(vim, {
+      mode: "visual",
+      anchor: range.start,
+      cursor: range.end - 1,
     });
   }
-  const selected = selection(vim, buffer);
-  const linewise = vim.mode === "visual-line";
-  switch (rest[0]) {
-    case "d":
-    case "x":
-      return operate(
-        buffer,
-        vim,
-        "d",
-        selected.delete,
-        selected.register,
-        linewise,
-      );
-    case "y":
-      return operate(
-        buffer,
-        vim,
-        "y",
-        selected.delete,
-        selected.register,
-        linewise,
-        Math.min(vim.anchor, vim.cursor),
-      );
+  switch (first) {
     case "o":
-      return done({ cursor: vim.anchor, anchor: vim.cursor });
+      return done(vim, { cursor: vim.anchor, anchor: vim.cursor });
     case "v":
-      return done(
-        vim.mode === "visual" ? normal(vim.cursor) : { mode: "visual" },
-      );
-    case "V":
-      return done(
-        vim.mode === "visual-line"
-          ? normal(vim.cursor)
-          : { mode: "visual-line" },
-      );
+    case "V": {
+      const mode = first === "v" ? "visual" : "visual-line";
+      return done(vim, vim.mode === mode ? normal(vim.cursor) : { mode });
+    }
     case "J":
     case "K":
-      if (linewise) return moveLines(vim, text, rest[0] === "J", count ?? 1);
+      if (linewise)
+        return moveLines(vim, buffer.text, first === "J", count ?? 1);
   }
-  return done({});
+  return done(vim, {});
 }
 
 /** `J` / `K` in visual line mode: move the selected lines down or up past
@@ -587,8 +756,7 @@ function moveLines(
   const first = lineOf(text, Math.min(vim.anchor, vim.cursor));
   const last = lineOf(text, Math.max(vim.anchor, vim.cursor));
   const steps = Math.min(count, down ? starts.length - 1 - last : first);
-  const same = { vim: { ...vim, typed: [] }, handled: true };
-  if (steps <= 0) return same;
+  if (steps <= 0) return done(vim, {});
   const lineAt = (line: number) => starts[line] ?? 0;
   const blockStart = lineAt(first);
   const blockEnd = lineEnd(text, lineAt(last));
@@ -597,30 +765,28 @@ function moveLines(
     const passedEnd = lineEnd(text, lineAt(last + steps));
     const passed = text.slice(blockEnd + 1, passedEnd);
     const shift = passed.length + 1;
-    return {
-      vim: {
-        ...vim,
-        typed: [],
-        anchor: vim.anchor + shift,
-        cursor: vim.cursor + shift,
+    return done(
+      vim,
+      { anchor: vim.anchor + shift, cursor: vim.cursor + shift },
+      {
+        edits: [
+          { start: blockStart, end: passedEnd, text: `${passed}\n${block}` },
+        ],
       },
-      edit: { start: blockStart, end: passedEnd, text: `${passed}\n${block}` },
-      handled: true,
-    };
+    );
   }
   const passedStart = lineAt(first - steps);
   const passed = text.slice(passedStart, blockStart - 1);
   const shift = passed.length + 1;
-  return {
-    vim: {
-      ...vim,
-      typed: [],
-      anchor: vim.anchor - shift,
-      cursor: vim.cursor - shift,
+  return done(
+    vim,
+    { anchor: vim.anchor - shift, cursor: vim.cursor - shift },
+    {
+      edits: [
+        { start: passedStart, end: blockEnd, text: `${block}\n${passed}` },
+      ],
     },
-    edit: { start: passedStart, end: blockEnd, text: `${block}\n${passed}` },
-    handled: true,
-  };
+  );
 }
 
 /** Keep a cursor read from the editor where the mode allows it. */

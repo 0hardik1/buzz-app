@@ -25,6 +25,7 @@ import {
   redo,
   closeHistory,
   isHistoryTransaction,
+  undoDepth,
 } from "prosemirror-history";
 import {
   toggleMark,
@@ -3067,6 +3068,7 @@ export function EditableInput({
         },
       },
       undo: { configurable: true, value: historyCommand },
+      undoDepth: { configurable: true, get: () => undoDepth(editor.state) },
       checkpoint: {
         configurable: true,
         value: () => {
