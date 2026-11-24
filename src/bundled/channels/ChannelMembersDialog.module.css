@@ -67,6 +67,23 @@
 .memberList > section + section:not(.memberGroup) {
   margin-block-start: calc(-1 * var(--space-2));
 }
+.memberList:has(.memberTabs) {
+  /* Leave usable rows below the sticky tabs, including at enlarged text. */
+  min-height: calc(var(--size-row) * 2 + var(--member-tabs-height, 0px));
+  scroll-padding-block-start: var(--member-tabs-height, 0px);
+}
+.memberTabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 0;
+  padding: var(--space-2) var(--space-control-inset);
+  background: var(--surface-popover);
+}
+.memberAccess {
+  /* General scrolls above the tabs; keyboard navigation reaches the tabs first. */
+  order: -1;
+}
 .loadingMembers {
   display: grid;
   flex: 1;

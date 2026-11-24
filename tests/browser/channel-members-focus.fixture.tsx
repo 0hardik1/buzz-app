@@ -29,6 +29,11 @@ const administration =
 const rejectRemoval = new URLSearchParams(location.search).has(
   "reject-removal",
 );
+const lateArchives = new URLSearchParams(location.search).has("late-archives");
+let releaseArchives = () => {};
+const archivesReady = new Promise<void>((resolve) => {
+  releaseArchives = resolve;
+});
 const viewer = keypair();
 const relay = keypair();
 const person = keypair();
@@ -143,12 +148,26 @@ const { session: sharedSession } = createRelaySession(
     viewer: viewer.pubkey,
     scope: "https://relay.example.test",
     relayAuthor: relay.pubkey,
+    ...(lateArchives ? { archiveAuthority: relay.pubkey } : {}),
     media: () => {
       searchWork.images++;
       return undefined;
     },
     readAgentLibrary: async () => ({ definitions: [], identities: inventory }),
     query: async (filters) => {
+      if (
+        lateArchives &&
+        filters.some((filter) => filter.kinds?.includes(13535))
+      ) {
+        await archivesReady;
+        return [
+          signed(relay, {
+            kind: 13535,
+            content: "",
+            tags: [["-"], ["p", person.pubkey]],
+          }),
+        ];
+      }
       if (filters.some((filter) => filter.search)) {
         // The roster-only workload must not introduce a new identity: random
         // npub suffix collisions legitimately change every row's key label.
@@ -368,6 +387,7 @@ Object.assign(window, {
     published,
     namesRequested: () => namesRequested,
     releaseNames: () => releaseNames(),
+    releaseArchives: () => releaseArchives(),
     additions,
     confirm: () => releasePublish(),
     settleAddition: (index: number, rejected = false) => {

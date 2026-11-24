@@ -719,10 +719,12 @@ it.each([false, true])(
       screen.getByRole("button", { name: "Retry member data" }),
     );
     await settled();
+    if (localAgent)
+      await t.user.click(screen.getByRole("tab", { name: "Agents · 1" }));
     const roster = () =>
-      screen.getByRole("region", {
-        name: localAgent ? "Agents" : "People",
-      });
+      localAgent
+        ? screen.getByRole("tabpanel", { name: /^Agents ·/ })
+        : screen.getByRole("region", { name: "People" });
     expect(
       within(roster()).getByText(localAgent ? "Fixture agent" : "Morgan"),
     ).toBeVisible();
@@ -2438,6 +2440,9 @@ it.each([
       await t.user.click(
         screen.getByRole("button", { name: "Retry member data" }),
       );
+      await t.user.click(
+        await screen.findByRole("tab", { name: "Agents · 1" }),
+      );
     } else await t.search();
     const owner = await screen.findByRole("button", {
       name: "Open owner profile: Carl (you)",
@@ -3255,8 +3260,11 @@ it("lets the Solo owner add an agent without sending a message", async () => {
   expect(notice).toHaveClass("sr-only");
   expect(input).toHaveValue("");
   expect(input).toHaveFocus();
-  expect(screen.getByRole("heading", { name: "People · 1" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "Agents · 1" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "People · 1" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByRole("tab", { name: "Agents · 1" })).toBeVisible();
   expect(
     screen.queryByRole("button", { name: /Add Fixture agent/ }),
   ).not.toBeInTheDocument();
@@ -3273,7 +3281,7 @@ it("lets the Solo owner add an agent without sending a message", async () => {
   ]);
   await t.user.click(screen.getByRole("button", { name: "Close" }));
   await t.user.click(t.trigger);
-  await screen.findByRole("heading", { name: "Agents · 1" });
+  await screen.findByRole("tab", { name: "Agents · 1" });
   expect(t.publish).toHaveBeenCalledOnce();
 });
 
@@ -3608,7 +3616,7 @@ it("closing Solo members during an addition keeps the confirmed roster discovera
     expect(memberData()).toHaveAttribute("data-refreshing", "false"),
   );
   await t.user.click(screen.getByRole("button", { name: "Retry member data" }));
-  await screen.findByRole("heading", { name: "Agents · 1" });
+  await screen.findByRole("tab", { name: "Agents · 1" });
   expect(t.publish.mock.calls.map(([event]) => event.kind)).toEqual([9000]);
 });
 
@@ -3800,9 +3808,6 @@ it.each(["public", "private"] as const)(
     expect(copy.closest("footer")).toContainElement(done);
     expect(access.closest("footer")).toBeNull();
     const search = screen.getByRole("searchbox");
-    expect(
-      screen.getByRole("region", { name: "General access" }).parentElement,
-    ).toBe(screen.getByRole("region", { name: "Member list" }));
     expect(
       search.compareDocumentPosition(access) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -4176,7 +4181,7 @@ it("loads another member page after a previous page fails", async () => {
   ).not.toBeInTheDocument();
 });
 
-it("lists known-archived members in a marked Archived group after the others", async () => {
+it("lists archived members in their own tab after People and Agents", async () => {
   let release!: () => void;
   const pendingArchives = new Promise<void>((resolve) => {
     release = resolve;
@@ -4187,39 +4192,31 @@ it("lists known-archived members in a marked Archived group after the others", a
     profile(keypair(), { name: "Ann Bot", is_agent: true }),
     profile(keypair(), { name: "Zoe Bot", is_agent: true }),
   ] as [RelayEvent, RelayEvent, RelayEvent, RelayEvent];
-  await setup("stream", false, false, undefined, undefined, {
+  const t = await setup("stream", false, false, undefined, undefined, {
     memberProfiles: [alice, zed, ann, zoe],
     archivedMembers: [alice.pubkey, ann.pubkey],
     pendingArchives,
   });
-  const sections = () =>
-    within(memberData())
-      .getAllByRole("region")
-      .map((section) => [
-        section.getAttribute("aria-label"),
-        within(section)
-          .getAllByRole("listitem")
-          // Each row starts with its avatar's one-letter fallback.
-          .map((row) => row.textContent?.slice(1)),
-      ]);
-  // Archive state unknown: nobody counts as archived.
-  await vi.waitFor(() =>
-    expect(sections()).toEqual([
-      ["People", ["Alice", "Carl (you)", "Zed"]],
-      ["Agents", ["Ann Bot", "Zoe Bot"]],
-    ]),
-  );
-  await act(async () => release());
-  await vi.waitFor(() =>
-    expect(sections()).toEqual([
-      ["People", ["Carl (you)", "Zed"]],
-      ["Agents", ["Zoe Bot"]],
-      ["Archived", ["AliceArchived", "Ann BotArchived"]],
-    ]),
-  );
   expect(
-    within(memberData()).getByRole("heading", { name: "Archived · 2" }),
-  ).toBeVisible();
+    await screen.findByRole("tab", { name: "People · 3" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await act(async () => release());
+  await screen.findByRole("tab", { name: "Archived · 2" });
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+    "People · 2",
+    "Agents · 1",
+    "Archived · 2",
+  ]);
+  await t.user.click(screen.getByRole("tab", { name: "Archived · 2" }));
+  const panel = screen.getByRole("tabpanel", { name: "Archived · 2" });
+  expect(
+    within(panel)
+      .getAllByRole("listitem")
+      .map((row) => row.textContent?.slice(1)),
+  ).toEqual(["AliceArchived", "Ann BotArchived"]);
+  await t.user.click(screen.getByRole("tab", { name: "Agents · 1" }));
+  expect(screen.getByRole("tabpanel")).toHaveTextContent("Zoe Bot");
+  expect(screen.getByRole("tabpanel")).not.toHaveTextContent("Ann Bot");
 });
 
 it("keeps archived members in their group in a paged roster when archives load late and members join", async () => {
@@ -4239,25 +4236,21 @@ it("keeps archived members in their group in a paged roster when archives load l
       .map((event) => event.pubkey),
     pendingArchives,
   });
-  const list = screen.getByRole("region", { name: "Member list" });
-  const rows = (group: string) =>
-    within(within(list).getByRole("region", { name: group }))
+  const rows = () =>
+    within(screen.getByRole("tabpanel"))
       .getAllByRole("listitem")
       .map((row) => row.textContent ?? "");
   const archived = (row: string) =>
     Number(/Member (\d\d)/.exec(row)?.[1] ?? 1) % 2 === 0;
-  const named = () =>
-    [...rows("People"), ...rows("Archived")].every(
-      (row) => !row.includes("npub"),
-    );
   await act(async () => release());
-  // People: you and the 30 live members. Archived: the other 30.
-  await vi.waitFor(() => {
-    expect(named()).toBe(true);
-    expect(rows("People").map(archived)).toEqual(Array(31).fill(false));
-    expect(rows("Archived").map(archived)).toEqual(Array(30).fill(true));
-  });
-  // A live member who joins later goes in People, not Archived.
+  await screen.findByRole("tab", { name: "Archived · 30" });
+  await vi.waitFor(() =>
+    expect(rows().map(archived)).toEqual(Array(31).fill(false)),
+  );
+  await t.user.click(screen.getByRole("tab", { name: "Archived · 30" }));
+  await vi.waitFor(() =>
+    expect(rows().map(archived)).toEqual(Array(30).fill(true)),
+  );
   await act(async () =>
     t.replaceRoster([
       t.viewer.pubkey,
@@ -4265,43 +4258,9 @@ it("keeps archived members in their group in a paged roster when archives load l
       (20000).toString(16).padStart(64, "0"),
     ]),
   );
-  await vi.waitFor(() => expect(rows("People")[31]).toContain("npub"));
-  expect(rows("Archived")).toHaveLength(30);
-});
-
-it("moves focus to the group heading when late archives move its row to Archived", async () => {
-  let release!: () => void;
-  const pendingArchives = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const alice = profile(keypair(), { name: "Alice" });
-  const t = await setup("stream", false, false, undefined, undefined, {
-    memberProfiles: [alice],
-    archivedMembers: [alice.pubkey],
-    pendingArchives,
-  });
-  const list = screen.getByRole("region", { name: "Member list" });
-  const action = () =>
-    within(list).getByRole("button", { name: /^Actions for Alice/ });
-  const focused = await vi.waitFor(action);
-  focused.focus();
-  await act(async () => release());
-  await vi.waitFor(() =>
-    expect(
-      within(within(list).getByRole("region", { name: "Archived" })).getByRole(
-        "button",
-        { name: /^Actions for Alice/ },
-      ),
-    ).toBeInTheDocument(),
-  );
-  expect(focused).not.toBeInTheDocument();
-  const heading = within(list).getByRole("heading", { name: /^People ·/ });
-  expect(heading).toHaveFocus();
-  // The next Tab stays in the list.
-  await t.user.tab();
-  expect(document.activeElement?.closest("li")).toBe(
-    within(list).getAllByRole("listitem")[0],
-  );
+  expect(rows()).toHaveLength(30);
+  await t.user.click(screen.getByRole("tab", { name: "People · 32" }));
+  await vi.waitFor(() => expect(rows()[31]).toContain("npub"));
 });
 
 it("keeps the visible member page and focus stable while names arrive", async () => {
@@ -4347,7 +4306,7 @@ it("keeps the visible member page and focus stable while names arrive", async ()
     expect(within(list).getAllByText(/^Member /).length).toBeGreaterThan(0);
     await t.user.click(screen.getByRole("button", { name: "Close" }));
     await t.user.click(screen.getByRole("button", { name: "Access" }));
-    await within(memberData()).findByRole("heading", { name: /^Agents ·/ });
+    await within(memberData()).findByRole("tab", { name: /^Agents ·/ });
   } finally {
     await act(async () => release());
   }

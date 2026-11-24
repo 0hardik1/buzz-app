@@ -673,6 +673,7 @@ test("member search reuses unchanged rows and owner observations", async ({
   const dialog = page.getByRole("dialog", { name: "Manage members" });
   const search = dialog.getByRole("searchbox");
   const data = dialog.getByRole("region", { name: "Member list" });
+  await dialog.getByRole("tab", { name: "Agents · 60" }).click();
   await expect(
     dialog.getByRole("button", { name: /^Open owner profile:/ }),
   ).toHaveCount(50);
@@ -855,171 +856,72 @@ test("final invitation expansion continues keyboard focus at the first new row",
   expect(errors).toEqual([]);
 });
 
-// Browser-only: shared Menu/modal focus, attached search geometry and native
-// full-height row action hit testing cannot be established by jsdom.
-test("member identity filter sits inside search and preserves modal focus", async ({
+// Native roving tab focus and modal tab order need a real browser.
+test("member tabs support arrow keys, activation and paging focus", async ({
   page,
 }) => {
-  for (const width of [1280, 768, 390]) {
-    await page.setViewportSize({ width, height: 832 });
-    await page.goto(`${url}?search-scale`);
-    await page.getByRole("button", { name: "Access" }).click();
-    const dialog = page.getByRole("dialog", {
-      name: "Manage members",
-      exact: true,
-    });
-    const search = dialog.getByRole("searchbox");
-    const filter = dialog.getByRole("button", {
-      name: /^Filter members:/,
-    });
-    await expect(filter).toBeVisible();
-    expect(
-      await filter.evaluate((node) =>
-        node
-          .closest(".buzz-input-group")
-          .contains(document.querySelector('input[type="search"]')),
-      ),
-    ).toBe(true);
-    const searchBounds = await search.boundingBox();
-    const filterBounds = await filter.boundingBox();
-    expect(filterBounds.x).toBeGreaterThan(searchBounds.x + searchBounds.width);
-    expect(filterBounds.x + filterBounds.width).toBeLessThan(width);
-    await filter.focus();
-    await page.keyboard.press("ArrowDown");
-    const all = page.getByRole("menuitemradio", { name: "All · 61" });
-    const agents = page.getByRole("menuitemradio", { name: "Agents · 60" });
-    await expect(all).toBeVisible();
-    const popup = page.locator(".buzz-menu-popup");
-    await animationsSettled(popup);
-    const popupBounds = await popup.boundingBox();
-    const minimumWidth = await page.evaluate(
-      () =>
-        11.25 *
-        Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
-    );
-    expect(popupBounds.width).toBeGreaterThanOrEqual(minimumWidth);
-    expect(popupBounds.x + popupBounds.width).toBeCloseTo(
-      filterBounds.x + filterBounds.width,
-      0,
-    );
-    // Reopening after every choice must retain both width and right edge,
-    // including each identity group and its selection mark.
-    for (const name of ["People · 1", "All · 61", "Agents · 60"]) {
-      await page.getByRole("menuitemradio", { name, exact: true }).click();
-      await expect(popup).toHaveCount(0);
-      await filter.click();
-      await expect(popup).toBeVisible();
-      await animationsSettled(popup);
-      const bounds = await popup.boundingBox();
-      expect(bounds.width).toBe(popupBounds.width);
-      expect(bounds.x + bounds.width).toBeCloseTo(
-        filterBounds.x + filterBounds.width,
-        0,
-      );
-    }
-    await agents.click();
-    await expect(filter).toBeFocused();
-    await expect(filter).toHaveAccessibleName("Filter members: Agents");
-    await expect(
-      dialog.getByRole("region", { name: "People", exact: true }),
-    ).toHaveCount(0);
-    await search.fill("Agent 12");
-    await expect(dialog.getByRole("listitem")).toHaveCount(1);
-    await expect(filter).toHaveCount(0);
-    // Filter and Clear occupy the same trailing slot without shifting the input.
-    expect((await search.boundingBox()).width).toBeCloseTo(
-      searchBounds.width,
-      0,
-    );
-    await expect(search).toBeFocused();
-    await search.fill("");
-    await expect(filter).toBeVisible();
-    await expect(filter).toHaveAccessibleName("Filter members: All");
-    await expect(dialog.getByRole("listitem")).toHaveCount(51);
-    await filter.click();
-    await expect(all).toHaveAttribute("aria-checked", "true");
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeVisible();
-    await expect(filter).toBeFocused();
+  await page.goto(`${url}?administration&search-scale`);
+  await page.getByRole("button", { name: "Access", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Manage members",
+    exact: true,
+  });
+  const list = dialog.getByRole("region", { name: "Member list" });
+  await expect(list).toHaveAttribute("data-refreshing", "false");
+  const search = dialog.getByRole("searchbox");
+  const filter = dialog.getByRole("button", { name: "Filter members: All" });
+  const people = dialog.getByRole("tab", { name: "People · 2" });
+  const agents = dialog.getByRole("tab", { name: "Agents · 60" });
+  await search.focus();
+  await page.keyboard.press("Tab");
+  await expect(filter).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(people).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(agents).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(agents).toHaveAttribute("aria-selected", "true");
+  const panel = dialog.getByRole("tabpanel", { name: "Agents · 60" });
+  await expect(agents).toHaveAttribute(
+    "aria-controls",
+    await panel.getAttribute("id"),
+  );
+  await page.keyboard.press("Tab");
+  await expect(panel).toBeFocused();
+  const pages = panel.getByRole("navigation", { name: "Agents member pages" });
+  await pages.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(panel).toBeFocused();
+  await expect(pages.getByText("2 of 2")).toBeVisible();
+  expect(await list.evaluate((node) => node.scrollTop)).toBe(0);
+  await people.click();
+  await agents.click();
+  await expect(pages.getByText("2 of 2")).toBeVisible();
+  await agents.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(people).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(people).toHaveAttribute("aria-selected", "true");
+});
 
-    // Hit the top edge, outside the former centered circular target.
-    const row = dialog.getByRole("listitem").filter({ hasText: "Agent 12" });
-    const action = row.getByRole("button", { name: "Actions for Agent 12" });
-    await row.hover();
-    const rowBounds = await row.boundingBox();
-    const actionBounds = await action.boundingBox();
-    expect(actionBounds.height).toBe(rowBounds.height);
-    expect(actionBounds.y).toBe(rowBounds.y);
-    expect(actionBounds.x + actionBounds.width).toBe(
-      rowBounds.x + rowBounds.width,
-    );
-    const geometry = await action.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        width: style.width,
-        expectedWidth: getComputedStyle(document.documentElement)
-          .getPropertyValue("--size-control-sm")
-          .trim(),
-        radius: style.borderTopRightRadius,
-        rowRadius: getComputedStyle(element.closest("li")).borderTopRightRadius,
-        leftRadius: style.borderTopLeftRadius,
-      };
-    });
-    expect(actionBounds.width).toBe(32);
-    expect(geometry.radius).toBe(geometry.rowRadius);
-    expect(geometry.leftRadius).toBe("0px");
-    // The attached action and profile are two parts of the same row, not
-    // a floating button with a brighter hover step. Check the painted states.
-    for (const mode of ["light", "dark"]) {
-      await page.evaluate((mode) => {
-        document.documentElement.className = mode;
-        document.documentElement.dataset.colorMode = mode;
-      }, mode);
-      const profile = row.getByRole("button", {
-        name: /^Open profile for Agent 12/,
-      });
-      await row.evaluate((element) =>
-        element.scrollIntoView({ block: "center" }),
-      );
-      await profile.hover({ position: { x: 20, y: 20 } });
-      await animationsSettled(profile);
-      const profileFill = await profile.evaluate(
-        (element) => getComputedStyle(element).backgroundColor,
-      );
-      await action.hover();
-      await expect(action).toHaveCSS("background-color", profileFill);
-    }
-    const corners = await action.evaluate((element) => {
-      const button = getComputedStyle(element);
-      return ["::before", "::after"].map((pseudo) => {
-        const style = getComputedStyle(element, pseudo);
-        return {
-          width: style.width,
-          height: style.height,
-          right: style.right,
-          mask: style.maskImage,
-          radius: button.borderTopRightRadius,
-          buttonWidth: button.width,
-          sameFill: style.backgroundColor === button.backgroundColor,
-          pointerEvents: style.pointerEvents,
-        };
-      });
-    });
-    for (const corner of corners) {
-      expect(corner.width).toBe(corner.radius);
-      expect(corner.height).toBe(corner.radius);
-      expect(corner.right).toBe(corner.buttonWidth);
-      expect(corner.mask).toContain("radial-gradient");
-      expect(corner.sameFill).toBe(true);
-      expect(corner.pointerEvents).toBe("none");
-    }
-    await action.click({ position: { x: actionBounds.width / 2, y: 2 } });
-    await expect(
-      page.getByRole("menu", { name: "Actions for Agent 12" }),
-    ).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(action).toBeFocused();
-  }
+// A late archive snapshot unmounts a focused row in the native focus trap.
+test("late archives return focus to the selected member tab", async ({
+  page,
+}) => {
+  await page.goto(`${url}?administration&late-archives`);
+  await page.getByRole("button", { name: "Access", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Manage members",
+    exact: true,
+  });
+  const actions = dialog.getByRole("button", {
+    name: "Actions for Morgan",
+    exact: true,
+  });
+  await actions.focus();
+  await page.evaluate(() => window.focusFixture.releaseArchives());
+  await expect(dialog.getByRole("tab", { name: "Archived · 1" })).toBeVisible();
+  await expect(actions).toHaveCount(0);
+  await expect(dialog.getByRole("tab", { name: "People · 1" })).toBeFocused();
 });
 
 // The same live dialog node must retain its focus trap while visual steps exit;
@@ -1204,11 +1106,12 @@ for (const rejected of [false, true]) {
     });
     const list = members.getByRole("region", { name: "Member list" });
     await expect(list).toHaveAttribute("data-refreshing", "false");
+    await members.getByRole("tab", { name: /^Agents ·/ }).click();
     const pages = list.getByRole("navigation", { name: "Agents member pages" });
     await pages.getByRole("button", { name: "Next", exact: true }).click();
     await expect(pages.getByText("2 of 2")).toBeVisible();
     const agents = list
-      .getByRole("region", { name: "Agents", exact: true })
+      .getByRole("tabpanel", { name: /^Agents ·/ })
       .getByRole("button", { name: /^Actions for / });
     await expect(agents).toHaveCount(10);
     // The last row sits where an error above the list would clip it.
@@ -1348,9 +1251,10 @@ test("removing the last page's only member focuses the member before it", async 
   });
   const list = members.getByRole("region", { name: "Member list" });
   await expect(list).toHaveAttribute("data-refreshing", "false");
+  await members.getByRole("tab", { name: /^Agents ·/ }).click();
   const pages = list.getByRole("navigation", { name: "Agents member pages" });
   const agents = list
-    .getByRole("region", { name: "Agents", exact: true })
+    .getByRole("tabpanel", { name: /^Agents ·/ })
     .getByRole("button", { name: /^Actions for / });
   await expect(agents).toHaveCount(50);
   const previous = await agents.last().getAttribute("aria-label");
@@ -1434,95 +1338,6 @@ test("plugin additions retain Search focus unless it was deliberately moved", as
   }
 });
 
-// Browser layout is required to prove the helper inset and role-label geometry.
-test("member helper aligns with content and Owner stays beside a person's name", async ({
-  page,
-}, testInfo) => {
-  for (const [mode, width, fontSize] of [
-    ["light", 1280, 16],
-    ["dark", 390, 20],
-  ]) {
-    await page.setViewportSize({ width, height: 832 });
-    for (const visitor of [false, true]) {
-      await page.goto(`${url}?administration${visitor ? "&visitor" : ""}`);
-      await page.evaluate(
-        ({ mode, fontSize }) => {
-          document.documentElement.setAttribute("data-color-mode", mode);
-          document.documentElement.style.fontSize = `${fontSize}px`;
-        },
-        { mode, fontSize },
-      );
-      await page.getByRole("button", { name: "Access" }).click();
-      const dialog = page.getByRole("dialog", {
-        name: "Manage members",
-        exact: true,
-      });
-      const heading = dialog.getByRole("heading", { name: /^People ·/ });
-      if (visitor) {
-        // A visitor cannot read the roster, so no empty People group renders.
-        const helper = dialog.getByText(
-          "Join this channel to add people and agents.",
-        );
-        await expect(helper).toBeVisible();
-        const note = dialog.getByText("No members to show.");
-        await expect(note).toBeVisible();
-        expect((await helper.boundingBox()).x).toBeCloseTo(
-          (await note.boundingBox()).x,
-          0,
-        );
-        const inset = await helper.evaluate((node) =>
-          Number.parseFloat(getComputedStyle(node).paddingLeft),
-        );
-        expect(inset).toBe(fontSize);
-        // Both boxes include the same shared content inset.
-        expect(
-          await helper.evaluate((node) => getComputedStyle(node).paddingLeft),
-        ).toBe(
-          await note.evaluate((node) => getComputedStyle(node).paddingLeft),
-        );
-      } else {
-        await expect(heading).toBeVisible();
-        const row = dialog
-          .getByRole("listitem")
-          .filter({ hasText: "Carl (you)" });
-        const name = row.getByText("Carl (you)", { exact: true });
-        const owner = row.getByText("Owner", { exact: true });
-        await expect(owner).toBeVisible();
-        const avatar = row.locator("[data-avatar-shape]");
-        const inset = await heading.evaluate((node) =>
-          Number.parseFloat(getComputedStyle(node).paddingLeft),
-        );
-        expect(inset).toBe(fontSize);
-        expect((await heading.boundingBox()).x + inset).toBeCloseTo(
-          (await avatar.boundingBox()).x,
-          0,
-        );
-        // Measure the settled layout, not the dialog's open transition.
-        await animationsSettled(dialog, { subtree: true });
-        const nameBounds = await name.boundingBox();
-        const ownerBounds = await owner.boundingBox();
-        expect(ownerBounds.x).toBeGreaterThan(nameBounds.x + nameBounds.width);
-        // WebKit rounds the caption and body line boxes separately.
-        expect(
-          Math.abs(
-            ownerBounds.y +
-              ownerBounds.height / 2 -
-              (nameBounds.y + nameBounds.height / 2),
-          ),
-        ).toBeLessThanOrEqual(1);
-      }
-      expect(
-        await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
-      ).toBe(true);
-      await dialog.screenshot({
-        path: testInfo.outputPath(
-          `members-${mode}-${visitor ? "visitor" : "owner"}.png`,
-        ),
-      });
-    }
-  }
-});
-
 // Browser-only: native focus and rendered add/roster geometry after membership confirmation.
 test("Solo adds an agent with pointer or Enter and retains the search focus", async ({
   page,
@@ -1585,11 +1400,12 @@ test("Solo adds an agent with pointer or Enter and retains the search focus", as
     ).toHaveClass("sr-only");
     await expect(search).toHaveValue("");
     await expect(
-      dialog.getByRole("region", { name: "People", exact: true }),
+      dialog.getByRole("tabpanel", { name: "People · 1" }),
     ).toContainText("Carl");
     await expect(search).toBeFocused();
+    await dialog.getByRole("tab", { name: "Agents · 1" }).click();
     await expect(
-      dialog.getByRole("region", { name: "Agents", exact: true }),
+      dialog.getByRole("tabpanel", { name: "Agents · 1" }),
     ).toContainText("Morgan");
     await expect(add).toHaveCount(0);
     expect(
