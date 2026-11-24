@@ -36,6 +36,8 @@ if that desktop app is up and running.
     threads needed. Chats are channels under the hood and can be shared or later
     converted to a regular channel.
   - **Direct messages**: one-to-one or group DMs. Also a channel under the hood.
+    A read one-to-one DM with an archived member leaves the sidebar; search
+    still finds it, and a new unread message brings it back.
 - **Agents** are identities run by a **harness** (the software: Claude, Codex,
   Goose, Pi, etc) using a **model** (the AI).
   Local agents run on their owner's computer. Remote/hosted agents run
@@ -65,6 +67,11 @@ if that desktop app is up and running.
   more of the same.
 - **Search**: the top bar (⌘K or ⌘T; Ctrl elsewhere). ⌘F searches the current
   conversation. ⌘/ lists shortcuts.
+- **History shortcuts.** On macOS, ⌘← and ⌘→ go back and forward when the
+  message composer is empty. A mention Buzz filled in for you still counts as
+  empty. Once you’ve typed, they move to the start or end of the line. ⌘[ and ⌘]
+  work either way. If a plugin uses ⌘← or ⌘→, change Go back or Go forward in
+  Settings → Shortcuts to give it the key.
 - **Settings** (⌘,, or **Buzz → Settings…** in the Mac app; Ctrl+, elsewhere)
   groups:
   - **Community**: **Profile**, **Local settings** (community address,
@@ -73,7 +80,8 @@ if that desktop app is up and running.
   - **Community admin**: **Membership** for owners and admins.
   - **Buzz**: **Identity**, **Security** (desktop only), **Appearance**,
     **Notifications**, **Shortcuts**, **Agent setup**, **Decisions API**,
-    **External apps** and **Software updates**.
+    **External apps** and **Software updates**. In the Mac app, **Buzz →
+    Check for Updates…** opens **Software updates** and checks.
   - **Plugins**: **Manage plugins**, plus each plugin's own page (Builderlab,
     Attention, Claude, GitHub, Focus and so on).
 
@@ -129,11 +137,18 @@ if that desktop app is up and running.
 - **Sidebar actions.** Hover over a workspace or channel heading, or press Tab
   to reach its actions. On touch, tap **⋯**. In workspaces and Solo channels
   that support tasks, **⋯ → New task** works even when the pencil is hidden.
+  Plugins can add actions after **View channel details** in a Solo channel’s
+  **⋯** menu.
 - **Activity** collects your mentions, DMs, chat replies and reactions.
   **Mute** on a conversation silences everything but mentions.
 - **Search** supports `from:`, `in:#channel`, `in:@person`, `after:`,
   `before:`, `"exact phrase"` and `-word`; type `?` for the full list. `ask:`
   sends the query to your default agent as a new chat.
+- **Finder.** With the Finder plugin on (it's off by default), ⌘P (Ctrl+P)
+  finds a message in the channel you're in from any piece you remember, and
+  ⌘⇧P (Ctrl+Shift+P) searches all of Buzz; a switch under the field changes
+  between them. Letters don't need to be next to each other: `dplyrlbk` finds
+  "deploy rollback". While typing in a text field, ⌘⇧P stays Spoiler.
 - **Charts.** With the Charts plugin on, a `buzz-chart` code block of JSON
   draws a chart, for example
   `{"version":1,"type":"bar","title":"…","x":"team","y":"issues","data":[…]}`.
@@ -164,6 +179,10 @@ if that desktop app is up and running.
   community on this computer deletes its list.
 - **Instructions** change how an agent behaves. They don't give it new tools,
   accounts or permissions.
+- **Settings → Agent setup → Base instructions** shows the instructions Buzz
+  gives agents on this device. Open a section to read it. For editable
+  sections, use **Save** or **Cancel**. **Options** lets you disable or enable
+  a section, or put the default text back in the editor for you to save.
 - **Sessions.** By default an agent starts a fresh conversation for each
   thread. Its settings can make it one per channel or one per community.
 - **While it works**, the agent shows typing dots, and you can stop it. If it

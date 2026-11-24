@@ -18,6 +18,7 @@ import { useChannelNavigation } from "../../features/channel-navigation/ChannelN
 import { soloSuccessor } from "../../features/channel-navigation/solo-successor";
 import { historyPanel, useConversationTabs } from "./useConversationTabs";
 import type { MessageLinkOrigin } from "../../features/messages/MessageRow";
+import { useComposerWrites } from "../../features/messages/composer-writes";
 import { focusDock, useCoveredByDock } from "./useCoveredByDock";
 import tabStyles from "./ChannelTabs.module.css";
 import panelStyles from "../../features/panels/Panels.module.css";
@@ -835,12 +836,19 @@ function ChannelWorkspace({
     navigator && navigation?.target.kind === "conversation"
       ? navigation.target
       : undefined;
-  // Inline threads draw over the composer, which these conversations lack.
+  // Inline threads draw over the composer, which these conversations lack,
+  // as does a connection that can only read: its composer has no box.
+  const { readingOnly } = useComposerWrites(
+    queries,
+    currentId,
+    current?.channelType === "solo",
+  );
   const composes =
     !!current &&
     !current.archived &&
     current.viewerRole !== "guest" &&
-    (!current.readOnly || current.cached);
+    (!current.readOnly || current.cached) &&
+    !readingOnly;
   const inlineRoot =
     addressed?.inline &&
     addressed.channelId === currentId &&
@@ -1742,10 +1750,9 @@ function ChannelWorkspace({
     if (draft || composingMessage) open(undefined);
     // A thread opened by its address, as from a link to it or the sidebar,
     // reads inline over this conversation as one opened from its row does,
-    // unless a tab already shows it or the visit asks for the thread beside
-    // its root in the channel, which is its tab. The visit becomes that
-    // conversation with the thread inline; the message it named, if a reply,
-    // is not singled out in the thread. Only a known root goes inline: the
+    // unless a tab already shows it; Open in channel does too. The visit
+    // becomes that conversation with the thread inline; the message it named,
+    // if a reply, is not singled out in the thread. Only a known root goes inline: the
     // timeline's, or the address's hint. A bare link to a message outside
     // the timeline still opens its tab, which reads it or says it's gone.
     const routedTarget = navigation.target;
@@ -1757,7 +1764,6 @@ function ChannelWorkspace({
       !routedTarget.panel &&
       !routedTarget.forward &&
       !routedTarget.layer &&
-      routedTarget.context !== "channel" &&
       placeIn(
         { kind: "thread" },
         inlineHost.current,
@@ -2956,9 +2962,9 @@ function ChannelWorkspace({
           channel={current}
           rootId={inlineThread}
           messageId={addressed?.inlineMessage}
-          // A panel over the thread takes the full height; so does the thread.
+          // A layer over the thread grows the thread to fit it.
           tall={
-            !!layerTarget?.target &&
+            !!layerTarget &&
             layerTarget.rootId === inlineThread &&
             !layerTarget.channelId
           }
