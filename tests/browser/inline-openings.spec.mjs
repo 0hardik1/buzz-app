@@ -320,6 +320,7 @@ test.describe("Inline", () => {
     // From the thread, the pull request replaces the profile.
     await activate(pullLink(thread(page)));
     await expect(pullHeading(github(page))).toBeVisible();
+    await expect(github(page)).toBeFocused();
     await expect(profile(page)).toHaveCount(0);
     await expect(thread(page)).toBeVisible();
     await page.reload();
