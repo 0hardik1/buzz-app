@@ -498,8 +498,8 @@ export function AppearanceSettings({
               />
             )}
             <SwitchPreferenceRow
-              label="Keep Markdown as you type it"
-              description="Bold, code, lists and other Markdown stay as plain characters until you send. The formatting toolbar and shortcuts won’t work in the message box."
+              label="Disable formatting while typing"
+              description="Bold, code, lists and other Markdown stay as plain characters until you send, and the formatting toolbar and shortcuts are turned off."
               checked={markdownAsTyped.enabled}
               onCheckedChange={setMarkdownAsTypedPreference}
             />
@@ -593,7 +593,7 @@ export function AppearanceSettings({
         )}
         {active && markdownAsTyped.unsaved && (
           <ToastNotice
-            title="Markdown preference wasn’t saved"
+            title="Formatting preference wasn’t saved"
             description="This choice is active, but could not be saved on this device. Try again."
           >
             <Button
@@ -603,7 +603,7 @@ export function AppearanceSettings({
                 setMarkdownAsTypedPreference(markdownAsTyped.enabled)
               }
             >
-              Retry saving Markdown preference
+              Retry saving formatting preference
             </Button>
           </ToastNotice>
         )}
