@@ -266,6 +266,11 @@ export function trackCursor() {
     const target = event.target instanceof Element ? event.target : null;
     if (target && (target.closest(CONVERSATION_NAV) || messageListOf(target)))
       clicked = true;
+    // Opening a thread, as opening a conversation, selects its newest
+    // message rather than its message box, also as its replies load. Reply
+    // is how to type in it.
+    if (target?.closest("button[data-thread-summary]"))
+      claim(() => newestRow(document.querySelector("[data-panel-workspace]")));
     schedule();
   };
   // A message's own content, such as a streaming reply, can't move a cursor;
