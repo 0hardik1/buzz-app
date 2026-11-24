@@ -564,8 +564,8 @@ presentedTest.describe("Presented focus", () => {
       );
       await scrolledAway.scrollIntoViewIfNeeded();
       await settle(page, reopenedHistory);
+      expect(await rowInReader(reopenedHistory, survivor.id)).toBe(false);
       expect(await rowInReader(reopenedHistory, replies[75].id)).toBe(true);
-      expect(await rowInReader(reopenedHistory, target.id)).toBe(false);
       const pluginTarget = replies[5];
       await page.evaluate(
         ({ events, placeId }) => {

@@ -2845,7 +2845,9 @@ function Timeline({
               session={queries}
               scope={scope}
               channelId={channelId}
-              linkedMessageId={requestedId}
+              linkedMessageId={
+                inlineTarget?.focus === false ? undefined : requestedId
+              }
               canOpen={(target) => canOpenLink?.(target) ?? false}
               open={onOpenLink}
             />
