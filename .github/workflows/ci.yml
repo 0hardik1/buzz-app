@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - uses: ./.github/actions/setup
       - name: Lint and types
         run: ./bin/pnpm check
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - uses: ./.github/actions/setup
       - name: Vitest shard
         env:
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - uses: ./.github/actions/setup
       - name: Install pinned Pi test dependencies
         run: |
@@ -120,7 +120,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - uses: ./.github/actions/setup
       - name: Tauri system libraries
         run: |
@@ -151,10 +151,12 @@ jobs:
         run: ./bin/cargo fmt --all --check
       - name: Rust lint
         run: ./bin/cargo clippy --workspace --locked --all-targets -- -D warnings
-      - name: Bundled buzz CLI
-        run: ./bin/node scripts/test-buzz-cli.mjs
+      - name: Stage bundled buzz CLI
+        run: ./bin/node scripts/build-buzz-cli.mjs --dev
       - name: All Rust tests and doctests
         run: ./bin/cargo test --workspace --locked
+      - name: Bundled buzz CLI
+        run: ./bin/node scripts/test-buzz-cli.mjs --prebuilt
       - name: FI Builderlab build and grant tests
         env:
           BUZZ_BUILD_FEDERATED_IDENTITY_CONFIG: '{"version":1,"id":"ci-fi","identityOrigin":"https://identity.example.test","communityHosts":["relay.example.test"],"adapterBase":"https://identity.example.test/api/goose/nip-fa","apiBasePath":"/api/goose/"}'
@@ -190,7 +192,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -237,7 +239,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -273,7 +275,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - uses: ./.github/actions/setup
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
@@ -369,7 +371,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -416,7 +418,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 92468f6ca3a088281db0da5d2e87f71f74faa4f5
+          ref: dffe441de315b7812ed252c47fc6231c13e2ba9a
       - uses: ./.github/actions/setup
       - name: Install pinned WebKit
         run: ./bin/pnpm exec playwright install webkit
@@ -462,4 +464,4 @@ jobs:
           for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
             test "$result" = success || exit 1
           done
-run-name: CI impact — main before
+run-name: CI impact — main after
