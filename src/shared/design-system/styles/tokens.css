@@ -918,7 +918,7 @@
   --time-state: 150ms;
   --time-panel-enter: 180ms;
   --time-settle: 220ms;
-  --time-showcase: 640ms;
+  --time-showcase: 960ms;
   --ease-state: ease;
   --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-settle: cubic-bezier(0.645, 0.045, 0.355, 1);

@@ -1,12 +1,9 @@
 /**
- * The tour's "Tidy it up", performed: the sidebar glides to each of the first
- * few cards that will trim and trims it slowly in view, then trims the rest
- * at once. A card qualifies while it shows everything only because the tour
+ * The tour's "Tidy it up", performed: the sidebar glides to the card that
+ * trims the most, so the change is unmistakable, then every card trims slowly
+ * together. A card qualifies while it shows everything only because the tour
  * is unanswered and it holds more than the default.
  */
-
-/** Cards trimmed in view; the rest trim together afterwards. */
-const SHOWN = 3;
 
 const listeners = new Set<() => void>();
 const emit = () => {
@@ -62,35 +59,37 @@ const until = (target: EventTarget, event: string, fallback: number) =>
   });
 
 /**
- * Answer the tour with `answer`, then trim. Cards stay full until their turn,
+ * Answer the tour with `answer`, then trim. Cards stay full until the trim,
  * so an answer saved mid-show still trims everything the next time.
  */
 export async function runTidyShow(answer: () => void) {
-  const cards = [...untidy].sort(([, a], [, b]) =>
-    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
-  );
-  held = new Set(cards.map(([key]) => key));
+  const cards = [...untidy];
+  const keys = cards.map(([key]) => key);
+  held = new Set(keys);
   answer();
   emit();
   const still = globalThis.matchMedia?.(
     "(prefers-reduced-motion: reduce)",
   ).matches;
-  if (still) return release(cards.map(([key]) => key));
-  for (const [key, rows] of cards.slice(0, SHOWN)) {
-    const card = rows.closest<HTMLElement>("[data-sidebar-section]") ?? rows;
-    const scroller = scrollParent(card);
-    const view = scroller?.getBoundingClientRect();
-    const place = card.getBoundingClientRect();
-    if (view && (place.top < view.top || place.top > view.bottom - 96)) {
-      card.scrollIntoView({ behavior: "smooth", block: "start" });
-      await until(scroller ?? window, "scrollend", 700);
-    }
-    rows.setAttribute("data-card-showcase", "");
-    release([key]);
-    await until(rows, "transitionend", 1200);
-    rows.removeAttribute("data-card-showcase");
+  if (still || cards.length === 0) return release(keys);
+  // The tallest card, while every card shows everything, trims the most.
+  const star = cards
+    .map(([, rows]) => rows)
+    .reduce((most, rows) =>
+      rows.scrollHeight > most.scrollHeight ? rows : most,
+    );
+  const card = star.closest<HTMLElement>("[data-sidebar-section]") ?? star;
+  const scroller = scrollParent(card);
+  const view = scroller?.getBoundingClientRect();
+  const place = card.getBoundingClientRect();
+  if (view && (place.top < view.top || place.bottom > view.bottom)) {
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    await until(scroller ?? window, "scrollend", 700);
   }
-  release(cards.slice(SHOWN).map(([key]) => key));
+  for (const [, rows] of cards) rows.setAttribute("data-card-showcase", "");
+  release(keys);
+  await until(star, "transitionend", 1600);
+  for (const [, rows] of cards) rows.removeAttribute("data-card-showcase");
 }
 
 function scrollParent(element: HTMLElement) {

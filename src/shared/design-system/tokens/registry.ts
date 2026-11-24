@@ -2196,7 +2196,7 @@ export const MOTION = [
   {
     token: "duration-showcase",
     variable: "--duration-showcase",
-    value: "640ms",
+    value: "960ms",
     use: "A one-time change performed for the person to watch, such as the tour trimming cards.",
   },
   {
