@@ -60,6 +60,7 @@ import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { Input } from "../../shared/design-system/ui/Input";
 import { useNamePrompt, useShake } from "./useNamePrompt";
 import { MigrationPreview } from "./AgentSettingsHost";
+import { ProviderDialog } from "./ProviderDialog";
 import { RemoteAgentIntroduction } from "./RemoteAgentIntroduction";
 
 const message = (error: unknown) =>
@@ -469,6 +470,9 @@ export function AgentCreateDialog({
   // passes a type's own refusal.
   const gate = !update && !type?.remote ? type?.admitsCreation : undefined;
   const { admission, retry } = useAdmission(gate);
+  // The type's own setup, where its credentials are set.
+  const [settingUp, setSettingUp] = useState(false);
+  const setUpButton = useRef<HTMLButtonElement>(null);
   const canCreate =
     admission.state === "open" &&
     (!Configuration || configurationReady || picked);
@@ -955,8 +959,12 @@ export function AgentCreateDialog({
             {admission.state === "held" && (
               <p className="m-0 flex items-center gap-2 text-body-sm">
                 <span role="status">{admission.reason}</span>
-                {openSettings && (
-                  <Button size="sm" onClick={() => openSettings("agents")}>
+                {type?.provider && (
+                  <Button
+                    ref={setUpButton}
+                    size="sm"
+                    onClick={() => setSettingUp(true)}
+                  >
                     Set up
                   </Button>
                 )}
@@ -1038,6 +1046,16 @@ export function AgentCreateDialog({
           />
           {errorMessage}
         </div>
+      )}
+      {settingUp && (
+        <ProviderDialog
+          type={type}
+          finalFocus={setUpButton}
+          onClose={() => {
+            setSettingUp(false);
+            retry();
+          }}
+        />
       )}
     </Dialog>
   );

@@ -2566,6 +2566,35 @@ describe("Recommended setup", () => {
       await waitFor(() => expect(agents.create).toHaveBeenCalledOnce());
     });
 
+    it("opens the type's own setup from a creation refusal", async () => {
+      const READY = { readiness: "ready" };
+      let refusing = true;
+      const gated = {
+        ...claude,
+        provider: {
+          snapshot: () => READY,
+          subscribe: () => () => undefined,
+          check: () => undefined,
+          DialogBody: () => <p>Claude credentials</p>,
+        },
+        admitsCreation: {
+          check: async () => (refusing ? "Needs a saved key." : undefined),
+          subscribe: () => () => undefined,
+        },
+      } as unknown as RegisteredAgentType;
+      const { dialog, user } = setup([gated]);
+      await inspectModel(user, dialog, "Model C · High");
+      await within(dialog).findByText("Needs a saved key.");
+      await user.click(within(dialog).getByRole("button", { name: "Set up" }));
+      expect(await screen.findByText("Claude credentials")).toBeVisible();
+      // Closing it asks again.
+      refusing = false;
+      await user.keyboard("{Escape}");
+      await waitFor(() =>
+        expect(within(dialog).queryByText("Needs a saved key.")).toBeNull(),
+      );
+    });
+
     it("offers Retry when a creation gate throws before answering", async () => {
       const gated = {
         ...claude,

@@ -180,8 +180,6 @@ export class ClaudeAuth {
   /** Whether `owned` is the latest probe's answer, not one before a probe
    * that failed. */
   private ownCurrent = false;
-  /** Probes Claude answered, rather than ones that failed. */
-  private readonly answered = new WeakSet<Promise<unknown>>();
   /** Whether `keySaved` is an answer yet, not its starting value. */
   private keyKnown = false;
 
@@ -220,7 +218,6 @@ export class ClaudeAuth {
     if (this.own) return this.own;
     const asking = ownConnection(spawn).then(
       (own) => {
-        this.answered.add(asking);
         if (this.own === asking) {
           const changed = this.owned !== undefined && this.owned !== !!own;
           this.owned = !!own;
@@ -280,16 +277,21 @@ export class ClaudeAuth {
   async protectedReady() {
     const known = this.protectedEligible;
     if (known !== undefined) return known;
-    const asking = this.connection();
-    const [own, key] = await Promise.all([
-      asking.catch(() => undefined),
-      this.has(),
-    ]);
-    if (key) return true;
+    const quiet = () => undefined;
+    let asking = this.connection();
+    await Promise.all([asking.catch(quiet), this.has()]);
+    // A newer check under way replaced that probe: its answer is the current one.
+    while (this.own && this.own !== asking) {
+      asking = this.own;
+      await asking.catch(quiet);
+    }
+    // The current answer, never an older probe's: one a newer check replaced
+    // may have answered yes after the newer one failed.
+    const current = this.protectedEligible;
     // An answer Claude couldn't give is unknown, never a no.
-    if (!this.answered.has(asking))
+    if (current === undefined)
       throw new Error("Claude couldn't say whether it is set up");
-    return !!own;
+    return current;
   }
 
   /** What Settings needs, asked again: whether the person has a setup of

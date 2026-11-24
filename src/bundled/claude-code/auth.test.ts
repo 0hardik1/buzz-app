@@ -547,3 +547,36 @@ it("stops admitting protected agents on the person's own setup once a fresh chec
   await auth.save(KEY);
   expect(auth.protectedEligible).toBe(true);
 });
+
+it("never admits a protected agent on a probe a newer, failed check replaced", async () => {
+  store(false);
+  const answers: ((status: unknown) => void)[] = [];
+  const spawn: Spawn = async (_id, options) => {
+    let stdout = "";
+    const exited = new Promise<number>((resolve) => {
+      answers.push((status) => {
+        stdout = JSON.stringify(status);
+        options?.onStdout?.(stdout);
+        resolve(0);
+      });
+    });
+    return {
+      write: async () => undefined,
+      end: async () => undefined,
+      kill: async () => undefined,
+      exited,
+    };
+  };
+  const auth = new ClaudeAuth(spawn);
+  // Admission starts probe A; a newer check replaces it with probe B.
+  const admitted = auth.protectedReady();
+  await vi.waitFor(() => expect(answers).toHaveLength(1));
+  const checked = auth.check();
+  await vi.waitFor(() => expect(answers).toHaveLength(2));
+  // B can't say, then A answers yes.
+  (answers[1] as (status: unknown) => void)(null);
+  await checked;
+  (answers[0] as (status: unknown) => void)({ loggedIn: true });
+  await expect(admitted).rejects.toThrow();
+  expect(auth.protectedEligible).toBeUndefined();
+});
