@@ -97,13 +97,13 @@ use legacy_communities::legacy_communities;
 use local_skills::local_skills_list;
 use os_idle::get_os_idle_seconds;
 use repositories_folder::{repositories_folder_list, repositories_folder_validate};
+mod ffmpeg_install;
 mod relaunch;
 mod relay;
 mod relay_admin;
 mod saved_downloads;
 mod sign_out;
 mod system_clock;
-mod ffmpeg_install;
 use identity::{
     identity_create, identity_export, identity_import, identity_import_legacy,
     identity_legacy_available, identity_prepare_remote_agent_authorization, identity_restore,

@@ -307,7 +307,8 @@ export function attachmentDraft(
             error instanceof Error
               ? error.message
               : "Upload failed. Retry or remove this file.",
-          missingEncoder: error instanceof UploadError && error.code === "ffmpeg",
+          missingEncoder:
+            error instanceof UploadError && error.code === "ffmpeg",
           unsupported:
             (error instanceof UploadError && error.code === "type") ||
             undefined,
