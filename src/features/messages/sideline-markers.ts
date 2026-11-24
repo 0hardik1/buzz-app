@@ -125,7 +125,10 @@ export function sidelineMarkers(
       (attachment) =>
         attachment.kind === "image" || attachment.kind === "video",
     );
-    const links = githubLinks(row.content);
+    // Pull requests and issues have a state to show; other GitHub pages don't.
+    const links = githubLinks(row.content).filter(
+      (link) => link.kind === "pull" || link.kind === "issue",
+    );
     const pin = pinned.has(row.id);
     if (!pin && !media.length && !links.length) continue;
     markers.push({

@@ -2307,6 +2307,7 @@ function Timeline({
       rows={rows}
       channelId={channelId}
       session={queries}
+      links={extensions?.links}
       scroller={scroller}
       handle={handle}
       onJump={(id) => {

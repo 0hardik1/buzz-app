@@ -48,3 +48,10 @@ export type LinkPreview = Readonly<{
 export const LinkPreviewContext = createContext<
   ((preview: LinkPreview | undefined) => void) | undefined
 >(undefined);
+
+/** Set where the host shows a link as its icon alone, such as on a
+ * conversation's sideline: a renderer shows only its icon, and reports the
+ * name it would show beside it. */
+export const LinkGlyphContext = createContext<
+  ((name: string | undefined) => void) | undefined
+>(undefined);

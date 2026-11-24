@@ -32,6 +32,7 @@ import {
   LinkContentContext,
   LinkChannelKindContext,
   LinkAccessibleNameContext,
+  LinkGlyphContext,
 } from "../../features/conversation/LinkLabelContext";
 import { buzzLinkKind } from "../../features/navigation/buzz-links";
 import styles from "../../shared/InlineReference.module.css";
@@ -222,7 +223,13 @@ export function LinkLabel({
     setAccessibleName?.(skill);
     return () => setAccessibleName?.(undefined);
   }, [setAccessibleName, skill]);
-  if (!kind) return <>{label}</>;
+  const glyph = useContext(LinkGlyphContext);
+  const glyphName = kind ? (skill ?? label) : undefined;
+  useEffect(() => {
+    glyph?.(glyphName);
+    return () => glyph?.(undefined);
+  }, [glyph, glyphName]);
+  if (!kind) return glyph ? null : label;
   if (skill) label = skill;
   const Icon =
     kind === "channel" && channelKind === "private" ? LockIcon : icons[kind];
@@ -232,6 +239,7 @@ export function LinkLabel({
       className={kind === "channel" ? channelIconClass(Icon) : styles.icon}
     />
   );
+  if (glyph) return icon;
   if (!skill && content !== undefined && !rawDestination)
     return (
       <span data-link-kind={kind}>

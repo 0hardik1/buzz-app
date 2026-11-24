@@ -55,14 +55,26 @@ const prose = [
   "Ship it behind a setting first so nobody's normal view changes.",
 ];
 
-const titles = {
-  4310: "Sideline timeline prototype",
-  4288: "Scroll anchor drifts after a reveal",
-  4302: "Pins should survive edits",
-  4315: "Fix flaky first-paint journey",
-  4316: "Retry media uploads on reconnect",
-  882: "Relay load budget",
-  4321: "Media thumbnails at small sizes",
+const pulls = {
+  4310: { title: "Sideline timeline prototype", state: "open", draft: true },
+  4288: { title: "Scroll anchor drifts after a reveal", state: "open" },
+  4302: {
+    title: "Pins should survive edits",
+    state: "closed",
+    state_reason: "completed",
+  },
+  4315: {
+    title: "Fix flaky first-paint journey",
+    state: "closed",
+    merged: true,
+  },
+  4316: { title: "Retry media uploads on reconnect", state: "closed" },
+  882: { title: "Relay load budget", state: "open" },
+  4321: {
+    title: "Media thumbnails at small sizes",
+    state: "closed",
+    merged: true,
+  },
 };
 
 function seed(app) {
@@ -130,7 +142,7 @@ test("the sideline maps media, GitHub links and pins beside the history", async 
   await page.route("https://api.github.com/**", (route) => {
     const number = new URL(route.request().url()).pathname.split("/").at(-1);
     return route.fulfill({
-      json: { title: titles[number] ?? "A change", state: "open" },
+      json: pulls[number] ?? { title: "A change", state: "open" },
     });
   });
   await page.addInitScript(() =>
@@ -143,14 +155,18 @@ test("the sideline maps media, GitHub links and pins beside the history", async 
   const markers = sideline.getByRole("button", { name: /^Jump to/ });
   await expect(markers.first()).toBeVisible();
   await expect(
-    sideline.getByRole("button", { name: /^Jump to Pinned: Next step/ }),
-  ).toBeVisible();
-  await expect(
-    sideline.getByRole("button", { name: /^Jump to #4310 / }),
+    sideline.getByRole("button", { name: /^Jump to Next step/ }),
   ).toBeVisible();
   await expect(
     sideline.getByRole("button", { name: /^Jump to Video/ }),
   ).toBeAttached();
+  // A GitHub icon is the state the chat shows on the link, named by its title.
+  const merged = sideline.getByRole("button", {
+    name: "Jump to chat#4321 · Media thumbnails at small sizes",
+  });
+  await expect(merged.locator('[data-pr-state="merged"]')).toBeAttached();
+  // Only the icons: no text on the line.
+  await expect(sideline).toHaveText("");
   await page.screenshot({
     path: test.info().outputPath("sideline-latest.png"),
   });
