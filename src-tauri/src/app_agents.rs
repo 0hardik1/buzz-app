@@ -719,11 +719,11 @@ pub(crate) async fn app_agent_set_protection(
 
 /// The owner's native consent to delete a plugin that still protects agents.
 /// The dialog names what storage holds, not what the caller sent.
-fn release_protection_dialog(protected: &str, provider: &str) -> bool {
+fn release_protection_dialog(protected: &str) -> bool {
     let result = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Warning)
-        .set_title("Delete this plugin and remove protection?")
-        .set_description(format!("{protected} protected by {provider}. Deleting the plugin also removes this protection, so they run without security checks, including in any other copy of Buzz on this Mac, such as a development build.\n\nTo keep them protected, cancel and keep the plugin."))
+        .set_title("Delete plugin and remove protection?")
+        .set_description(format!("This plugin protects {protected}. Deleting it removes their protection, so they run without security checks.\n\nTo keep them protected, cancel."))
         .set_buttons(rfd::MessageButtons::OkCancelCustom("Delete and remove protection".into(), "Cancel".into()))
         .show();
     result == rfd::MessageDialogResult::Ok
@@ -775,11 +775,12 @@ pub(crate) async fn app_agent_release_protection(
         if defaults.is_some() {
             names.push("new agents".into());
         }
-        let subject = match names.as_slice() {
-            [one] if defaults.is_none() => format!("{one} is"),
-            _ => format!("{} are", names.join(", ")),
+        let subject = match names.split_last() {
+            Some((last, [])) => last.clone(),
+            Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+            None => String::new(),
         };
-        if !release_protection_dialog(&subject, &provider) {
+        if !release_protection_dialog(&subject) {
             return Ok(false);
         }
         for agent in &protected {
