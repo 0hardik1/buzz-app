@@ -62,7 +62,8 @@ if that desktop app is up and running.
   more of the same.
 - **Search**: the top bar (⌘K or ⌘T; Ctrl elsewhere). ⌘F searches the current
   conversation. ⌘/ lists shortcuts.
-- **Settings** groups:
+- **Settings** (⌘,, or **Buzz → Settings…** in the Mac app; Ctrl+, elsewhere)
+  groups:
   - **Community**: **Profile**, **Local settings** (community address,
     repositories folder, cache, **New Solo chats** lifetime), **Mobile app**
     (or **Pair mobile**) and **Leave or remove**.
