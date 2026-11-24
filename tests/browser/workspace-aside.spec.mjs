@@ -1,5 +1,6 @@
-// A workspace's aside docks in a column of its declared width beside the
-// reader, or floats over the history's end edge when the reader is narrow.
+// A workspace's aside sits over the history's end edge, left of its scrollbar.
+// Docked, the history's content and the composer keep to the width beside it;
+// when the reader is narrow, it floats over the history while open.
 import { test, expect } from "./fixture.mjs";
 import { open, settle } from "./timeline.mjs";
 
@@ -77,7 +78,7 @@ const past = (region) =>
     );
   });
 
-test("a docked aside takes a column of its width beside the history and composer", async ({
+test("a docked aside keeps the history and composer beside it", async ({
   page,
   app,
 }) => {
@@ -87,10 +88,9 @@ test("a docked aside takes a column of its width beside the history and composer
   await settle(page, region);
   const at = await layout(page);
   expect(at.aside.width).toBe(320);
-  expect(Math.abs(at.reader.right - at.aside.left)).toBeLessThanOrEqual(1);
-  expect(at.history.right).toBeLessThanOrEqual(at.aside.left + 1);
+  expect(at.list.right).toBeLessThanOrEqual(at.aside.left);
   expect(at.composer.right).toBeLessThanOrEqual(at.aside.left + 1);
-  // The composer stays centered under the narrowed history. It spans the
+  // The composer stays centered under the history's rows. It spans the
   // frame and the list the scrollport, so a classic scrollbar moves the
   // list's center by half its width.
   expect(
@@ -101,12 +101,12 @@ test("a docked aside takes a column of its width beside the history and composer
         at.scrollbar / 2,
     ),
   ).toBeLessThanOrEqual(2);
-  // The column runs the reader's height, and the plan scrolls inside it.
-  expect(Math.abs(at.aside.top - at.reader.top)).toBeLessThanOrEqual(1);
-  expect(Math.abs(at.aside.bottom - at.reader.bottom)).toBeLessThanOrEqual(1);
+  // A tall plan spans the history, never the composer, and scrolls itself.
+  expect(Math.abs(at.aside.top - at.history.top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(at.aside.bottom - at.history.bottom)).toBeLessThanOrEqual(1);
   expect(at.region.scrollHeight).toBeGreaterThan(at.region.clientHeight);
 
-  // Wheeling over the aside scrolls only the plan.
+  // Wheeling over the plan scrolls only the plan.
   const offset = await region.evaluate((element) => element.scrollTop);
   await plan(page).hover();
   for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 120);
@@ -115,16 +115,73 @@ test("a docked aside takes a column of its width beside the history and composer
     .toBeGreaterThan(100);
   expect(await region.evaluate((element) => element.scrollTop)).toBe(offset);
 
-  // The page's control hides it, and the history takes the width back.
+  // The page's control hides it, and the rows take the width back.
   await page.getByRole("button", { name: "Hide plan" }).click();
   await expect(plan(page)).toBeHidden();
   await expect
     .poll(async () =>
       history(page).evaluate(
-        (element) => element.getBoundingClientRect().right,
+        (element) => element.querySelector("ol").getBoundingClientRect().right,
       ),
     )
-    .toBeGreaterThan(at.aside.right - 2);
+    .toBeGreaterThan(at.aside.left + 100);
+});
+
+test("the history's scrollbar stays at the reader's end, right of a docked aside", {
+  tag: "@classic-scrollbars",
+}, async ({ page, app }) => {
+  test.skip(
+    process.platform !== "linux" && !process.env.BUZZ_CLASSIC_SCROLLBARS,
+    "Set BUZZ_CLASSIC_SCROLLBARS=1 on a Mac whose scrollbars take space",
+  );
+  await open(page, app);
+  await openAside(page);
+  const region = history(page);
+  await settle(page, region);
+  const at = await layout(page);
+  // The history spans the reader, and its scrollport runs under the aside.
+  expect(Math.abs(at.history.right - at.reader.right)).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(at.aside.right - (at.history.right - at.scrollbar)),
+  ).toBeLessThanOrEqual(1);
+  // The scrollbar beside the aside belongs to the history.
+  expect(at.scrollbar).toBeGreaterThan(0);
+  expect(
+    await region.evaluate(
+      (element, { x, y }) => element === document.elementFromPoint(x, y),
+      {
+        x: at.history.right - at.scrollbar / 2,
+        y: (at.aside.top + at.aside.bottom) / 2,
+      },
+    ),
+  ).toBe(true);
+});
+
+test("the wheel beside or below a short docked plan scrolls the history", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await openAside(page, { aside: "short" });
+  const region = history(page);
+  await settle(page, region);
+  const at = await layout(page);
+  const card = await plan(page).boundingBox();
+  // The box sizes to the plan's card, which leaves the column below it empty.
+  expect(at.aside.bottom).toBeLessThan(at.history.bottom - 100);
+  for (const point of [
+    // Below the card.
+    { x: card.x + card.width / 2, y: at.aside.bottom + 60 },
+    // In the card's margin, inside the aside's box.
+    { x: at.aside.left + 3, y: card.y + card.height / 2 },
+  ]) {
+    const before = await region.evaluate((element) => element.scrollTop);
+    await page.mouse.move(point.x, point.y);
+    for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -120);
+    await expect
+      .poll(() => region.evaluate((element) => element.scrollTop))
+      .toBeLessThan(before - 100);
+  }
 });
 
 test("an aside's popover escapes over the history", async ({ page, app }) => {
@@ -193,6 +250,8 @@ test("a narrow reader floats the aside over the history while the page opens it"
   await expect(plan(page)).toBeHidden();
   const show = page.getByRole("button", { name: "Show plan" });
   await expect(show).toHaveAttribute("aria-expanded", "false");
+  // The page hears that the aside floats.
+  await expect(show).toHaveAttribute("data-aside-floating", "true");
   const closed = await layout(page);
   expect(
     Math.abs(closed.history.right - closed.reader.right),
@@ -210,7 +269,7 @@ test("a narrow reader floats the aside over the history while the page opens it"
   const at = await layout(page);
   expect(at.aside.top).toBeGreaterThanOrEqual(at.history.top);
   expect(at.aside.bottom).toBeLessThanOrEqual(at.history.bottom);
-  expect(at.aside.bottom).toBeLessThan(at.composer.top);
+  expect(at.aside.bottom).toBeLessThanOrEqual(at.composer.top);
   expect(at.aside.right).toBeLessThanOrEqual(at.history.right - at.scrollbar);
   expect(await region.evaluate((element) => element.clientWidth)).toBe(full);
   const offset = await region.evaluate((element) => element.scrollTop);
@@ -234,7 +293,10 @@ test("a narrow reader floats the aside over the history while the page opens it"
   // Widening docks it again, restoring the docked state.
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(plan(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Hide plan" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hide plan" })).toHaveAttribute(
+    "data-aside-floating",
+    "false",
+  );
   await expect
     .poll(async () => (await layout(page)).list.width)
     .toBeCloseTo(docked, 0);
@@ -277,7 +339,7 @@ test.describe("in a thread", () => {
     historyCounts: { alpha: 40, beta: 3 },
   });
 
-  test("a thread target docks the aside beside the thread", async ({
+  test("a thread target docks the aside over the thread's end edge", async ({
     page,
     app,
   }) => {
@@ -290,12 +352,25 @@ test.describe("in a thread", () => {
       .locator("xpath=preceding-sibling::*[1]")
       .locator("[data-message-scroller]");
     await expect(thread).toBeVisible();
-    const [box, column] = await Promise.all([
-      thread.boundingBox(),
-      aside(page).boundingBox(),
-    ]);
-    expect(column.width).toBe(320);
-    expect(box.x + box.width).toBeLessThanOrEqual(column.x + 1);
+    const at = await thread.evaluate((element) => {
+      const box = (node) => node.getBoundingClientRect().toJSON();
+      const widget = document.querySelector("[data-workspace-aside]");
+      return {
+        thread: box(element),
+        scrollbar: element.offsetWidth - element.clientWidth,
+        rows: box(element.querySelector("[data-thread-rows]")),
+        aside: box(widget),
+        reader: box(widget.previousElementSibling),
+      };
+    });
+    expect(at.aside.width).toBe(320);
+    expect(at.rows.right).toBeLessThanOrEqual(at.aside.left);
+    expect(Math.abs(at.thread.right - at.reader.right)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(at.aside.right - (at.thread.right - at.scrollbar)),
+    ).toBeLessThanOrEqual(1);
+    expect(at.aside.top).toBeGreaterThanOrEqual(at.thread.top - 1);
+    expect(at.aside.bottom).toBeLessThanOrEqual(at.thread.bottom + 1);
   });
 });
 

@@ -37,19 +37,23 @@ type Props = {
   width: WorkspaceAsideWidth | undefined;
   open: boolean | undefined;
   onOpenChange: ((open: boolean) => void) | undefined;
+  onFloatingChange: ((floating: boolean) => void) | undefined;
   children: ReactNode;
 };
 
 /**
- * A workspace's reader and its page's aside: a column beside the reader, or,
- * when the reader would get too narrow, an overlay over the history's end edge
- * while open. Rows under the overlay aren't read.
+ * A workspace's reader and its page's aside, placed over the history's end
+ * edge. Docked, the history, composer, queue and typing label keep to the
+ * reader's width beside it, so the history's scrollbar stays at the reader's
+ * end. When the reader would get too narrow, it floats over the history
+ * instead, while open, and rows under it aren't read.
  */
 export function WorkspaceRow({
   aside,
   width,
   open: controlled,
   onOpenChange,
+  onFloatingChange,
   children,
 }: Props) {
   const row = useRef<HTMLDivElement>(null);
@@ -65,7 +69,9 @@ export function WorkspaceRow({
   const layout =
     rowWidth === undefined ? undefined : asideLayout(rowWidth, width);
   const docked = layout?.docked ?? true;
-  const floating = aside != null && !docked && open;
+  const shown = aside != null && open;
+  const floating = shown && !docked;
+  const asideWidth = layout?.width ?? width ?? DEFAULT_WIDTH;
 
   useLayoutEffect(() => {
     const element = row.current;
@@ -93,24 +99,26 @@ export function WorkspaceRow({
     transition(docked);
   }, [docked]);
 
-  // The overlay spans the history, beside its scrollbar, not the composer.
-  // Its owner wakes reading whenever the overlay opens, moves or closes.
-  const [geometry, setGeometry] = useState<CSSProperties>();
-  const wasFloating = useRef(false);
+  const measured = layout !== undefined;
+  const reportFloating = useEffectEvent((floating: boolean) =>
+    onFloatingChange?.(floating),
+  );
   useLayoutEffect(() => {
-    const scroller = reader.current?.querySelector<HTMLElement>(
-      "[data-message-scroller]",
-    );
-    if (!floating) {
-      setGeometry(undefined);
-      if (wasFloating.current) readingPositioned(scroller ?? null);
-      wasFloating.current = false;
-      return;
-    }
-    wasFloating.current = true;
+    if (measured) reportFloating(!docked);
+  }, [measured, docked]);
+
+  // The box spans the history, beside its scrollbar, not the composer. It
+  // wakes reading whenever it shows, moves, floats, docks or hides. A reader
+  // can show its history later, as a thread does once loaded, or replace it.
+  const [geometry, setGeometry] = useState<CSSProperties>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: docking or floating changes what covers the rows, so reading wakes.
+  useLayoutEffect(() => {
     const container = row.current;
-    if (!container || !scroller) return;
+    const frame = reader.current;
+    if (!shown || !container || !frame) return;
+    let scroller: HTMLElement | null = null;
     const measure = () => {
+      if (!scroller?.isConnected) return find();
       const outer = container.getBoundingClientRect();
       const history = scroller.getBoundingClientRect();
       setGeometry({
@@ -120,12 +128,29 @@ export function WorkspaceRow({
       } as CSSProperties);
       readingPositioned(scroller);
     };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(container);
-    observer.observe(scroller);
-    return () => observer.disconnect();
-  }, [floating]);
+    // A removed history reports one last resize, so only a reader without
+    // one is watched for it to appear.
+    const resize = new ResizeObserver(measure);
+    const appear = new MutationObserver(() => find());
+    const find = () => {
+      resize.disconnect();
+      appear.disconnect();
+      scroller = frame.querySelector<HTMLElement>("[data-message-scroller]");
+      if (!scroller) {
+        appear.observe(frame, { childList: true, subtree: true });
+        return;
+      }
+      resize.observe(container);
+      resize.observe(scroller);
+      measure();
+    };
+    find();
+    return () => {
+      resize.disconnect();
+      appear.disconnect();
+      if (scroller) readingPositioned(scroller);
+    };
+  }, [shown, floating]);
 
   // A nested surface: Escape and a press elsewhere in the row close only it.
   useEffect(() => {
@@ -167,17 +192,28 @@ export function WorkspaceRow({
 
   return (
     <div ref={row} className={styles.workspaceRow}>
-      <div ref={reader} className={styles.workspaceReader}>
+      <div
+        ref={reader}
+        className={styles.workspaceReader}
+        data-aside-docked={shown && docked ? "" : undefined}
+        style={
+          shown && docked
+            ? ({
+                "--timeline-aside-width": `${asideWidth}px`,
+              } as CSSProperties)
+            : undefined
+        }
+      >
         <ReadingCovers value={covers}>{children}</ReadingCovers>
       </div>
       {aside != null && (
         <div
           ref={box}
-          className={docked ? styles.workspaceAside : styles.floatingAside}
+          className={styles.workspaceAside}
           data-workspace-aside={docked ? "docked" : "floating"}
           hidden={!open}
           tabIndex={docked ? undefined : -1}
-          style={{ ...geometry, inlineSize: layout?.width ?? width }}
+          style={{ ...geometry, inlineSize: asideWidth }}
         >
           {aside}
         </div>

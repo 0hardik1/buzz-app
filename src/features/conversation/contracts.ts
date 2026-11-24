@@ -541,11 +541,14 @@ export type ConversationWorkspaceProps = {
     restHeight: number;
     content(state: { expanded: boolean; toggle(): void }): ReactNode;
   };
-  /** Content beside the main tab's reader. The host gives it a column of
-   * `asideWidth` at the reader's end edge, between the reader's top and its
-   * bottom, and the reader narrows by that width. When the reader would get
-   * too narrow, the aside floats instead: an overlay over the history's end
-   * edge, shown only while open. The content fills the box and scrolls itself. */
+  /** Content beside the main tab's history. The host places it in a box of
+   * `asideWidth` over the history's end edge, beside its scrollbar and above
+   * the composer; the history and composer keep to the width beside it. When
+   * the reader would get too narrow, the aside floats over the history
+   * instead, shown only while open. The box draws nothing: the content draws
+   * its own card, sizes to it, and scrolls itself when taller than the box.
+   * Only the content takes pointer input, so the wheel beside or below it
+   * scrolls the history. */
   aside?: ReactNode;
   /** The aside's width. Defaults to 320. */
   asideWidth?: WorkspaceAsideWidth;
@@ -556,6 +559,9 @@ export type ConversationWorkspaceProps = {
    * control; without one, a floating aside stays closed. */
   asideOpen?: boolean;
   onAsideOpenChange?(open: boolean): void;
+  /** Called with whether the aside floats, once the host first places it and
+   * whenever it moves between docked and floating. */
+  onAsideFloatingChange?(floating: boolean): void;
   /** Actions in the pane's menu and the main tab's context menu. */
   actions?: readonly { label: string; run(): void }[];
   /** Select this panel on entry. Closing it keeps the main conversation. */

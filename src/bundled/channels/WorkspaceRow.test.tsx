@@ -51,7 +51,13 @@ function Covers() {
   return null;
 }
 /** A page whose header button drives the aside, as the contract asks. */
-function Page({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
+function Page({
+  onOpenChange,
+  onFloatingChange,
+}: {
+  onOpenChange?: (open: boolean) => void;
+  onFloatingChange?: (floating: boolean) => void;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <>
@@ -70,6 +76,7 @@ function Page({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
           onOpenChange?.(next);
           setOpen(next);
         }}
+        onFloatingChange={onFloatingChange}
       >
         <div data-message-scroller>History</div>
         <Covers />
@@ -88,26 +95,41 @@ it("docks an aside only while its reader keeps the minimum width", () => {
   expect(asideLayout(1000, 400)).toEqual({ docked: true, width: 400 });
 });
 
-it("docks the aside in a column after the reader, shown by the page's control", () => {
+it("docks the aside after the reader, which keeps its width beside it while shown", () => {
   render(<Page />);
   const box = plan()?.parentElement;
+  const reader = screen.getByText("History").parentElement as HTMLElement;
   expect(box).toHaveAttribute("data-workspace-aside", "docked");
   expect(box).toHaveStyle({ inlineSize: "320px" });
-  expect(screen.getByText("History").parentElement?.nextElementSibling).toBe(
-    box,
-  );
+  expect(reader.nextElementSibling).toBe(box);
+  expect(reader.style.getPropertyValue("--timeline-aside-width")).toBe("320px");
+  expect(reader).toHaveAttribute("data-aside-docked");
   expect(plan()).toBeVisible();
   expect(covers()).toEqual([]);
   fireEvent.click(screen.getByRole("button", { name: "Plan" }));
   expect(plan()).not.toBeVisible();
+  expect(reader.style.getPropertyValue("--timeline-aside-width")).toBe("");
+  expect(reader).not.toHaveAttribute("data-aside-docked");
 });
 
 it("closes the aside as it floats and restores the docked state after", () => {
   const changes: boolean[] = [];
-  render(<Page onOpenChange={(open) => changes.push(open)} />);
+  const floats: boolean[] = [];
+  render(
+    <Page
+      onOpenChange={(open) => changes.push(open)}
+      onFloatingChange={(floating) => floats.push(floating)}
+    />,
+  );
   const reader = screen.getByText("History");
+  expect(floats).toEqual([false]);
   resize(800);
   expect(changes).toEqual([false]);
+  expect(floats).toEqual([false, true]);
+  // A floating aside leaves the history its full width.
+  expect(
+    reader.parentElement?.style.getPropertyValue("--timeline-aside-width"),
+  ).toBe("");
   expect(plan()?.parentElement).toHaveAttribute(
     "data-workspace-aside",
     "floating",
@@ -115,6 +137,7 @@ it("closes the aside as it floats and restores the docked state after", () => {
   expect(plan()).not.toBeVisible();
   resize(1200);
   expect(changes).toEqual([false, true]);
+  expect(floats).toEqual([false, true, false]);
   expect(plan()).toBeVisible();
   // A docked aside hidden by its page stays hidden when it docks again.
   fireEvent.click(screen.getByRole("button", { name: "Plan" }));
@@ -128,8 +151,15 @@ it("closes the aside as it floats and restores the docked state after", () => {
 it("an aside that first measures narrow starts closed", () => {
   width = 700;
   const changes: boolean[] = [];
-  render(<Page onOpenChange={(open) => changes.push(open)} />);
+  const floats: boolean[] = [];
+  render(
+    <Page
+      onOpenChange={(open) => changes.push(open)}
+      onFloatingChange={(floating) => floats.push(floating)}
+    />,
+  );
   expect(changes).toEqual([false]);
+  expect(floats).toEqual([true]);
   expect(plan()).not.toBeVisible();
 });
 

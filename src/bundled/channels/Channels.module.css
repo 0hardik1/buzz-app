@@ -67,30 +67,27 @@
   min-height: 0;
   min-width: 0;
 }
-/* The aside's box, which its content fills and scrolls itself. */
-.workspaceAside,
-.floatingAside {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  min-height: 0;
-}
+/* The page's aside, over the history's end edge beside its scrollbar, never
+   over the composer, docked or floating. It draws nothing itself: its content
+   draws its card, sizes to it, and scrolls itself past the history's height.
+   Only that content takes pointer input, so the wheel beside or below it
+   scrolls the history. */
 .workspaceAside {
-  flex: none;
-  border-inline-start: 1px solid var(--border-standard);
-}
-/* Over the history's end edge, beside its scrollbar, never over the composer. */
-.floatingAside {
-  @apply floating-surface;
   position: absolute;
   z-index: 1;
-  inset-block-start: calc(var(--aside-top, 0px) + var(--space-2));
-  inset-inline-end: calc(var(--aside-scrollbar, 0px) + var(--space-2));
-  block-size: calc(var(--aside-height, 100%) - 2 * var(--space-2));
-  max-inline-size: calc(100% - 2 * var(--space-2));
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  inset-block-start: var(--aside-top, 0px);
+  inset-inline-end: var(--aside-scrollbar, 0px);
+  max-block-size: var(--aside-height, 100%);
+  max-inline-size: 100%;
+  pointer-events: none;
 }
-.workspaceAside[hidden],
-.floatingAside[hidden] {
+.workspaceAside > * {
+  min-block-size: 0;
+  pointer-events: auto;
+}
+.workspaceAside[hidden] {
   display: none;
 }
 .conversation

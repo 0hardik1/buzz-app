@@ -511,6 +511,7 @@ export const fixturePlugins: readonly BundledPlugin[] = [
           const [shownAside, setShownAside] = useState<AsideSize | null>();
           // The page's own control drives the aside, as the contract asks.
           const [asideOpen, setAsideOpen] = useState(true);
+          const [asideFloating, setAsideFloating] = useState<boolean>();
           useEffect(() => {
             window.fixtureAside = setShownAside;
             return () => {
@@ -569,6 +570,7 @@ export const fixturePlugins: readonly BundledPlugin[] = [
                 <button
                   type="button"
                   aria-expanded={asideOpen}
+                  data-aside-floating={asideFloating}
                   onClick={() => setAsideOpen(!asideOpen)}
                 >
                   {asideOpen ? "Hide plan" : "Show plan"}
@@ -587,6 +589,7 @@ export const fixturePlugins: readonly BundledPlugin[] = [
                         aside: <AsideWidget size={asideSize} />,
                         asideOpen,
                         onAsideOpenChange: setAsideOpen,
+                        onAsideFloatingChange: setAsideFloating,
                       }
                     : {})}
                   latestRequest={

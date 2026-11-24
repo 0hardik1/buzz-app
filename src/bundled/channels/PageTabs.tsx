@@ -559,6 +559,7 @@ export function PageTabs({
                       width={workspace.asideWidth}
                       open={workspace.asideOpen}
                       onOpenChange={workspace.onAsideOpenChange}
+                      onFloatingChange={workspace.onAsideFloatingChange}
                     >
                       {primaryTab &&
                       primaryChannel &&
