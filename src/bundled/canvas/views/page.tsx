@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { Browser } from "../../../features/browser/api";
 import { Button } from "../../../shared/design-system/ui/Button";
 import { Input } from "../../../shared/design-system/ui/Input";
@@ -69,6 +69,80 @@ export function AddressBar({
   );
 }
 
+/** How long after a page is opened for this viewer its address changes count
+ * as the site redirecting, not as the viewer going somewhere. */
+const SETTLE = 4000;
+
+/** The host's own browser view, with its own back, forward and address bar.
+ * It doesn't say where its page goes, so this reads the address it shows:
+ * where the viewer goes inside the page is then shared like any other change.
+ * That reaches into the host's markup and can break with it; the page still
+ * shows if it does, but only the address it was opened at is shared. */
+function HostPage({
+  View,
+  state,
+  interactive,
+  update,
+}: CanvasViewProps<PageState> & { View: Browser["View"] }) {
+  const frame = useRef<HTMLDivElement>(null);
+  // A new address from someone else is a new guest: the host view keeps the
+  // address it was opened at.
+  const [guest, setGuest] = useState({ url: state.url, opened: 0 });
+  // The address this viewer's page last showed.
+  const seen = useRef(state.url);
+  const quietUntil = useRef(Date.now() + SETTLE);
+  const typing = useRef(false);
+  const share = useRef({ interactive, update });
+  share.current = { interactive, update };
+  useEffect(() => {
+    if (state.url === seen.current) return;
+    seen.current = state.url;
+    quietUntil.current = Date.now() + SETTLE;
+    setGuest((was: { opened: number }) => ({
+      url: state.url,
+      opened: was.opened + 1,
+    }));
+  }, [state.url]);
+  useEffect(() => {
+    const view = frame.current;
+    const typed = () => {
+      typing.current = true;
+    };
+    const left = () => {
+      typing.current = false;
+    };
+    // An address the viewer entered is theirs, however soon it comes.
+    const entered = () => {
+      typing.current = false;
+      quietUntil.current = 0;
+    };
+    view?.addEventListener("input", typed);
+    view?.addEventListener("focusout", left);
+    view?.addEventListener("submit", entered);
+    const timer = setInterval(() => {
+      const address = frame.current?.querySelector<HTMLInputElement>(
+        'input[aria-label="Address"]',
+      );
+      const url = address && !typing.current && pageUrl(address.value);
+      if (!url || url === seen.current) return;
+      seen.current = url;
+      if (share.current.interactive && Date.now() >= quietUntil.current)
+        share.current.update({ url });
+    }, 500);
+    return () => {
+      clearInterval(timer);
+      view?.removeEventListener("input", typed);
+      view?.removeEventListener("focusout", left);
+      view?.removeEventListener("submit", entered);
+    };
+  }, []);
+  return (
+    <div ref={frame} className={styles.fill}>
+      <View key={guest.opened} url={guest.url} storage="canvas" />
+    </div>
+  );
+}
+
 function Page({
   state,
   interactive,
@@ -79,7 +153,20 @@ function Page({
   browser?: Browser | undefined;
   addressable: boolean;
 }) {
-  const Native = browser?.available ? browser.View : undefined;
+  // Cordis wraps a service's functions on each access: keep one identity, or
+  // React would see a new component, and a new page, on every render.
+  const [Native] = useState(() =>
+    browser?.available ? browser.View : undefined,
+  );
+  if (Native && state.url)
+    return (
+      <HostPage
+        View={Native}
+        state={state}
+        interactive={interactive}
+        update={update}
+      />
+    );
   return (
     <div className={styles.fill}>
       {addressable && interactive && (
@@ -95,9 +182,6 @@ function Page({
             ? "Enter an address to show a page here."
             : "No page is open here yet."}
         </p>
-      ) : Native ? (
-        // A new address is a new guest: the host view keeps its first one.
-        <Native key={state.url} url={state.url} storage="canvas" />
       ) : (
         <iframe
           className={styles.frame}
