@@ -220,6 +220,12 @@ them. Don't assume an
 optional plugin is on. Agents can ask to install or enable one, which you
 approve or decline.
 
+The Notes reader is no longer bundled. When it becomes available in the
+Marketplace, install and enable it on desktop to restore **Shared notes**.
+The old enabled setting does not carry over, and browsers cannot load external
+plugins. Existing notes remain available to agents through `notes_get`,
+`notes_set` and `notes_rm`.
+
 For a Git-installed plugin, an agent's update request or a pinned install link
 can switch the tracked branch even when the code is unchanged. Review and
 confirm the update to save the new source; no reinstall is needed.

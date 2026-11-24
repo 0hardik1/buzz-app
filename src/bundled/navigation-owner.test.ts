@@ -54,7 +54,6 @@ it("gives every bundled page to the app whose navigation lists it", async () => 
     "buzz.reminders/reminders": messages,
     "buzz.agents/agents": messages,
     "buzz.workflows/workflows": messages,
-    "buzz.relay-notes/notes": messages,
     // An unlisted destination still owns itself.
     "buzz.repos/repos": "buzz.repos/repos",
   });
