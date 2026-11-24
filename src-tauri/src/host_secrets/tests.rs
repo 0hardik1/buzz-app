@@ -388,6 +388,7 @@ impl Fixture {
         self.dialog()
     }
     /// Replaces any pre-accepted confirmation with one the test answers.
+    #[cfg(target_os = "macos")]
     fn confirmation(&self) -> (mpsc::Receiver<()>, tokio::sync::oneshot::Sender<bool>) {
         self.dialog()
     }
