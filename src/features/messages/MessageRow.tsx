@@ -94,6 +94,7 @@ import {
   contributionKey,
 } from "../conversation/ContributionBoundary";
 import type { ChannelMessage, Profile } from "../relay/contracts";
+import { CollapsibleMediaGroup } from "./CollapsibleMediaGroup";
 import { AttachmentImage } from "./AttachmentImage";
 import { AgentDeclineNotes } from "./AgentDeclineNotes";
 import { DeliveryNotice } from "./DeliveryNotice";
@@ -223,6 +224,11 @@ type MessageContentProps = MessageRowProps & {
     trigger: RefObject<HTMLButtonElement | null>,
   ) => ReactElement;
 };
+
+function mediaGroupLabel(count: number, imageOnly: boolean) {
+  if (count === 1) return imageOnly ? "Image" : "Video";
+  return `${count} ${imageOnly ? "images" : "photos and videos"}`;
+}
 
 /** A reply is not completion evidence. Read the exact request's lifecycle. */
 function useCompletedMessageWork(
@@ -819,7 +825,7 @@ function MessageRowContent({
             const images =
               group[0]?.kind === "image" || group[0]?.kind === "video";
             const imageOnly = group.every((item) => item.kind === "image");
-            const mediaLabel = imageOnly ? "images" : "photos and videos";
+            const mediaLabel = mediaGroupLabel(group.length, imageOnly);
             const files = group[0]?.kind === "file";
             // Only collapse when the host can open the complete gallery.
             const collapsed = images && group.length > 4 && !!onOpenMediaReview;
@@ -919,7 +925,7 @@ function MessageRowContent({
                     keepMounted={keepRowMounted}
                     label={
                       collapsed && index === 3
-                        ? `View all ${group.length} ${mediaLabel}, starting at ${imageOnly ? "image" : "item"} 4`
+                        ? `View all ${mediaLabel}, starting at ${imageOnly ? "image" : "item"} 4`
                         : group.length > 1
                           ? `Open image ${index + 1} of ${group.length}`
                           : "Open image attachment"
@@ -966,7 +972,7 @@ function MessageRowContent({
                   overlayCount={collapsed && index === 3 ? group.length - 3 : 0}
                   label={
                     collapsed && index === 3
-                      ? `View all ${group.length} ${mediaLabel}, starting at item 4`
+                      ? `View all ${mediaLabel}, starting at item 4`
                       : `Open video ${index + 1} of ${group.length}`
                   }
                   mode={mediaMode}
@@ -997,22 +1003,32 @@ function MessageRowContent({
                 />
               );
             });
-            return images &&
-              !(group[0] && drawn(group[0])) &&
-              (imageOnly || group.length >= 4) ? (
-              <div className={styles.imageGroup} key={group[0]?.url}>
-                {/* biome-ignore lint/a11y/useSemanticElements: This labels related media links, not a fieldset of form controls. */}
-                <div
-                  className={`${styles.imageList} ${group.length >= 4 ? styles.imageGrid : ""}`}
-                  data-image-grid={group.length >= 4 || undefined}
-                  role="group"
-                  aria-label={`${group.length} ${imageOnly ? (group.length === 1 ? "image" : "images") : "photos and videos"}`}
+            const first = group[0];
+            if (first && images && !drawn(first)) {
+              const seekTarget =
+                mediaSeekRequest === undefined
+                  ? undefined
+                  : row.attachments.find((item) => item.kind === "video");
+              return (
+                <CollapsibleMediaGroup
+                  key={first.url}
+                  groupKey={JSON.stringify([row.id, first.url])}
+                  scope={scope}
+                  label={mediaLabel}
+                  imageList={imageOnly || group.length >= 4}
+                  grid={group.length >= 4}
+                  seekRequest={
+                    seekTarget && group.includes(seekTarget)
+                      ? mediaSeekRequest
+                      : undefined
+                  }
                 >
                   {items}
-                </div>
-              </div>
-            ) : files ? (
-              <div className={styles.fileGroup} key={group[0]?.url}>
+                </CollapsibleMediaGroup>
+              );
+            }
+            return files ? (
+              <div className={styles.fileGroup} key={first?.url}>
                 {items}
               </div>
             ) : (

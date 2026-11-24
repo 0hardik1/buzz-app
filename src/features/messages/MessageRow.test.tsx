@@ -2387,7 +2387,7 @@ it.each([
   );
   const document = new DOMParser().parseFromString(html, "text/html");
   const group = document.querySelector(
-    `[aria-label="${attachments.length} photos and videos"]`,
+    `[role="group"][aria-label="${attachments.length} photos and videos"]`,
   );
   expect(group).not.toBeNull();
   const links = [...(group?.querySelectorAll("a") ?? [])];
@@ -5774,5 +5774,81 @@ it("reads a relayed line's date when Message timestamps hides its clock", () => 
   } finally {
     cleanup();
     setClockPreference({ messageTimestamps: "show" });
+  }
+});
+
+it("keeps a media disclosure focused and restores its state when the row returns", async () => {
+  const props = {
+    row: {
+      ...row,
+      attachments: [
+        { kind: "image" as const, url: "https://relay.test/media/one.gif" },
+      ],
+    },
+    scope: "media-disclosure-test",
+    profile: undefined,
+    media: (url: string) => url,
+    onOpenLink: () => false,
+    day: false,
+    retry: undefined,
+  };
+  const toggle = () => screen.getByRole("button", { name: "Image" });
+  const image = () =>
+    screen.queryByRole("link", { name: "Open image attachment" });
+  try {
+    const view = renderDom(<MessageRow {...props} />);
+    const user = userEvent.setup();
+    toggle().focus();
+    await user.keyboard("{Enter}");
+    expect(toggle()).toHaveFocus();
+    expect(toggle()).toHaveTextContent("Image");
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(
+      document.getElementById(toggle().getAttribute("aria-controls") ?? ""),
+    ).toBeEmptyDOMElement();
+    expect(image()).toBeNull();
+    view.unmount();
+    renderDom(<MessageRow {...props} />);
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    toggle().focus();
+    await user.keyboard(" ");
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(image()).toBeVisible();
+  } finally {
+    cleanup();
+  }
+});
+
+it("a timecode opens only its video group and saves that choice", () => {
+  const props = {
+    row: {
+      ...row,
+      attachments: [
+        { kind: "image" as const, url: "https://relay.test/media/still.png" },
+        { kind: "video" as const, url: "https://relay.test/media/clip.mp4" },
+      ],
+    },
+    scope: "timecode-test",
+    profile: undefined,
+    media: (url: string) => `/api/relay/media?url=${encodeURIComponent(url)}`,
+    onOpenLink: () => false,
+    day: false,
+    retry: undefined,
+  };
+  const toggle = (name: string) => screen.getByRole("button", { name });
+  try {
+    const view = renderDom(<MessageRow {...props} />);
+    fireEvent.click(toggle("Image"));
+    fireEvent.click(toggle("Video"));
+    view.rerender(
+      <MessageRow {...props} mediaSeekTo={5} mediaSeekRequest={1} />,
+    );
+    expect(toggle("Video")).toHaveAttribute("aria-expanded", "true");
+    expect(toggle("Image")).toHaveAttribute("aria-expanded", "false");
+    view.unmount();
+    renderDom(<MessageRow {...props} />);
+    expect(toggle("Video")).toHaveAttribute("aria-expanded", "true");
+  } finally {
+    cleanup();
   }
 });
