@@ -4318,28 +4318,13 @@ function Composer({
           {editing.target && (
             <ComposerAttachments
               media={session.media}
-              items={[]}
-              gifs={editing.attachments.map(({ attachment }) => ({
-                markdown: attachment.url,
-                title: attachment.name ?? "Attachment",
-                hint: {
-                  image: "Image",
-                  video: "Video",
-                  audio: "Audio",
-                  file: "File",
-                }[attachment.kind],
-                mime: attachment.mime,
-                source:
-                  attachment.kind === "image" || attachment.previewUrl
-                    ? session.media(attachment.previewUrl ?? attachment.url)
-                    : undefined,
-              }))}
-              removeGif={(url) => {
+              renderers={extensions?.attachments}
+              items={editing.items}
+              disabled={editingDisabled || editing.locked}
+              remove={(url) => {
                 editing.removeAttachment(url);
                 input.current?.focus();
               }}
-              disabled={editingDisabled || editing.locked}
-              remove={() => {}}
               retry={() => {}}
             />
           )}
