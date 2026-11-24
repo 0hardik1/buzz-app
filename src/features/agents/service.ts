@@ -275,7 +275,6 @@ import {
 import { readInterrupted, writeInterrupted } from "./interrupted";
 import { AttentionSources, type AttentionProducer } from "./attention-sources";
 import { type AddedTool, BUZZ_SESSION } from "../../buzz-mcp/session-tools";
-import { soloChannelMetadata } from "../relay/discovery";
 import { channelIdentity } from "../relay/channel-labels";
 import { regionLabels } from "../solo/region-labels";
 import { nameSoloChat } from "./solo-chat-name";
@@ -3250,9 +3249,6 @@ export class AgentsService extends Service implements Agents {
                   created.pubkey !== agent.pubkey ||
                   !id ||
                   !created.tags.some(
-                    ([key, value]) => key === "t" && value === "buzz.solo",
-                  ) ||
-                  !created.tags.some(
                     ([key, value]) => key === "p" && value === binding.viewer,
                   )
                 )
@@ -3289,7 +3285,7 @@ export class AgentsService extends Service implements Agents {
                 );
                 if (
                   !metadata ||
-                  !soloChannelMetadata(metadata) ||
+                  !metadata.tags.some(([key, value]) => key === "t" && value === "stream") ||
                   regionLabels(channelIdentity(metadata).labels).length > 0 ||
                   !metadata.tags.some(
                     ([key, value]) => key === "P" && value === agent.pubkey,

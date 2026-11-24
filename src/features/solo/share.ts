@@ -7,7 +7,7 @@ import { saveWithFreeName } from "../relay/free-name";
 import { canAddMembers, canShareSoloChat } from "../channel-members/members";
 import type { ChannelSummary } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
-import { ownSolo, soloLabels } from "./labels";
+import { ownSolo } from "./labels";
 import { generalAccessPolicy } from "../channels/general-access";
 
 /** Sharing changes access, never presentation or Solo placement. */
@@ -117,7 +117,6 @@ export async function shareSoloChatAccess(
     .channels.find((item) => item.id === id);
   if (
     !base.canEdit ||
-    !soloLabels(base.labels) ||
     !ownSolo(source, session.viewer)
   )
     throw new Error("You can no longer change this chat’s general access.");
