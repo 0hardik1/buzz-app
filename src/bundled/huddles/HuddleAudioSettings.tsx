@@ -74,7 +74,7 @@ export function HuddleAudioSettings({
                 }
               />
               <Switch
-                label="Live transcripts"
+                label="Live agent transcripts"
                 checked={routing.liveTranscript}
                 onCheckedChange={(enabled) =>
                   setRouting("liveTranscript", enabled)

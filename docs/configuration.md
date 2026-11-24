@@ -34,7 +34,6 @@ token or other secret in one**. Open-source builds leave them all unset.
 | `BUZZ_BUILD_REPOSITORY_ACCESS` | Default [repository access rules](repository-access.md#default-rules). |
 | `BUZZ_DATABRICKS_HOST` | An `https://` Databricks workspace URL passed to every bundled goose as `DATABRICKS_HOST`. Only the host; model and sign-in stay goose's. |
 | `BUZZ_MOBILE_APP_IOS_URL`, `BUZZ_MOBILE_APP_ANDROID_URL` | Store links shown with QR codes on the mobile Settings card, for people whose Builderlab account holds this device's backed-up key. |
-| `BUZZ_VOICE_TRANSCRIPTION_URL` | An HTTPS endpoint for live Huddle microphone transcription. It accepts a JSON POST with `{"language":"en"}` and returns a short-lived OpenAI Realtime transcription `client_secret` and optional Unix `expires_at`. Native code uses the token to establish a WebRTC connection from the app to OpenAI. A process value overrides the build value. When unset, Buzz uses the existing on-device recognizer where available. |
 | `BUZZ_UPDATER_PUBLIC_KEY`, `BUZZ_UPDATER_ENDPOINT` | Release builds only. Both together turn on the updater; the release workflow sets them (see [releases](releases.md)). |
 
 **Development only:** `BUZZ_RELAY_URL`, `BUZZ_DEV_VIEWER`,

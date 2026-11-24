@@ -1,7 +1,6 @@
 //! Client-side Huddle owner. Uses the existing relay's ephemeral channels and v2 audio.
 //! No key, arbitrary signer, or arbitrary WebSocket endpoint is exposed to plugins.
 mod audio;
-mod realtime_transcription;
 mod speech;
 
 use super::{origin, request_url, send, verify_signature, Result};
@@ -655,34 +654,6 @@ pub(crate) fn huddle_touch(huddles: tauri::State<'_, Huddles>, id: String) -> Re
         a.touched.store(lease_time(), Ordering::Relaxed);
     }
     Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn huddle_realtime_transcription_available() -> bool {
-    realtime_transcription::available()
-}
-
-#[tauri::command]
-pub(crate) async fn huddle_realtime_transcription_connect(
-    huddles: tauri::State<'_, Huddles>,
-    id: String,
-    offer: String,
-) -> Result<String> {
-    let mut stop = huddles
-        .0
-        .lock()
-        .map_err(|_| "Huddle unavailable")?
-        .get(&id)
-        .filter(|call| call.agent.is_none())
-        .map(|call| call.stop.subscribe())
-        .ok_or("The Huddle is no longer connected")?;
-    if *stop.borrow() {
-        return Err("The Huddle is no longer connected".into());
-    }
-    tokio::select! {
-        _ = stop.changed() => Err("The Huddle ended".into()),
-        result = realtime_transcription::connect(offer) => Ok(result?),
-    }
 }
 
 #[tauri::command]

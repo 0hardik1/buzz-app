@@ -7,7 +7,6 @@ import { createPlayout } from "./playout";
 
 export type HuddleAudio = {
   settings?: HuddleAudioSettings;
-  transcriptionTrack?(): MediaStreamTrack | undefined;
   mute(muted: boolean): void;
   play(peer: string, samples: readonly number[]): void;
   participants(peers: readonly string[]): void;
@@ -35,7 +34,6 @@ export const openHuddleAudio: OpenHuddleAudio = async (send, ended, signal) => {
   const output = context.createGain();
   output.connect(context.destination);
   let speaker: HTMLAudioElement | undefined;
-  let transcription: MediaStreamAudioDestinationNode | undefined;
   let speakerStream: MediaStreamAudioDestinationNode | undefined;
   const stopStream = (value: MediaStream | undefined) => {
     for (const track of value?.getTracks() ?? []) {
@@ -71,7 +69,6 @@ export const openHuddleAudio: OpenHuddleAudio = async (send, ended, signal) => {
     source?.disconnect();
     settings?.close();
     stopStream(stream);
-    stopStream(transcription?.stream);
     output.disconnect();
     speaker?.pause();
     if (speaker) speaker.srcObject = null;
@@ -115,7 +112,6 @@ export const openHuddleAudio: OpenHuddleAudio = async (send, ended, signal) => {
           for (const track of next.getAudioTracks()) track.enabled = !muted;
           nextSource = context.createMediaStreamSource(next);
           nextSource.connect(activeCapture);
-          if (transcription) nextSource.connect(transcription);
         } catch (error) {
           stopStream(next);
           throw error;
@@ -159,14 +155,6 @@ export const openHuddleAudio: OpenHuddleAudio = async (send, ended, signal) => {
     );
     return {
       settings,
-      transcriptionTrack() {
-        if (!source || closed) return;
-        if (!transcription) {
-          transcription = context.createMediaStreamDestination();
-          source.connect(transcription);
-        }
-        return transcription.stream.getAudioTracks()[0];
-      },
       close,
       mute(value) {
         muted = value;
