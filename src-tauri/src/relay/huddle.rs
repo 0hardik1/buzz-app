@@ -517,10 +517,13 @@ async fn run(
             advertised = true;
             let mut start = lifecycle(48100, &call.parent, &room);
             if let Some(origin) = &call.origin {
-                start.content = json!({"ephemeral_channel_id": room, "transcripts_in_origin": true}).to_string();
-                if let Some(root) = &origin.root {
-                    start.tags.push(vec!["e".into(), root.clone(), String::new(), "reply".into()]);
-                }
+                // Keep lifecycle events visible to discovery, including
+                // the channel window's fold that suppresses Huddle cards.
+                start.content = json!({
+                    "ephemeral_channel_id": room,
+                    "transcripts_in_origin": true,
+                    "thread_root": origin.root,
+                }).to_string();
             }
             publish(host, fi, &call.community, start, &call.viewer).await?;
         }

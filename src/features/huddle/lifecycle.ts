@@ -25,6 +25,7 @@ export function huddleLifecycleBody(event: Pick<EventData, "content">) {
     return JSON.parse(event.content) as {
       ephemeral_channel_id?: unknown;
       transcripts_in_origin?: unknown;
+      thread_root?: unknown;
     } | null;
   } catch {
     return undefined;
