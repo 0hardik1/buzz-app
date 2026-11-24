@@ -278,6 +278,49 @@ test.describe("the message box's modes", () => {
     expect((await view()).scrollTop).toBeLessThan(scrolled);
     await page.keyboard.press("Shift+G");
     await expect.poll(async () => (await view()).bottom).toBeLessThan(1);
+
+    // Lines opened with o and copied with yy and p, from the bottom back
+    // to the top one k at a time: each k moves one line, the view keeps
+    // three lines above the cursor, and the cursor reaches the first line.
+    for (const key of ["g", "g", "d", "Shift+G", "i"])
+      await page.keyboard.press(key);
+    await page.keyboard.type("line 1");
+    await page.keyboard.press("Escape");
+    for (let line = 2; line <= 5; line++) {
+      await page.keyboard.press("o");
+      await page.keyboard.type(`line ${line}`);
+      await page.keyboard.press("Escape");
+    }
+    for (const key of ["y", "y", "2", "0", "p"]) await page.keyboard.press(key);
+    const lines = 25;
+    const cursorLine = () =>
+      alpha.evaluate(
+        (box) => box.value.slice(0, box.selectionStart).split("\n").length,
+      );
+    await expect
+      .poll(() => value(alpha))
+      .toBe(
+        [
+          "line 1",
+          "line 2",
+          "line 3",
+          "line 4",
+          ...Array(21).fill("line 5"),
+        ].join("\n"),
+      );
+    await page.keyboard.press("Shift+G");
+    await expect.poll(cursorLine).toBe(lines);
+    await expect.poll(async () => (await view()).bottom).toBeLessThan(1);
+    for (let line = lines - 1; line >= 1; line--) {
+      await page.keyboard.press("k");
+      await expect.poll(cursorLine).toBe(line);
+      const { scrollTop, above } = await view();
+      if (scrollTop > 0) expect(above).toBeGreaterThanOrEqual(3);
+    }
+    await expect.poll(async () => (await view()).scrollTop).toBe(0);
+    await expect.poll(async () => (await view()).above).toBe(0);
+    await page.keyboard.press("k");
+    await expect.poll(cursorLine).toBe(1);
   });
 
   test("V selects lines, and J and K move them and keep them selected", async ({
