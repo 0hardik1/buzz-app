@@ -325,6 +325,7 @@ pub(crate) async fn huddle_window_open<R: tauri::Runtime>(
     require(&window, "main")?;
     validate(&view)?;
     let incoming = view.phase == "incoming";
+    let ring = ring_attention(&view.phase);
     let id = view.id.clone();
     let on_closed = closed_notice(actions.clone(), id.clone());
     {
@@ -351,6 +352,8 @@ pub(crate) async fn huddle_window_open<R: tauri::Runtime>(
         .inner_size(520.0, 560.0)
         .min_inner_size(360.0, 400.0)
         .center()
+        .focused(ring.is_none())
+        .always_on_top(ring.is_some())
         .disable_drag_drop_handler()
         .build()
         .map_err(|e| e.to_string())?,
@@ -362,8 +365,27 @@ pub(crate) async fn huddle_window_open<R: tauri::Runtime>(
         retire(app, &id);
         return Err("This Huddle has ended".into());
     }
+    companion
+        .set_always_on_top(ring.is_some())
+        .map_err(|e| e.to_string())?;
     companion.show().map_err(|e| e.to_string())?;
-    companion.set_focus().map_err(|e| e.to_string())
+    match ring {
+        Some(attention) => {
+            // Best effort: the ring sound and the floating window already announce it.
+            let _ = companion.request_user_attention(Some(attention));
+            Ok(())
+        }
+        None => companion.set_focus().map_err(|e| e.to_string()),
+    }
+}
+/// How an opened Huddle window asks for attention without taking focus.
+///
+/// A ringing invitation arrives while the person may be typing in another app.
+/// Taking keyboard focus then sends their keystrokes to Buzz, so it
+/// floats above other windows and asks for attention instead. A call the person
+/// joined or started comes to the front with focus, as before.
+fn ring_attention(phase: &str) -> Option<tauri::UserAttentionType> {
+    (phase == "incoming").then_some(tauri::UserAttentionType::Informational)
 }
 #[tauri::command]
 pub(crate) fn huddle_window_update<R: tauri::Runtime>(
@@ -542,6 +564,16 @@ mod tests {
             assert_ne!(thread, thread::current().id());
         }
         assert!(receiver.recv().is_err());
+    }
+    #[test]
+    fn only_a_ringing_invitation_opens_without_taking_focus() {
+        assert!(matches!(
+            ring_attention("incoming"),
+            Some(tauri::UserAttentionType::Informational)
+        ));
+        for phase in ["connecting", "connected"] {
+            assert!(ring_attention(phase).is_none(), "{phase} must take focus");
+        }
     }
     fn view(id: &str) -> View {
         View {
