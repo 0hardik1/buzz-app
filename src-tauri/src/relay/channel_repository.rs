@@ -62,13 +62,13 @@ async fn send_bound(
         AuthorizationContext {
             fi: Some(fi),
             assertion: assertion.as_ref(),
+            expected_viewer: Some(viewer),
         },
         url,
         method,
         body,
         true,
         MAX_RESPONSE,
-        Some(viewer),
     )
     .await
 }

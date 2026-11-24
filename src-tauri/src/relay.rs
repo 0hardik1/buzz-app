@@ -1133,6 +1133,7 @@ async fn evidence(
 struct AuthorizationContext<'a> {
     fi: Option<&'a FederatedIdentity>,
     assertion: Option<&'a Authorization>,
+    expected_viewer: Option<&'a str>,
 }
 async fn admit(
     host: &IdentityHost,
@@ -1166,13 +1167,13 @@ async fn send(
             AuthorizationContext {
                 fi,
                 assertion: assertion.as_ref(),
+                expected_viewer: None,
             },
             url,
             method,
             body,
             authenticated,
             response_limit,
-            None,
         )
         .await
     }
@@ -1264,7 +1265,6 @@ async fn send_authorized(
     body: Option<String>,
     authenticated: bool,
     response_limit: usize,
-    expected_viewer: Option<&str>,
 ) -> Result<RelayResponse> {
     let mut request = client()?.request(
         reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| "Invalid relay method")?,
@@ -1295,7 +1295,10 @@ async fn send_authorized(
                 .concat(),
             })
             .await?;
-        if expected_viewer.is_some_and(|viewer| auth["pubkey"] != viewer) {
+        if authorization
+            .expected_viewer
+            .is_some_and(|viewer| auth["pubkey"] != viewer)
+        {
             return Err("Your identity changed; try again.".into());
         }
         request = request
@@ -1744,6 +1747,7 @@ async fn upload_file(
             AuthorizationContext {
                 fi,
                 assertion: assertion.as_ref(),
+                expected_viewer: None,
             },
             url,
             kind,
