@@ -381,6 +381,13 @@ it.each([false, true])(
         ["e", card.id, "", "reply"],
       ],
     });
+    // Automatic relay teardown names the room without the new card or thread.
+    const end = signed(relay, {
+      kind: 48103,
+      created_at: 4,
+      content: JSON.stringify({ ephemeral_channel_id: room }),
+      tags: [["h", "a"]],
+    });
     const announcement = signed(alice, {
       kind: 48100,
       created_at: 2,
@@ -416,6 +423,18 @@ it.each([false, true])(
       replyParentId: card.id,
       threadRootId: nested ? root.id : card.id,
     });
+    expect(
+      foldMessages("a", relay.pubkey, [
+        root,
+        announcement,
+        ...(nested ? [] : [card]),
+        end,
+      ]).map((row) => row.id),
+    ).toEqual(nested ? [root.id] : [root.id, card.id]);
+    h.traffic.receive([end]);
+    expect(h.session.channels.window("a").rows.map((row) => row.id)).toEqual(
+      nested ? [root.id] : [root.id, card.id],
+    );
   },
 );
 

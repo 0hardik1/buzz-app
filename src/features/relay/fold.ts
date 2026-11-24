@@ -580,9 +580,9 @@ export function foldMessages(
       }),
     );
   }
-  return (collapseHuddles ? collapseHuddleCards(rows, relayAuthor) : rows).sort(
-    compareMessages,
-  );
+  return (
+    collapseHuddles ? collapseHuddleCards(rows, relayAuthor, events) : rows
+  ).sort(compareMessages);
 }
 
 /** Count people, but retain event IDs for author-only removal and duplicate cleanup. */
@@ -646,6 +646,7 @@ export function groupReactions(
 export function collapseHuddleCards(
   rows: ChannelMessage[],
   relayAuthor: string,
+  events: Iterable<EventData>,
 ): ChannelMessage[] {
   const key = (row: ChannelMessage) => `${row.channelId}:${row.huddle?.room}`;
   const starts = new Map<string, ChannelMessage>();
@@ -659,11 +660,31 @@ export function collapseHuddleCards(
     )
       starts.set(key(row), row);
   }
+  // The relay's automatic end may have no thread tags. Keep it as
+  // lifecycle evidence without creating a second card in the timeline.
+  const roomsWithCards = new Set<string>();
+  if (
+    rows.some((row) => row.huddle?.state === "ended" && !starts.has(key(row)))
+  ) {
+    for (const event of events) {
+      const cardId =
+        event.kind === 48100 ? huddleLifecycleBody(event)?.card_id : undefined;
+      const room =
+        huddleCardRoom(event) ??
+        (typeof cardId === "string" && HEX64.test(cardId)
+          ? huddleRoom(event)
+          : undefined);
+      if (room) roomsWithCards.add(`${channelRowChannel(event)}:${room}`);
+    }
+  }
   const authorized = rows.filter((row) => {
-    if (row.huddle?.state !== "ended" || row.authorId === relayAuthor)
-      return true;
+    if (row.huddle?.state !== "ended") return true;
     const start = starts.get(key(row));
-    return start?.authorId === row.authorId && start.createdAt <= row.createdAt;
+    if (!start && roomsWithCards.has(key(row))) return false;
+    return (
+      row.authorId === relayAuthor ||
+      (start?.authorId === row.authorId && start.createdAt <= row.createdAt)
+    );
   });
   if (!starts.size) return authorized;
   const ends = new Map<string, number>();
