@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentSaveState } from "../../features/agents/AgentSaveButton";
+import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import type {
   Agent,
   Agents,
@@ -555,4 +556,31 @@ it("an agent's override note follows a device save made over its page", async ()
   expect(
     await within(page.container).findByText("Overrides the device-wide value"),
   ).toBeInTheDocument();
+});
+
+it("says a device save that fails after Settings closes", async () => {
+  const user = userEvent.setup();
+  let reject!: (reason: unknown) => void;
+  native.invoke.mockImplementation(async (command) => {
+    if (command === "agent_env_status") return { names };
+    if (command === "agent_env_set")
+      return new Promise((_, no) => (reject = no));
+    return undefined;
+  });
+  const view = (open: boolean) => (
+    <ToastProvider>{open && <AgentEnvironment />}</ToastProvider>
+  );
+  const { rerender } = render(view(true));
+  await replaceSaved(user);
+  await user.type(screen.getByLabelText("Value of SAVED_KEY"), "secret-value");
+  await user.click(button("Save"));
+  await waitFor(() => expect(calls("agent_env_set")).toHaveLength(1));
+  // Settings closes while the store is still writing.
+  rerender(view(false));
+  reject("store denied SAVED_KEY");
+  expect(
+    await screen.findByText("Couldn't save environment variables"),
+  ).toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent("SAVED_KEY");
+  expect(document.body).not.toHaveTextContent("secret-value");
 });

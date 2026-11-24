@@ -143,6 +143,9 @@ export function AgentEnvironment({ agent, restartAgent, openSettings }: Props) {
       notify(done, "success");
     } catch (reason) {
       setError(String(reason));
+      // Outlives this editor, so a save that fails after Settings closes is
+      // still said; fixed text, never a name or value.
+      notify("Couldn't save environment variables", "error");
     } finally {
       setPending(false);
     }
