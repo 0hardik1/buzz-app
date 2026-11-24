@@ -53,8 +53,9 @@ export const insert = (cursor: number): Vim => ({
 });
 
 // Lines.
+// `lastIndexOf` reads a negative start as 0, which would find a break at 0.
 const lineStart = (text: string, at: number) =>
-  text.lastIndexOf("\n", at - 1) + 1;
+  at > 0 ? text.lastIndexOf("\n", at - 1) + 1 : 0;
 const lineEnd = (text: string, at: number) => {
   const end = text.indexOf("\n", at);
   return end < 0 ? text.length : end;
@@ -458,7 +459,10 @@ function join(vim: Vim, text: string, count: number | undefined): Result {
     let end = start + 1;
     while (blank(text[end])) end++;
     const space =
-      end === lineEnd(text, end) || text[end] === ")" || blank(text[start - 1])
+      end === lineEnd(text, end) ||
+      text[end] === ")" ||
+      blank(text[start - 1]) ||
+      start === lineStart(text, start)
         ? ""
         : " ";
     edits.push({ start, end, text: space });

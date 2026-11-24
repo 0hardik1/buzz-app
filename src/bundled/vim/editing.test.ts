@@ -80,6 +80,10 @@ test("motions move by characters, words and lines, with counts", () => {
   expect(text("|a\n  b\nc", "G")).toBe("a\n  b\n|c");
   expect(text("|a\n  b\nc", "2G")).toBe("a\n  |b\nc");
   expect(text("a\n  b\n|c", "2gg")).toBe("a\n  |b\nc");
+  // An empty first line is a line like any other.
+  expect(text("|\nab", "j")).toBe("\n|ab");
+  expect(text("\na|b", "k")).toBe("|\nab");
+  expect(text("|\nab", "dd")).toBe("|ab");
   // w crosses lines and stops on an empty one.
   expect(text("|ab\n\ncd", "w")).toBe("ab\n|\ncd");
 });
@@ -230,6 +234,7 @@ test("J joins lines with one space", () => {
   expect(text("|a \nb", "J")).toBe("a |b");
   expect(text("|f(\n)", "J")).toBe("f(|)");
   expect(text("|a\n\nb", "J")).toBe("a|\nb");
+  expect(text("|\nb", "J")).toBe("|b");
   expect(text("a\n|b", "J")).toBe("a\n|b");
 });
 

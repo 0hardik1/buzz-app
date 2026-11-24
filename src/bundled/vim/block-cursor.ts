@@ -119,8 +119,12 @@ export function blockCursor(input: HTMLElement) {
   block.setAttribute("aria-hidden", "true");
   block.dataset.vimBlockCursor = "";
   block.hidden = true;
-  block.style.font = getComputedStyle(input).font;
-  document.body.append(block);
+  // Longhands: WebKit leaves the computed `font` shorthand empty.
+  const style = getComputedStyle(input);
+  block.style.fontFamily = style.fontFamily;
+  block.style.fontSize = style.fontSize;
+  // In a modal dialog's top layer, the block must be in the dialog too.
+  (input.closest("dialog, [popover]") ?? document.body).append(block);
   const caret = input.style.caretColor;
   input.style.caretColor = "transparent";
 
