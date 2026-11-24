@@ -12,6 +12,10 @@ export async function openVoice(
   instructions: string,
   thinking?: (active: boolean) => void,
   voice?: string,
+  client?: Readonly<{
+    speaking?: ((active: boolean) => void) | undefined;
+    initialContext: string;
+  }>,
 ) {
   signal.throwIfAborted();
   const peer = new RTCPeerConnection();
@@ -30,6 +34,22 @@ export async function openVoice(
   let closed = false;
   let closing: Promise<void> | undefined;
   let starting: Promise<unknown> | undefined;
+  let providerSpeaking = false;
+  let audibleUntil = 0;
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  let outputActive = false;
+  const reportOutput = () => {
+    const active = providerSpeaking || performance.now() < audibleUntil;
+    if (active !== outputActive) {
+      outputActive = active;
+      client?.speaking?.(active);
+    }
+  };
+  const checkQuiet = () => {
+    const remaining = audibleUntil - performance.now();
+    quiet = remaining > 0 ? setTimeout(checkQuiet, remaining) : undefined;
+    reportOutput();
+  };
   let cancel!: (error: Error) => void;
   const cancelled = new Promise<never>((_, reject) => {
     cancel = reject;
@@ -42,6 +62,7 @@ export async function openVoice(
   const close = () => {
     if (closed) return closing;
     closed = true;
+    clearTimeout(quiet);
     signal.removeEventListener("abort", close);
     off();
     cancel(new Error("Voice connection closed"));
@@ -97,7 +118,18 @@ export async function openVoice(
     capture = new AudioWorkletNode(context, "buzz-huddle-capture");
     capture.port.onmessage = ({ data }: MessageEvent<Float32Array>) => {
       if (closed) return;
-      // The Huddle seat owns bounded buffering and serial native sends.
+      // Some V3 backends send turn events without WebRTC output-buffer
+      // events. Use decoded signal energy in that case; the track also
+      // delivers silent frames while the channel is open.
+      if (client?.speaking) {
+        const energy = data.reduce((sum, sample) => sum + sample * sample, 0);
+        if (energy > data.length * 0.000004) {
+          audibleUntil = performance.now() + 140;
+          quiet ??= setTimeout(checkQuiet, 140);
+        }
+        reportOutput();
+      }
+      // The seat owns bounded buffering and serial native sends.
       void output(Array.from(data)).catch(fail);
     };
     capture.connect(context.destination); // Existing capture worklet emits silence.
@@ -122,6 +154,15 @@ export async function openVoice(
       try {
         const event = JSON.parse(data);
         if (event.type === "response.created") thinking?.(true);
+        if (event.type === "output_audio_buffer.started")
+          providerSpeaking = true;
+        if (
+          event.type === "output_audio_buffer.stopped" ||
+          event.type === "output_audio_buffer.cleared"
+        )
+          providerSpeaking = false;
+        if (event.type === "output_audio_buffer.cleared") audibleUntil = 0;
+        reportOutput();
         if (
           event.type === "response.done" ||
           event.type === "output_audio_buffer.started" ||
@@ -160,6 +201,9 @@ export async function openVoice(
       outputModality: "audio",
       clientManagedHandoffs: false,
       realtimeStartInstructions: instructions,
+      ...(client
+        ? { initialItems: [{ role: "developer", text: client.initialContext }] }
+        : {}),
       ...(voice ? { voice } : {}),
     });
     await wait(starting);

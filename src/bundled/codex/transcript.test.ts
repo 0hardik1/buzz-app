@@ -22,6 +22,7 @@ import {
   readTranscript,
   shellCommand,
   TURN_LIMIT,
+  voiceExcerpts,
 } from "./transcript";
 
 const root = "c".repeat(64);
@@ -80,6 +81,24 @@ const turn = (patch: Record<string, unknown> = {}) => ({
     { type: "agentMessage", id: "a2", text: "" },
   ],
   ...patch,
+});
+
+it("reads only owner and agent dialogue from the selected saved voice thread", async () => {
+  const { spawn, sent } = server(paged([turn()]));
+  const context = await voiceExcerpts(
+    spawn,
+    "voice-thread",
+    "sam",
+    new AbortController().signal,
+  );
+  expect(context).toEqual([
+    { speaker: "Owner", text: "fix the <tests>" },
+    { speaker: "Agent", text: "Done" },
+    { speaker: "Agent", text: "Fixed." },
+  ]);
+  expect(
+    sent.find(({ method }) => method === "thread/turns/list")?.params,
+  ).toMatchObject({ threadId: "voice-thread", limit: 4 });
 });
 
 it("shows a Codex turn's request, steering, tools and reply in the shared transcript model", () => {

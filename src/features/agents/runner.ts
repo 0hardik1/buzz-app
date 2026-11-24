@@ -1178,13 +1178,25 @@ export class AgentRunners {
       ...(start.synced && { synced: start.synced }),
       ...(team && { team }),
       async transcript(speaker, text) {
-        if (seat.signal.aborted || !text.trim()) return;
+        if (
+          seat.signal.aborted ||
+          !text.trim() ||
+          (seat.startup && speaker === "owner")
+        )
+          return;
         const name = speaker === "owner" ? ownerName : agent.name;
         await handle.publish(
           {
             kind: 9,
-            content: `${name} (transcribed by ${agent.name}): ${text}`,
-            tags: [["h", seat.conversation.channelId]],
+            content: seat.startup
+              ? text
+              : `${name} (transcribed by ${agent.name}): ${text}`,
+            tags: [
+              ["h", seat.conversation.channelId],
+              ...(seat.conversation.root
+                ? [["e", seat.conversation.root, "", "root"]]
+                : []),
+            ],
           },
           () => seat.signal.throwIfAborted(),
         );

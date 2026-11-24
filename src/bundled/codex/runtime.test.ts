@@ -7886,6 +7886,33 @@ describe("voice seats", () => {
     );
     await f.connection.close();
   });
+  it("interrupts the selected thread before opening audio on the same Codex thread", async () => {
+    const f = fixture();
+    const d = f.delivery("typed first");
+    await f.runtime.run(d);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const connection = await f.runtime.voice(
+      {
+        config: d.config,
+        agent: { ...d.agent, config: d.config } as unknown as Agent,
+        conversation: { channelId: "channel", root },
+        signal: new AbortController().signal,
+        async output() {},
+        async transcript() {},
+        ended() {},
+      },
+      d.agent,
+    );
+    expect(
+      f.sent.find(({ method }) => method === "turn/interrupt")?.params,
+    ).toMatchObject({ threadId: "thread-1", turnId: "turn-1" });
+    expect(vi.mocked(openVoice).mock.calls.at(-1)?.[1]).toBe("thread-1");
+    expect(
+      f.sent.filter(({ method }) => method === "thread/start"),
+    ).toHaveLength(1);
+    await connection.close();
+  });
+
   it("gives a resumed room thread the seat's current context", async () => {
     vi.stubGlobal("RTCPeerConnection", class {});
     const f = fixture();

@@ -130,6 +130,7 @@ function fixture(resume = Promise.resolve()) {
   const open = (
     send: (samples: number[]) => Promise<void> = output,
     voice?: string,
+    client?: Parameters<typeof openVoice>[8],
   ) =>
     openVoice(
       rpc as unknown as AppServer,
@@ -140,6 +141,7 @@ function fixture(resume = Promise.resolve()) {
       "instructions",
       thinking,
       voice,
+      client,
     );
   return {
     open,
@@ -158,6 +160,35 @@ function fixture(resume = Promise.resolve()) {
     decoder,
   };
 }
+it("includes a plugin's voice context in the first Realtime session request", async () => {
+  const f = fixture();
+  const speaking = vi.fn();
+  const client = { initialContext: "The codeword is Pine.", speaking };
+  const connection = await f.open(undefined, undefined, client);
+  expect(f.rpc.request).toHaveBeenCalledWith(
+    "thread/realtime/start",
+    expect.objectContaining({
+      initialItems: [{ role: "developer", text: "The codeword is Pine." }],
+    }),
+  );
+  f.events.onmessage?.({
+    data: JSON.stringify({ type: "output_audio_buffer.started" }),
+  });
+  f.events.onmessage?.({
+    data: JSON.stringify({ type: "output_audio_buffer.stopped" }),
+  });
+  expect(speaking.mock.calls).toEqual([[true], [false]]);
+  f.capture.port.onmessage?.({ data: new Float32Array(960) });
+  expect(speaking).toHaveBeenCalledTimes(2);
+  f.capture.port.onmessage?.({ data: new Float32Array(960).fill(0.1) });
+  expect(speaking).toHaveBeenLastCalledWith(true);
+  await vi.waitFor(() =>
+    expect(speaking.mock.calls).toEqual([[true], [false], [true], [false]]),
+  );
+
+  await connection.close();
+});
+
 it("keeps incoming WebRTC audio decoding and releases its muted sink on close", async () => {
   const f = fixture();
   const connection = await f.open();

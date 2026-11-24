@@ -444,6 +444,48 @@ export async function withServer<T>(
   }
 }
 
+/** Dialogue from the exact saved thread being opened for voice. */
+export async function voiceExcerpts(
+  spawn: Spawn,
+  threadId: string,
+  owner: string,
+  signal: AbortSignal,
+) {
+  return withServer(spawn, signal, async (rpc) => {
+    const recent = await turns(rpc, threadId, 4, signal);
+    return recent
+      .reverse()
+      .flatMap((turn) =>
+        turn.items.flatMap((value) => {
+          if (value.type === "agentMessage" && value.phase === "commentary")
+            return [];
+          if (
+            value.type !== "userMessage" &&
+            value.type !== "agentMessage" &&
+            !(
+              value.type === "dynamicToolCall" &&
+              value.namespace === "buzz" &&
+              value.tool === "send"
+            )
+          )
+            return [];
+          const line = item(value, 0, false, () => undefined);
+          if (
+            line?.type === "prompt" &&
+            line.authorPubkey === owner &&
+            line.sections.length &&
+            !line.text.startsWith("<")
+          )
+            return [{ speaker: "Owner", text: line.text.slice(0, 320) }];
+          if (line?.type === "message")
+            return [{ speaker: "Agent", text: line.text.slice(0, 320) }];
+          return [];
+        }),
+      )
+      .slice(-8);
+  });
+}
+
 /** Only complete records are cached. A live final line is read again on append. */
 type RecordedWindow = { from: number; bytes: number; lines: Json[] };
 type Rollout = {

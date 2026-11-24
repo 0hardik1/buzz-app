@@ -1077,13 +1077,16 @@ export type ConfigBinding = Readonly<{
   instructions?: Readonly<{ mode: Mode; subject: Subject }>;
 }>;
 
-/** A room audio pipe, not authorization to run tools. The harness obtains its
- * own AgentHandle and applies its ordinary per-turn authorization. */
+/** An audio pipe. The harness obtains its own AgentHandle and applies its
+ * ordinary per-turn authorization. */
 export type AgentVoiceSeat<Config = unknown> = Readonly<
   {
     agent: Agent<Config>;
-    /** Always channel-scoped, regardless of the harness setting; never invent a root. */
-    conversation: Readonly<{ channelId: string }>;
+    conversation: SessionPlace;
+    /** Present when opening a selected session through the plugin API. */
+    startup?: AgentSessionVoiceStartup;
+    /** Provider output activity. The audio consumer owns its playback tail. */
+    speaking?(active: boolean): void;
     signal: AbortSignal;
     /** Final lines only: h-tag-only agent posts; own events never trigger this agent. */
     transcript(speaker: "owner" | "agent", text: string): Promise<void>;
@@ -1096,6 +1099,18 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
     thinking?(active: boolean): void;
   } & Pick<Delivery<Config>, "config" | "revisions" | "synced" | "team">
 >;
+
+/** Optional voice-model instructions and recent conversation excerpts.
+ * The provider can supplement these with the same session's saved dialogue. */
+export type AgentSessionVoiceStartup = Readonly<{
+  instructions: string;
+  excerpts?: readonly Readonly<{ speaker: string; text: string }>[];
+}>;
+
+export type AgentSessionVoiceOptions = Pick<
+  AgentVoiceSeat,
+  "signal" | "output" | "ended" | "thinking" | "speaking"
+> & { startup: AgentSessionVoiceStartup };
 
 /** Host pipe before the agents service resolves launch settings and transcript policy. */
 export type AgentVoicePipe = Omit<
@@ -1120,8 +1135,10 @@ export type AgentType<Config = unknown> = {
   sessionAdmission?: true;
   /** Resolves Delivery.routeConversation before selecting the provider session. */
   invocationRouting?: true;
-  /** Huddles supplies a running agent owned by the current viewer.
-   * Full-duplex voice on the existing room conversation; abort closes the pipe. */
+  /** Supports voice startup on the same session selected by session controls. */
+  sessionVoice?: true;
+  /** The host supplies a local running agent owned by the current viewer.
+   * Full-duplex voice on the existing conversation; abort closes the pipe. */
   voice?(seat: AgentVoiceSeat<Config>): Promise<AgentVoiceConnection>;
   /** Native callback events this harness exposes to plugins. */
   hooks?: Readonly<{ events: readonly string[] }>;
@@ -2009,6 +2026,14 @@ export type Agents = {
     place: SessionPlace,
     action: SessionControlAction,
   ): Promise<void>;
+  /** Opens the local agent's selected session, interrupting any active turn
+   * before handing off. The caller owns microphone input and owner transcripts.
+   * Final agent transcripts appear in the selected conversation. */
+  openSessionVoice?(
+    agent: AgentKey,
+    place: Pick<SessionPlace, "channelId" | "root">,
+    options: AgentSessionVoiceOptions,
+  ): Promise<AgentVoiceConnection>;
   /** Gives one conversation of the owner's local agent its own working
    * folder, before its first turn: its session starts there, with that
    * folder's repository configuration, and the agent's workspace stays
@@ -6303,6 +6328,69 @@ export class AgentsService extends Service implements Agents {
           : undefined,
       );
     });
+  }
+
+  async openSessionVoice(
+    key: AgentKey,
+    place: Pick<SessionPlace, "channelId" | "root">,
+    options: AgentSessionVoiceOptions,
+  ) {
+    if (!this.ctx.pluginOwner) throw new Error("Session voice needs a plugin");
+    const agent = this.state.running.find((candidate) => candidate.key === key);
+    const type = agent && this.types().find((kind) => kind.key === agent.type);
+    const source = { tags: [["h", place.channelId]] };
+    if (
+      agent?.place !== "here" ||
+      agent.owner !== this.bindingOf(agent)?.viewer ||
+      !this.member(agent, source) ||
+      !type?.sessionVoice ||
+      !type.voice
+    )
+      throw new Error("Voice needs an owned local agent in this conversation");
+    const startup = {
+      instructions: options.startup.instructions.slice(0, 1200),
+      excerpts: (options.startup.excerpts ?? [])
+        .slice(-6)
+        .map(({ speaker, text }) => ({
+          speaker: speaker.slice(0, 80),
+          text: text.slice(0, 300),
+        })),
+    };
+    const abort = new AbortController();
+    const signal = AbortSignal.any([options.signal, abort.signal]);
+    signal.throwIfAborted();
+    const dispose = this.ctx.effect(() => () => {
+      options.signal.removeEventListener("abort", dispose);
+      abort.abort();
+    });
+    options.signal.addEventListener("abort", dispose, { once: true });
+    try {
+      const voice = await type.voice({
+        ...options,
+        startup,
+        signal,
+        agent,
+        conversation: this.sessionPlace(agent, type, place),
+        ended(error) {
+          dispose();
+          options.ended(error);
+        },
+      });
+      if (signal.aborted) {
+        await voice.close();
+        signal.throwIfAborted();
+      }
+      return {
+        input: voice.input,
+        close() {
+          dispose();
+          return voice.close();
+        },
+      };
+    } catch (error) {
+      dispose();
+      throw error;
+    }
   }
 
   async assignConversationFolder(

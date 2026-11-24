@@ -96,6 +96,8 @@ then. Use compact icon buttons with an `aria-label` and `title`, and set
 workspace with `registerWorkspace(component, { slots })` names the optional
 props its component renders.
 
+A desktop plugin can open audio on an owned local agent with `ctx.agents.openSessionVoice?.(agent.key, place, options)`. The provider must support session voice. Buzz uses the conversation selected by session controls, waits for any interrupted turn to end, and publishes final agent transcripts there. The plugin owns the microphone and the human transcript. Give it 48 kHz mono audio, use the optional provider speaking callback to track reply audio, and abort the supplied signal when the conversation closes. Inline excerpts are bounded and passed to the voice model as reference dialogue.
+
 For `ctx.agents.ui.Transcript`, give each turn a unique `turnId` that stays the same across reads. Return a new turn when it changes. Leave previously returned turns and their items untouched.
 
 ## Migration writes

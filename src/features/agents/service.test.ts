@@ -259,6 +259,7 @@ async function setup({
   timeoutMs = 60_000,
   runOnce = undefined as AgentType<Config>["runOnce"],
   voice = undefined as AgentType<Config>["voice"],
+  sessionVoice = undefined as true | undefined,
   jev = undefined as FakeJev | undefined,
   binding = undefined as ((agent: Agent) => ConfigBinding) | undefined,
   sessionControls = undefined as
@@ -418,6 +419,7 @@ async function setup({
     }),
     run,
     ...(voice ? { voice } : {}),
+    ...(sessionVoice ? { sessionVoice } : {}),
     ...(protection ? { protection } : {}),
     ...(retire ? { retire } : {}),
     ...(readFile ? { readFile } : {}),
@@ -5256,6 +5258,49 @@ describe("voice launch and transcripts", () => {
         channelId: channel,
       });
       await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("lets an external plugin publish only the agent's spoken reply in its session", async () => {
+    const received = vi.fn(async (_seat: AgentVoiceSeat<Config>) => ({
+      input() {},
+      close() {},
+    }));
+    const f = await setup({ voice: received, sessionVoice: true });
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      const agent = f.service.find(bot);
+      if (!agent) throw new Error("Missing voice fixture agent");
+      const client = f.ctx.extend({
+        pluginOwner: { id: "voice-consumer", revision: "one" },
+      });
+      const abort = new AbortController();
+      const connection = await client.agents.openSessionVoice?.(
+        agent.key,
+        { channelId: channel },
+        {
+          startup: { instructions: "Listen for your name" },
+          signal: abort.signal,
+          ended() {},
+          async output() {},
+        },
+      );
+      const seat = received.mock.calls[0]?.[0];
+      if (!connection || !seat) throw new Error("Missing opened seat");
+      await seat.transcript("owner", "Human transcript already posted");
+      await seat.transcript("agent", "Spoken answer");
+      const lines = await published(f.native, 9);
+      expect(lines).toMatchObject([
+        { pubkey: bot, content: "Spoken answer", tags: [["h", channel]] },
+      ]);
+      f.emit({ events: lines, channelId: channel });
+      await connection.close();
+      expect(seat.signal.aborted).toBe(true);
+      await seat.transcript("agent", "Late reply");
+      expect(await published(f.native, 9)).toEqual(lines);
+      expect(f.run).not.toHaveBeenCalled();
     } finally {
       await f.ctx.fiber.dispose();
     }
