@@ -68,6 +68,7 @@ export function CanvasPanel({
         ? `Looking around on your own. ${driverName} is driving.`
         : "Nobody is driving. Changes are shared with everyone.";
   const addable = types.filter((view) => view.initial !== undefined);
+  const shown = scene.items.find((item) => item.id === scene.active);
   const view = (item: CanvasItem) => {
     const type = views.get(item.type);
     if (!type)
@@ -83,7 +84,7 @@ export function CanvasPanel({
       );
     const View = type.component;
     return (
-      <div className={styles.view} inert={following}>
+      <div key={item.id} className={styles.view} inert={following}>
         <View
           state={item.state}
           interactive={!following}
@@ -144,56 +145,59 @@ export function CanvasPanel({
       )}
       <div className={styles.stage}>
         {scene.items.length ? (
-          <Tabs
-            label="Canvas views"
-            variant="panel"
-            value={scene.active ?? null}
-            onValueChange={(id) =>
-              change((current) => activateItem(current, id))
-            }
-            items={scene.items.map((item) => ({
-              value: item.id,
-              label:
-                item.title ?? views.get(item.type)?.title ?? "Unknown view",
-              onClose: following
-                ? undefined
-                : () => change((current) => closeItem(current, item.id)),
-            }))}
-            trailingAction={
-              !following && addable.length ? (
-                <MenuRoot>
-                  <MenuTrigger
-                    render={
-                      <Button variant="ghost" size="sm" aria-label="Add a view">
-                        <PlusIcon size={16} aria-hidden="true" />
-                      </Button>
-                    }
-                  />
-                  <MenuPopup align="end">
-                    {addable.map((type) => (
-                      <MenuItem
-                        key={type.type}
-                        onClick={() =>
-                          change((current) =>
-                            openItem(current, views, {
-                              type: type.type,
-                              state: type.initial,
-                            }),
-                          )
-                        }
-                      >
-                        {type.title}
-                      </MenuItem>
-                    ))}
-                  </MenuPopup>
-                </MenuRoot>
-              ) : undefined
-            }
-            renderPanel={(id) => {
-              const item = scene.items.find((other) => other.id === id);
-              return item ? view(item) : null;
-            }}
-          />
+          <>
+            <Tabs
+              label="Canvas views"
+              variant="panel"
+              value={scene.active ?? null}
+              onValueChange={(id) =>
+                change((current) => activateItem(current, id))
+              }
+              items={scene.items.map((item) => ({
+                value: item.id,
+                label:
+                  item.title ?? views.get(item.type)?.title ?? "Unknown view",
+                onClose: following
+                  ? undefined
+                  : () => change((current) => closeItem(current, item.id)),
+              }))}
+              trailingAction={
+                !following && addable.length ? (
+                  <MenuRoot>
+                    <MenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label="Add a view"
+                        >
+                          <PlusIcon size={16} aria-hidden="true" />
+                        </Button>
+                      }
+                    />
+                    <MenuPopup align="end">
+                      {addable.map((type) => (
+                        <MenuItem
+                          key={type.type}
+                          onClick={() =>
+                            change((current) =>
+                              openItem(current, views, {
+                                type: type.type,
+                                state: type.initial,
+                              }),
+                            )
+                          }
+                        >
+                          {type.title}
+                        </MenuItem>
+                      ))}
+                    </MenuPopup>
+                  </MenuRoot>
+                ) : undefined
+              }
+            />
+            {shown && view(shown)}
+          </>
         ) : (
           <div className={styles.empty}>
             <EmptyState

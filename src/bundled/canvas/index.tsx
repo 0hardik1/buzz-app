@@ -9,6 +9,9 @@ import { CanvasPanel } from "./CanvasPanel";
 import { createCanvasChannel } from "./store";
 import { canvasTools } from "./tools";
 import { createCanvasViews, type CanvasViews } from "./view";
+import { mapView } from "./views/map";
+import { browserView, webView } from "./views/page";
+import { videoView } from "./views/video";
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -21,10 +24,14 @@ declare module "@deepseek-ai/cordis" {
 /** What a link or an agent opens to show a conversation's canvas. */
 export const CANVAS_TARGET = "buzz-canvas:";
 
-export const inject = ["panels", "relay", "agents"];
+export const inject = ["panels", "relay", "agents", "browser"];
 export const apply: PluginModule["apply"] = (ctx) => {
   const views = createCanvasViews();
   ctx.provide("canvasViews", views);
+  views.register(browserView(ctx.browser));
+  views.register(webView);
+  views.register(mapView());
+  views.register(videoView);
 
   function Live({
     session,
