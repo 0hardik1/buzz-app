@@ -119,6 +119,9 @@ punctuation too. `i"` and `a"` are inside and around quotes, also with `'`
 and `` ` ``. `i(` and `a(` are inside and around brackets, also with `[`,
 `{` and `<`; `ib` and `iB` are `i(` and `i{`.
 
+When the message is taller than the box, the view follows the cursor and
+keeps three lines around it, as Vim's `scrolloff`.
+
 A count repeats a motion or edit, before the operator or after it: `5l`,
 `3dw`, `d2w`, `3dd`. `u` undoes one command, and an insert from `i`, `o` or
 `c` until Escape is one command. In a selection, motions extend it, a text

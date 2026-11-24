@@ -231,6 +231,55 @@ test.describe("the message box's modes", () => {
     await expect.poll(() => value(alpha)).toBe("four five!\nsix");
   });
 
+  test("the view follows the cursor, three lines from the box's edges", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const alpha = composer(page, "Alpha");
+    await expect(page.locator("[data-message-cursor]")).toBeFocused();
+    await insert(page);
+    await typeLines(
+      page,
+      ...Array.from({ length: 30 }, (_, index) => `line ${index + 1}`),
+    );
+    await page.keyboard.press("Escape");
+    /** The box's scroll, and the lines between the cursor and its edges. */
+    const view = () =>
+      alpha.evaluate((box) => {
+        const [range] = CSS.highlights.get("vim-block-cursor") ?? [];
+        const caret = range?.getBoundingClientRect();
+        const line = Number.parseFloat(getComputedStyle(box).lineHeight);
+        const top = box.getBoundingClientRect().top + box.clientTop;
+        return {
+          scrollTop: box.scrollTop,
+          bottom: box.scrollHeight - box.clientHeight - box.scrollTop,
+          rows: Math.round(box.clientHeight / line),
+          above: caret && Math.round((caret.top - top) / line),
+          below:
+            caret && Math.round((top + box.clientHeight - caret.bottom) / line),
+        };
+      });
+    await expect.poll(async () => (await view()).bottom).toBeLessThan(1);
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    await expect.poll(async () => (await view()).scrollTop).toBe(0);
+    // j moves the cursor down without scrolling, until it is three lines
+    // from the bottom; then each j scrolls one line.
+    const { rows } = await view();
+    for (let line = 1; line < rows + 2; line++) await page.keyboard.press("j");
+    await expect.poll(async () => (await view()).below).toBe(3);
+    const scrolled = (await view()).scrollTop;
+    expect(scrolled).toBeGreaterThan(0);
+    // k scrolls back up once the cursor is three lines from the top.
+    for (let line = 0; line < 4; line++) await page.keyboard.press("k");
+    await expect.poll(async () => (await view()).above).toBe(3);
+    expect((await view()).scrollTop).toBeLessThan(scrolled);
+    await page.keyboard.press("Shift+G");
+    await expect.poll(async () => (await view()).bottom).toBeLessThan(1);
+  });
+
   test("V selects lines, and J and K move them and keep them selected", async ({
     page,
     app,

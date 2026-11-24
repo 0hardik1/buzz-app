@@ -83,6 +83,35 @@ function caretRect(node: Node, offset: number) {
     : undefined;
 }
 
+/** Scroll the box `input` scrolls in so the caret stays `lines` lines from
+ * its top and bottom, as Vim's scrolloff. Only a box that overflows moves. */
+export function scrollOff(input: HTMLElement, lines = 3) {
+  const selection = getSelection();
+  const node = selection?.focusNode;
+  if (!node || !input.contains(node)) return;
+  const caret = caretRect(node, selection.focusOffset);
+  const surface = input.closest("[data-composer-surface]");
+  let box: HTMLElement | null = input;
+  while (
+    box &&
+    !(
+      box.scrollHeight > box.clientHeight &&
+      /auto|scroll/.test(getComputedStyle(box).overflowY)
+    )
+  )
+    box = box === surface ? null : box.parentElement;
+  if (!caret || !box) return;
+  const line =
+    Number.parseFloat(getComputedStyle(input).lineHeight) || caret.height;
+  // In a box too short for both margins, keep the caret in its middle.
+  const margin = Math.min(lines * line, (box.clientHeight - caret.height) / 2);
+  const top = box.getBoundingClientRect().top + box.clientTop;
+  const above = top + margin - caret.top;
+  const below = caret.bottom + margin - (top + box.clientHeight);
+  if (above > 0) box.scrollTop -= above;
+  else if (below > 0) box.scrollTop += below;
+}
+
 /** Show a block cursor in `input` until `stop`; `draw` after it moves. */
 export function blockCursor(input: HTMLElement) {
   const block = document.createElement("div");

@@ -20,7 +20,7 @@ import {
   settle,
   type Vim,
 } from "./editing";
-import { blockCursor } from "./block-cursor";
+import { blockCursor, scrollOff } from "./block-cursor";
 import { WHICH_KEY } from "./pending";
 
 const STATUS: Record<Mode, string> = {
@@ -127,6 +127,7 @@ export function composerModes({
       shown = undefined;
       input.setSelectionRange(vim.cursor, vim.cursor);
       if (vim.mode === "normal") {
+        scrollOff(input);
         block ??= blockCursor(input);
         block.draw();
       }
@@ -139,6 +140,7 @@ export function composerModes({
       vim.cursor < vim.anchor ? "backward" : "forward",
     );
     shown = { start: input.selectionStart, end: input.selectionEnd };
+    scrollOff(input);
   };
   const reset = () => {
     block?.stop();
