@@ -180,6 +180,10 @@ huddle's room. Each agent's **Huddle voice** setting picks its voice. An agent
 hears whatever your microphone picks up, including people near you, and audio
 sent just before someone leaves can be credited to whoever takes their place.
 
+If joining interrupts a Codex agent's typed work, it continues in the same
+session once the voice seat opens. Closing the Huddle lets that work finish.
+Use **Stop** on the work to cancel it.
+
 ## Workflows
 
 Workflows are a plugin, off by default. A workflow belongs to a channel and

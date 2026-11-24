@@ -213,6 +213,7 @@ type Request = {
   answered: (stopped?: boolean) => void;
   /** A failed final delivery stays pending until this request gets a reply. */
   finalDelivery?: Error | true;
+  voiceContinuation?: VoiceContinuation;
   step?: (tool: string, target?: string) => void;
   acknowledged?: (input?: Readonly<{ steering?: true }>) => void;
   accepted?: () => void;
@@ -232,6 +233,11 @@ type Request = {
   gatewayFallback?: Delivery["gatewayFallback"];
 };
 type TextRequest = Request & { event: EventData; adopted?: never };
+type VoiceContinuation = {
+  entry: Entry;
+  threadId: string;
+  requests: TextRequest[];
+};
 /** `at` is when the binding last took in a message or ended a turn; bindings
  * saved before it existed have none. `tools` is the `addedKey` of the
  * thread's tools, absent when plugins added none. `protection` is the
@@ -263,6 +269,7 @@ type Active = {
   released: Promise<void>;
   nativeCompleted?: Promise<string>;
   voiceRetirement?: Promise<void>;
+  voiceHandoff?: VoiceContinuation[];
   rejectedSpeech?: Promise<void>;
   steering: Promise<void>;
   reply: Request;
@@ -501,7 +508,7 @@ function restoreNotes(request: Request) {
     );
 }
 /** The note at the end of a request's turn input, if any. */
-function noteOf(request: Request) {
+function noteOf(request: Request, continuation = false) {
   request.notes ??=
     request.agent.notes?.(
       request.conversation.channelId,
@@ -510,7 +517,11 @@ function noteOf(request: Request) {
   const notes = [
     request.sessionContext,
     request.invocationContext,
-    request.resumed ? RESUMED_PROMPT : undefined,
+    continuation
+      ? "Continue the work interrupted while joining the Huddle. Check the thread history for actions that already completed before proceeding."
+      : request.resumed
+        ? RESUMED_PROMPT
+        : undefined,
     ...request.notes,
     turnNote(
       request.agent,
@@ -1964,6 +1975,7 @@ export class CodexRuntime {
     const key = scopedKey(settings.scope, channelId);
     if (settings.scope === "community" && !finishPreemption) {
       let connection: AgentVoiceConnection | undefined;
+      const continuations: VoiceContinuation[] = [];
       // Previously queued work can take the native lane before voice.
       const failed = new AbortController();
       let interrupted = Promise.resolve();
@@ -1974,7 +1986,12 @@ export class CodexRuntime {
         const active = entry?.lanes.get(key)?.active;
         if (entry && active && !active.finished && active !== interrupting) {
           interrupting = active;
-          interrupted = this.interruptForVoice(entry, key, active);
+          interrupted = this.interruptForVoice(
+            entry,
+            key,
+            active,
+            continuations,
+          );
           void interrupted.catch((error) => failed.abort(error));
         }
       };
@@ -1995,6 +2012,7 @@ export class CodexRuntime {
               return interrupted;
             },
           );
+          this.resumeVoiceWork(key, continuations);
         },
         true,
       );
@@ -2009,6 +2027,11 @@ export class CodexRuntime {
         throw error;
       } finally {
         off();
+        // The Huddle can cancel its own opening while Codex is still draining.
+        if (!connection)
+          void interrupted
+            .catch(() => {})
+            .then(() => this.resumeVoiceWork(key, continuations));
       }
       if (!connection) throw new Error("Voice startup was interrupted");
       return connection;
@@ -2027,12 +2050,14 @@ export class CodexRuntime {
     if (lane.voice || lane.voiceOpening)
       throw new Error("This conversation already has a voice seat");
     lane.voiceOpening = true;
+    const continuations: VoiceContinuation[] = [];
     try {
       const active = lane.active;
       if (active && !finishPreemption)
-        await this.interruptForVoice(entry, key, active);
+        await this.interruptForVoice(entry, key, active, continuations);
     } catch (error) {
       delete lane.voiceOpening;
+      this.resumeVoiceWork(key, continuations);
       if (
         !lane.active &&
         !lane.queued &&
@@ -2330,6 +2355,7 @@ export class CodexRuntime {
       throw error;
     } finally {
       delete lane.voiceOpening;
+      this.resumeVoiceWork(key, continuations);
     }
   }
   run(delivery: Delivery): Promise<void> {
@@ -3144,7 +3170,15 @@ export class CodexRuntime {
     key: string,
     request: Request,
     canStopWaiting = request.settings.scope === "community",
+    forVoice = false,
   ): Promise<void> {
+    if (request.voiceContinuation) {
+      for (const pending of request.voiceContinuation.requests) {
+        pending.current = () => false;
+        pending.answered(true);
+      }
+      return Promise.resolve();
+    }
     if (entry.waiting.has(request)) {
       if (!canStopWaiting)
         return Promise.reject(
@@ -3160,10 +3194,15 @@ export class CodexRuntime {
       return Promise.resolve();
     }
     const active = entry.lanes.get(key)?.active;
-    if (!active?.requests.includes(request) || active.finished)
-      return Promise.resolve();
+    if (!active?.requests.includes(request)) return Promise.resolve();
+    if (!forVoice) delete active.voiceHandoff;
+    if (active.finished) return Promise.resolve();
     active.stopped = true;
-    active.tools.abort(new Error("The owner stopped the turn"));
+    active.tools.abort(
+      new Error(
+        forVoice ? "The Huddle is opening" : "The owner stopped the turn",
+      ),
+    );
     active.stopping ??= (async () => {
       try {
         await active.ready;
@@ -3186,8 +3225,20 @@ export class CodexRuntime {
     return active.stopping;
   }
 
-  private async interruptForVoice(entry: Entry, key: string, active: Active) {
-    await this.interrupt(entry, key, active.reply);
+  private async interruptForVoice(
+    entry: Entry,
+    key: string,
+    active: Active,
+    continuations: VoiceContinuation[],
+  ) {
+    if (!active.stopping && !active.reply.unaddressed)
+      active.voiceHandoff = continuations;
+    try {
+      await this.interrupt(entry, key, active.reply, undefined, true);
+    } catch (error) {
+      delete active.voiceHandoff;
+      throw error;
+    }
     if (active.finished || !active.nativeCompleted) return;
     try {
       await withTimeout(
@@ -3199,6 +3250,24 @@ export class CodexRuntime {
       active.voiceRetirement = active.rpc.close();
       await active.voiceRetirement;
       throw error;
+    }
+  }
+
+  private resumeVoiceWork(key: string, continuations: VoiceContinuation[]) {
+    for (const continuation of continuations) {
+      const { entry } = continuation;
+      const request = continuation.requests.at(-1);
+      if (!request) continue;
+      const lane = laneFor(entry, key, request.settings.scope === "community");
+      this.start(
+        request,
+        textOf(request.event, request.agent.name),
+        key,
+        lane,
+        entry,
+        undefined,
+        continuation,
+      );
     }
   }
 
@@ -3312,6 +3381,7 @@ export class CodexRuntime {
     lane: Lane,
     entry: Entry,
     admitted?: Promise<boolean>,
+    continuation?: VoiceContinuation,
   ) {
     const current = lane;
     current.queued++;
@@ -3334,10 +3404,11 @@ export class CodexRuntime {
         while (current.active || current.voice?.rejectedSpeechClosing)
           await (current.active?.released ??
             current.voice?.rejectedSpeechClosing);
-        entry.waiting.delete(request);
+        if (!continuation) entry.waiting.delete(request);
         if (!ready) return;
         if (entry.abort.signal.aborted) {
-          request.failActivity("Codex was stopped");
+          for (const pending of continuation?.requests ?? [request])
+            pending.failActivity("Codex was stopped");
           return;
         }
         if (request.current && !request.current()) {
@@ -3347,7 +3418,17 @@ export class CodexRuntime {
         try {
           await entry.after;
           // A rerun waits for the retired Huddle seat to let go of the lane.
-          while (await this.execute(request, text, key, current, entry, next))
+          while (
+            await this.execute(
+              request,
+              text,
+              key,
+              current,
+              entry,
+              next,
+              continuation,
+            )
+          )
             await current.voice?.rejectedSpeechClosing;
         } catch (error) {
           request.failActivity(message(error));
@@ -3355,7 +3436,15 @@ export class CodexRuntime {
         }
       })
       // Messages that joined a turn that never began queue on their own.
-      .finally(() => next.begin());
+      .finally(() => {
+        if (continuation)
+          for (const pending of continuation.requests) {
+            if (pending.voiceContinuation !== continuation) continue;
+            entry.waiting.delete(pending);
+            delete pending.voiceContinuation;
+          }
+        next.begin();
+      });
     lane.tail = job;
     this.status(request.agent.key, key, "Starting");
     // Agents can deliver follow-ups and other conversations immediately.
@@ -4198,6 +4287,7 @@ export class CodexRuntime {
     lane: Lane,
     entry: Entry,
     next?: Next,
+    continuation?: VoiceContinuation,
   ) {
     const { adopted } = request;
     let ready!: () => void;
@@ -4213,6 +4303,16 @@ export class CodexRuntime {
     ]);
     const routing = this.routed(request.agent, signal);
     if (routing) await routing;
+    if (continuation) {
+      for (const pending of continuation.requests) {
+        entry.waiting.delete(pending);
+        delete pending.voiceContinuation;
+      }
+      if (request.current?.() === false) {
+        for (const pending of continuation.requests) pending.answered();
+        return;
+      }
+    }
     if (signal.aborted) {
       // As a turn cancelled once started ends, without publishing.
       if (entry.abort.signal.aborted) request.failActivity("Codex was stopped");
@@ -4242,7 +4342,7 @@ export class CodexRuntime {
       workspace: lane.voice?.loaded.workspace ?? request.settings.workspace,
       signal,
       tools: new AbortController(),
-      requests: [request],
+      requests: continuation?.requests ?? [request],
       activity: new Map(),
     };
     void active.ready.catch(() => undefined);
@@ -4276,6 +4376,7 @@ export class CodexRuntime {
     let hookBridge: Awaited<ReturnType<typeof openHookBridge>> | undefined;
     let explain: (() => string | undefined) | undefined;
     let turnFailed = false;
+    let continuing = false;
     let turnMayBeRunning = adopted !== undefined;
     /** The voice seat whose thread this turn runs on, if any. */
     let seat: Lane["voice"];
@@ -4370,6 +4471,10 @@ export class CodexRuntime {
       active.effort = effort;
       // The seat owns its retained bridge; individual turns must not close it.
       hookBridge = seat ? undefined : bridge;
+      if (continuation && threadId !== continuation.threadId)
+        throw new Error(
+          "Could not continue the interrupted work on its original Codex thread",
+        );
       if (request.adopted !== undefined) {
         ready();
       } else {
@@ -4436,7 +4541,7 @@ export class CodexRuntime {
           return again;
         }
         signal.throwIfAborted();
-        request.accepted?.();
+        if (!continuation) request.accepted?.();
         // A folder assigned since it was admitted can differ from where
         // its thread works, which its Canvas states the rule from.
         if (active.elsewhere !== undefined && request.projectAt) {
@@ -4471,7 +4576,7 @@ export class CodexRuntime {
                 ]
                   .filter(Boolean)
                   .join("\n\n")) ??
-              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
+              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request, !!continuation), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
           ),
           model,
           effort,
@@ -4522,9 +4627,10 @@ export class CodexRuntime {
                 .join(""),
             },
           ]);
-        this.acknowledgeActivity(active, request);
+        for (const taken of active.requests)
+          this.acknowledgeActivity(active, taken);
         // A conversation new to this agent: name its Solo chat meanwhile.
-        if (request.named && !saved && !server.protection)
+        if (!continuation && request.named && !saved && !server.protection)
           void this.offerTitle(
             rpc,
             request.named,
@@ -4557,9 +4663,23 @@ export class CodexRuntime {
       // Closing the seat after Codex completed does not undo its spoken reply.
       if (adopted === undefined || !active.finished) signal.throwIfAborted();
       if (status === "interrupted" && active.stopped) {
-        for (const taken of active.requests) taken.answered(true);
-        await this.terminals(rpc, threadId, STOP_LINGER_MS);
-        this.status(agent.key, key, "Stopped", notice);
+        const pending = active.requests.filter(
+          (taken): taken is TextRequest =>
+            !!taken.event && !taken.unaddressed && taken.finalDelivery !== true,
+        );
+        if (active.voiceHandoff && pending.length) {
+          const handoff = { entry, threadId, requests: pending };
+          active.voiceHandoff.push(handoff);
+          for (const taken of pending) {
+            taken.voiceContinuation = handoff;
+            entry.waiting.add(taken);
+          }
+          continuing = true;
+        } else {
+          for (const taken of active.requests) taken.answered(true);
+          await this.terminals(rpc, threadId, STOP_LINGER_MS);
+          this.status(agent.key, key, "Stopped", notice);
+        }
       } else if (status === "interrupted") {
         for (const taken of active.requests)
           taken.failActivity("Codex’s turn was interrupted");
@@ -4634,8 +4754,9 @@ export class CodexRuntime {
         );
       }
     } finally {
-      for (const taken of active.requests)
-        taken.failActivity("Codex ended without a final reply");
+      if (!continuing)
+        for (const taken of active.requests)
+          taken.failActivity("Codex ended without a final reply");
       // A turn Codex took in has ended, however it ended.
       if (active.turnId && !entry.abort.signal.aborted)
         this.touch(request, entry, key);
