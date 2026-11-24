@@ -319,5 +319,6 @@ export function withRemoteDmVoiceCalls(
     voiceListening: huddles.voiceListening,
     voiceThinking: huddles.voiceThinking,
     subscribePeerAudio: huddles.subscribePeerAudio,
+    openLocalPlayout: huddles.openLocalPlayout,
   };
 }

@@ -26,7 +26,7 @@ export function createHuddleVoices(
     Huddles,
     "snapshot" | "subscribe" | "voiceListening" | "voiceThinking"
   > &
-    Partial<Pick<Huddles, "subscribePeerAudio">> & {
+    Partial<Pick<Huddles, "subscribePeerAudio" | "openLocalPlayout">> & {
       voiceAgent?(): string | undefined;
     },
   agents: Pick<Agents, "snapshot" | "subscribe" | "types" | "reserveVoice">,
@@ -60,6 +60,7 @@ export function createHuddleVoices(
     let release: (() => void) | undefined;
     let speech = Promise.resolve();
     let queuedSpeech = 0;
+    let localPlayout: ReturnType<Huddles["openLocalPlayout"]>;
     const fail = (error?: unknown) => {
       if (abort.signal.aborted) return;
       void stop();
@@ -85,6 +86,7 @@ export function createHuddleVoices(
     function stop() {
       if (closing) return closing;
       abort.abort();
+      localPlayout?.close();
       clearInterval(heartbeat);
       release?.();
       closing = Promise.allSettled([
@@ -129,6 +131,7 @@ export function createHuddleVoices(
         );
         await opening;
         if (abort.signal.aborted) return;
+        localPlayout = huddles.openLocalPlayout?.(call, agent.pubkey);
         heartbeat = setInterval(() => {
           void bridge.touch(id).catch(fail);
         }, 5000);
@@ -175,7 +178,13 @@ export function createHuddleVoices(
             if (!abort.signal.aborted)
               huddles.voiceThinking(call, agent.pubkey, active);
           },
-          output: sender.send,
+          output: (samples) => {
+            if (abort.signal.aborted) return Promise.resolve();
+            // The owner's local copy avoids the relay round trip. The relay
+            // still carries the same frames to every other device in the room.
+            localPlayout?.play(samples);
+            return sender.send(samples);
+          },
         });
         if (abort.signal.aborted) await opened.close();
         else {

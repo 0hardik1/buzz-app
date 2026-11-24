@@ -26,6 +26,9 @@ function harness() {
   };
   const listeners = new Set<() => void>();
   const call: Huddles = {
+    openLocalPlayout() {
+      return undefined;
+    },
     voiceError() {},
     remoteVoiceError() {},
     voiceListening() {},
