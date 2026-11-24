@@ -1,6 +1,6 @@
 import type { ProfileQueries } from "./profile-directory";
 import { workflowOwner } from "./workflow-attribution";
-import { agentAudience } from "./audience";
+import { agentAudience, detailsBrief, messageAudience } from "./audience";
 import type { InboxItem, InboxSnapshot } from "./inbox";
 import type { ChannelMessage, ChannelQueries } from "./contracts";
 import type { RelayEvent } from "./events";
@@ -331,12 +331,16 @@ const EVIDENCE_LOW_BYTES = 6 * 1024 * 1024;
 const eventBytes = (event: RelayEvent) =>
   new TextEncoder().encode(JSON.stringify(event)).byteLength;
 const noMentions = Object.freeze({ content: "", mentions: Object.freeze([]) });
+/** A message body as a preview shows it: a details message's brief, as the
+ * chat shows it before it opens, and any other body whole. */
+const previewBody = (content: string, audience: string | undefined) =>
+  audience === "details" ? detailsBrief(content) : content;
 /** A row's preview text: its body, or a plain description of its attachments
  * when attachment presentation left no text, so the row is never blank. */
-const previewText = (message: ChannelMessage) =>
-  message.content.trim()
-    ? message.content
-    : attachmentSummary(message.attachments) || message.content;
+const previewText = (message: ChannelMessage) => {
+  const body = previewBody(message.content, message.audience);
+  return body.trim() ? body : attachmentSummary(message.attachments) || body;
+};
 
 /** Rendered message order: effective ms, then event id. */
 const order = (a: RelayEvent, b: RelayEvent) =>
@@ -1434,7 +1438,10 @@ export function createUnread({
       presented ??= new Map(
         folded(channelId).map((message) => [message.id, previewText(message)]),
       );
-      return presented.get(event.id) ?? event.content;
+      return (
+        presented.get(event.id) ??
+        previewBody(event.content, messageAudience(event))
+      );
     };
     for (const evidence of byChannel.get(channelId) ?? []) {
       const { event, rootId } = evidence;
@@ -1743,7 +1750,7 @@ export function createUnread({
               return event &&
                 !row.threadRootId &&
                 !row.membership &&
-                !row.audience &&
+                row.audience !== "agents" &&
                 row.authorId !== viewer &&
                 !elsewhere.has(row.id) &&
                 (!best || order(event, best) > 0)
@@ -1833,7 +1840,9 @@ export function createUnread({
                 : {}),
               authorId: shown.pubkey,
               workflowOwnerId: workflowOwner(shown, workflowAuthority),
-              preview: content.get(shown.id) ?? shown.content,
+              preview:
+                content.get(shown.id) ??
+                previewBody(shown.content, messageAudience(shown)),
               previewMessageId: shown.id,
               previewMentions: previewRows.get(shown.id) ?? noMentions,
               createdAt: shown.created_at,
