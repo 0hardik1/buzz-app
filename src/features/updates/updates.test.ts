@@ -234,21 +234,29 @@ it("reports download and install failures, then retries with a fresh check", asy
   expect(second.update.close).toHaveBeenCalledOnce();
 });
 
-it("asks to move Buzz to Applications when its location is read-only", async () => {
-  const updates = start();
-  const { update, download, install } = handle();
-  (await check(0)).resolve(update);
-  download.resolve();
-  await vi.waitFor(() => expect(state()).toBe("ready"));
+it.each([
+  ["MacIntel", MOVE_TO_APPLICATIONS],
+  ["Linux x86_64", "Read-only file system (os error 30)"],
+])(
+  "reports a read-only install location on %s",
+  async (platformName, message) => {
+    vi.stubGlobal("navigator", { platform: platformName });
+    try {
+      const updates = start();
+      const { update, download, install } = handle();
+      (await check(0)).resolve(update);
+      download.resolve();
+      await vi.waitFor(() => expect(state()).toBe("ready"));
 
-  const installing = updates.installAndRelaunch();
-  install.reject("Read-only file system (os error 30)");
-  await installing;
-  expect(updates.snapshot()).toEqual({
-    state: "error",
-    message: MOVE_TO_APPLICATIONS,
-  });
-});
+      const installing = updates.installAndRelaunch();
+      install.reject("Read-only file system (os error 30)");
+      await installing;
+      expect(updates.snapshot()).toEqual({ state: "error", message });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 it("stops background checks on dispose without closing an in-flight download", async () => {
   const updates = start();

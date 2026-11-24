@@ -118,13 +118,14 @@ export function createUpdates(platform: UpdatePlatform = tauriPlatform) {
     } catch (err) {
       noticeRecovery = true;
       const message = toErrorMessage(err);
-      // The updater replaces the app where it runs, which a disk image or a
+      // The updater replaces the app where it runs, which a macOS disk image or
       // translocated copy refuses as a read-only file system (EROFS).
       setStatus({
         state: "error",
-        message: message.includes("os error 30")
-          ? MOVE_TO_APPLICATIONS
-          : message,
+        message:
+          /Mac/.test(navigator.platform) && message.includes("os error 30")
+            ? MOVE_TO_APPLICATIONS
+            : message,
       });
     } finally {
       installInFlight = false;
