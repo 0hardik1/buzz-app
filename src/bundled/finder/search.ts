@@ -7,9 +7,17 @@ import {
   type FinderDoc,
   type FinderResults,
 } from "./corpus.ts";
-import { type ChannelSearchStatus, type FinderSync, finderDoc } from "./sync";
+import {
+  type ChannelSearchStatus,
+  type FinderSync,
+  finderDoc,
+  lost,
+} from "./sync";
 
 const PAGE = 50;
+/** Device rows above the relay's in All of Buzz. More would push the relay's
+ * best hits out of sight; This channel still shows a full page. */
+const DEVICE_ROWS = 5;
 
 /** Relay hits held until Finder closes, then added to the index, so the
  * device rows above them never change while you read. */
@@ -104,21 +112,27 @@ export function useFinderAll({
     session: RelaySession;
     results: FinderResults;
   }>(undefined);
+  // Always asked: a page of device rows with every word can still rank below
+  // an unindexed message that has them together.
+  const search = useSearchMessages(session, query);
+  const asked = !search.tooShort && !!query.trim();
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision names the corpus contents.
   const fresh = useMemo(
-    () => corpus.search(query, PAGE),
-    [corpus, query, revision],
+    () => corpus.search(query, asked ? DEVICE_ROWS : PAGE),
+    [corpus, query, revision, asked],
   );
-  const local =
+  const steady =
     holding.current &&
     kept.current?.query === query &&
     kept.current.session === session
       ? kept.current.results
       : fresh;
-  kept.current = { query, session, results: local };
-  // Always asked: a page of device rows with every word can still rank below
-  // an unindexed message that has them together.
-  const search = useSearchMessages(session, query);
+  kept.current = { query, session, results: steady };
+  // Rows held still still leave when you lose the channel they're from.
+  const local: FinderResults = {
+    ...steady,
+    hits: steady.hits.filter(({ doc }) => !lost(session, doc.channelId)),
+  };
   const [previous, setPrevious] = useState<{
     session: RelaySession;
     query: string;
@@ -153,7 +167,8 @@ export function useFinderAll({
         !shown.has(message.id) &&
         channel &&
         !channel.huddle &&
-        !channel.metadataPending
+        !channel.metadataPending &&
+        !lost(session, message.channelId)
       );
     })
     .map(({ id, channelId, authorId, createdAt, text }) =>
@@ -166,9 +181,16 @@ export function useFinderAll({
   useEffect(() => {
     if (!search.loading && !search.error) hold(docs);
   }, [session, search.loading, search.error, freshKey]);
-  const ranked = createCorpus();
-  ranked.add(docs);
-  const results = ranked.search(query, docs.length || 1);
+  // Ranked again only when the hits or their labels change.
+  const docsKey = docs
+    .map((doc) => `${doc.id} ${doc.author} ${doc.place}`)
+    .join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: docsKey names the docs.
+  const results = useMemo(() => {
+    const ranked = createCorpus();
+    ranked.add(docs);
+    return ranked.search(query, docs.length || 1);
+  }, [docsKey, query]);
   const matched = new Set(results.hits.map(({ doc }) => doc.id));
   const relay: FinderResults = {
     total: docs.length,
@@ -179,7 +201,6 @@ export function useFinderAll({
         .map((doc) => ({ doc, score: 0, positions: [] })),
     ],
   };
-  const asked = !search.tooShort && !!query.trim();
   holding.current = asked && (search.loading || relay.hits.length > 0);
   return { local, relay, search, asked };
 }

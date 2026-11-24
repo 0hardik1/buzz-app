@@ -47,15 +47,15 @@ Settings → Shortcuts.
   when it searched the whole channel. Closing or switching stops the read.
   Reopening resumes where it left off. Join a public preview before searching
   its history here.
-- **All of Buzz** shows matches from this device at once. After a short pause
-  in typing, with at least three letters in the last word, it also asks the
-  relay, which searches every message you can read, including public channels
-  you haven't joined. Those hits appear below, under **More from all of Buzz**,
-  ranked the same way. Rows you're looking at never move: once relay rows show,
-  the device rows above them hold still until you change the text. Relay rows
-  for earlier text clear as soon as you change it, so Enter can't open one
-  while the new search loads. Use **Retry** after a failed read, or **More
-  messages** for the next page.
+- **All of Buzz** shows the best 5 matches from this device at once. After a
+  short pause in typing, with at least three letters in the last word, it also
+  asks the relay, which searches every message you can read, including public
+  channels you haven't joined. Those hits appear below, under **More from all of
+  Buzz**, ranked the same way. Rows you're looking at never move: once relay
+  rows show, the device rows above them hold still until you change the text.
+  Relay rows for earlier text clear as soon as you change it, so Enter can't
+  open one while the new search loads. Use **Retry** after a failed read, or
+  **More messages** for the next page.
 
 Older channel messages stay in the index for this session. Relay hits from
 joined channels join it when you close Finder. Public previews stay out; their
@@ -109,9 +109,15 @@ The index lives in memory on this device. It is never sent anywhere. Scoped
 searches can add older messages. A reconnect keeps it. Signing out, being
 refused by the community, or switching to another account or community drops
 it. **Clear cache** doesn't; restarting does. When you lose access to a
-channel, its messages leave the index; if you rejoin it, the next reconnect
-reads your history in that channel again. A deleted message leaves the index
-too, and stays out if a later read brings it back.
+channel, its messages leave the index and the results right away; if you
+rejoin it, the next reconnect reads your history in that channel again. If the
+relay still refuses that read, the rest of the index finishes, and the channel
+is tried again at the following reconnect. A deleted message (kind 5 or 9005)
+leaves the index too, and stays out if a later read brings it back.
+
+Direct messages are read 50 at a time. If your list of DMs changes, a group of
+50 that changed is read again from 90 days back. It costs a few extra reads,
+and only then.
 
 ## How it stays current
 

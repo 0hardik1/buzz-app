@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { queryEvents } from "../../../tests/fixtures/finder-data";
+import { ReadError } from "../../features/relay/errors";
 import { createRelaySession } from "../../features/relay/session";
 import {
   keypair,
@@ -745,4 +746,155 @@ test("losing one direct message of a 50-message chunk resets that chunk's fill",
   // The other chunk only resumes.
   const other = reads.find((filter) => filter["#h"]?.includes("dm55"));
   expect(other?.since).toBeGreaterThanOrEqual(now - 300);
+});
+
+test("losing a channel drops its messages at once, not after the relabel pause", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const said = [
+    message(viewer, "lab", "Lab quartz", now - 60),
+    message(viewer, "crew", "Crew quartz", now - 60),
+  ];
+  const left = roster(relay, "lab", [author.pubkey], 1_700_000_100);
+  const events = [
+    ...discovery,
+    metadata(relay, "lab", "lab", 1_700_000_000, [["private"]]),
+    ...said,
+  ];
+  const owner = createRelaySession({
+    viewer: viewer.pubkey,
+    relayAuthor: relay.pubkey,
+    media: () => undefined,
+    query: async (filters) => queryEvents(events, filters),
+  });
+  dispose.push(owner.dispose);
+  await owner.session.channels.ensureList();
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  const corpus = createCorpus();
+  const sync = startFinderSync({
+    session: owner.session,
+    corpus,
+    changed() {},
+  });
+  dispose.push(sync.dispose);
+  await vi.advanceTimersByTimeAsync(1000);
+  const found = () =>
+    corpus
+      .search("quartz")
+      .hits.map(({ doc }) => doc.text)
+      .sort();
+  expect(found()).toEqual(["Crew quartz", "Lab quartz"]);
+  events.push(left);
+  await owner.session.read([
+    { kinds: [39002], "#d": ["lab"], authors: [relay.pubkey], limit: 1 },
+  ]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Crew quartz"]);
+});
+
+test("a refused rejoin read doesn't hold up the index, and is tried again at the next reconnect", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const old = message(viewer, "lab", "Old lab quartz", now - 86_400);
+  const other = message(viewer, "crew", "Crew quartz", now - 86_400);
+  const connect = async (member: boolean, refuse = false) => {
+    const owner = createRelaySession({
+      viewer: viewer.pubkey,
+      relayAuthor: relay.pubkey,
+      media: () => undefined,
+      async query(filters) {
+        if (refuse && filters.some((filter) => filter["#h"]?.includes("lab")))
+          throw new ReadError("denied", "Relay read failed (403)", 403);
+        const lab = [
+          metadata(relay, "lab", "lab"),
+          roster(relay, "lab", member ? [viewer.pubkey] : [author.pubkey]),
+        ];
+        const events = [other, ...lab, ...(member ? [old] : [])];
+        return queryEvents([...discovery.slice(0, 2), ...events], filters);
+      },
+    });
+    dispose.push(owner.dispose);
+    await owner.session.channels.ensureList();
+    return owner;
+  };
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  const corpus = createCorpus();
+  const state = createFinderState();
+  const found = () =>
+    corpus
+      .search("quartz")
+      .hits.map(({ doc }) => doc.text)
+      .sort();
+  const run = async (member: boolean, refuse = false) => {
+    const owner = await connect(member, refuse);
+    const sync = startFinderSync({
+      session: owner.session,
+      corpus,
+      state,
+      changed() {},
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sync.status().phase).toBe("ready");
+    sync.dispose();
+    owner.dispose();
+  };
+  await run(true);
+  await run(false);
+  expect(found()).toEqual(["Crew quartz"]);
+  // Rejoined, but the relay refuses the channel's history for now.
+  await run(true, true);
+  expect(found()).toEqual(["Crew quartz"]);
+  await run(true);
+  expect(found()).toEqual(["Crew quartz", "Old lab quartz"]);
+});
+
+test("a kind-9005 deletion removes its message, now and from pages read later", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const live = message(author, "crew", "Live quartz", now - 10);
+  const older = message(author, "crew", "Older quartz", 1_700_000_000);
+  const kept = message(author, "crew", "Kept quartz", now - 10);
+  const deletion = (target: string) =>
+    signed(author, {
+      kind: 9005,
+      content: "",
+      created_at: now,
+      tags: [
+        ["h", "crew"],
+        ["e", target],
+      ],
+    });
+  const { corpus, sync, owner } = await fixture([
+    live,
+    older,
+    kept,
+    deletion(live.id),
+    deletion(older.id),
+  ]);
+  const found = () =>
+    corpus
+      .search("quartz")
+      .hits.map(({ doc }) => doc.text)
+      .sort();
+  await owner.session.read([{ ids: [live.id, kept.id], limit: 2 }]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Kept quartz", "Live quartz"]);
+  await owner.session.read([{ kinds: [9005], limit: 10 }]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Kept quartz"]);
+  // The app received the older message with its deletion, then a page of
+  // history brings it again.
+  await owner.session.read([
+    { ids: [older.id], limit: 1 },
+    { kinds: [9005], "#e": [older.id], limit: 1 },
+  ]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Kept quartz"]);
+  const reader = sync.searchChannel(
+    "crew",
+    () => true,
+    () => {},
+  );
+  dispose.push(reader.dispose);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(found()).toEqual(["Kept quartz"]);
 });

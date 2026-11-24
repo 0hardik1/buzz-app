@@ -6,6 +6,7 @@ import type {
   RelayEvent,
 } from "../../features/relay/events";
 import { deletionApplies } from "../../features/relay/fold";
+import { isRetryableRead } from "../../features/relay/read-retry";
 import type { RelaySession } from "../../features/relay/session";
 import { threadReference } from "../../features/relay/thread-reference";
 import type { FinderCorpus, FinderDoc } from "./corpus.ts";
@@ -119,6 +120,21 @@ function placeOf(session: RelaySession, channelId: string) {
 }
 const nameOf = (session: RelaySession, pubkey: string) =>
   session.profiles.snapshot().get(pubkey)?.name ?? pubkey.slice(0, 10);
+
+/** Whether the viewer has lost `channelId`: the channel list is loaded and
+ * the channel is gone from it, or is private and no longer yours. Its
+ * messages must not be shown or opened. Unjoined public channels aren't lost;
+ * their previews stay readable. */
+export function lost(session: RelaySession, channelId: string) {
+  const found = session.channels.get?.(channelId);
+  if (!found) return session.channels.list().status === "ready";
+  return (
+    !!found.private &&
+    !!found.readOnly &&
+    !found.cached &&
+    found.viewerRole !== "guest"
+  );
+}
 
 /** A message, from the relay or its search, as Finder indexes it: named
  * by who wrote it and where, for `session`'s viewer. */
@@ -402,7 +418,8 @@ export function startFinderSync({
           { signal, priority: "background" },
         );
       } catch (error) {
-        if (signal.aborted) throw error;
+        // A refusal won't change by asking again; the caller decides.
+        if (signal.aborted || !isRetryableRead(error)) throw error;
         await sleep(delay + Math.random() * 1000, signal);
         delay = Math.min(delay * 2, BACKOFF_CAP_MS);
         continue;
@@ -478,10 +495,16 @@ export function startFinderSync({
     observed();
     publish({ phase: "filling" });
     await readHistory();
-    // Rejoined channels get back what lost access removed.
+    // Rejoined channels get back what lost access removed. One the relay
+    // still refuses is tried again at the next reconnect, without holding up
+    // the rest.
     for (const id of [...revoked].filter(relevant)) {
-      await readHistory(id);
-      revoked.delete(id);
+      try {
+        await readHistory(id);
+        revoked.delete(id);
+      } catch (error) {
+        if (signal.aborted) throw error;
+      }
     }
     publish({ phase: "ready" });
     // ponytail: a failed read ends the read-ahead; it is a head start, and
@@ -495,10 +518,15 @@ export function startFinderSync({
       // Messages posted while disconnected, beyond what live replay brings.
       if (resumable.has(id) && progress.top !== undefined) {
         const started = Math.floor(Date.now() / 1000);
-        await readPages(
-          { kinds: KINDS, "#h": [id] },
-          Math.max(since, progress.top - RESUME_SLACK_S),
-        );
+        try {
+          await readPages(
+            { kinds: KINDS, "#h": [id] },
+            Math.max(since, progress.top - RESUME_SLACK_S),
+          );
+        } catch (error) {
+          if (signal.aborted) throw error;
+          return;
+        }
         progress.top = started;
         continue;
       }
@@ -517,14 +545,14 @@ export function startFinderSync({
   }
 
   // New messages the session receives anyway: live traffic and other reads.
-  const live = session.observe([{ kinds: [...KINDS, 5], limit: PAGE }]);
+  const live = session.observe([{ kinds: [...KINDS, 5, 9005], limit: PAGE }]);
   // Deletions are applied before the messages beside them are taken, and
   // kept, so a page read later can't add a deleted message back.
   const observed = () => {
     const events = live.snapshot().events as readonly RelayEvent[];
     const gone = new Set<string>();
     for (const event of events) {
-      if (event.kind !== 5) continue;
+      if (event.kind !== 5 && event.kind !== 9005) continue;
       for (const [name, id] of event.tags) {
         if (name !== "e" || !id) continue;
         const known = tombstones.get(id) ?? [];
@@ -547,8 +575,9 @@ export function startFinderSync({
   };
   const stopLive = live.subscribe(observed);
 
-  // Lost access drops the channel's messages; names arriving relabel rows.
-  const relabel = () => {
+  // Lost access drops the channel's messages at once, so nothing from it can
+  // be read or opened; names arriving relabel rows a moment later.
+  const evict = () => {
     const list = session.channels.list();
     if (list.status === "ready") {
       const gone = new Set(
@@ -570,8 +599,11 @@ export function startFinderSync({
           for (const [key, progress] of fills)
             if (progress.channelIds?.includes(id)) fills.delete(key);
         }
+        publish({});
       }
     }
+  };
+  const relabel = () => {
     const relabeled = [...docs.values()].map((doc) => finderDoc(session, doc));
     for (const doc of relabeled) docs.set(doc.id, doc);
     corpus.add(relabeled);
@@ -582,7 +614,10 @@ export function startFinderSync({
     clearTimeout(pending);
     pending = setTimeout(relabel, 1000);
   };
-  const stopList = session.channels.subscribeList(soon);
+  const stopList = session.channels.subscribeList(() => {
+    evict();
+    soon();
+  });
   const stopProfiles = session.profiles.subscribe(soon);
 
   fill().catch((error) => {
