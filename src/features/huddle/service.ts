@@ -1,5 +1,6 @@
 import { addChannelMember } from "../channel-members/members";
 import { endLastHumanHuddle } from "./ending";
+import { createMicrophoneTranscript } from "./transcript";
 import { createPcmSender } from "./sender";
 import type { ChannelSummary } from "../relay/contracts";
 import type { AudioSettingsState } from "./audio-settings";
@@ -19,6 +20,7 @@ export type HuddleSnapshot = Readonly<{
   phase: "idle" | "incoming" | "connecting" | "connected" | "leaving" | "error";
   destination?: HuddleDestination;
   room?: string;
+  transcriptDestination?: ChannelSummary["huddleTranscript"];
   muted: boolean;
   participants: readonly string[];
   listening?: readonly string[];
@@ -30,6 +32,7 @@ type Attempt = {
   connection: RelaySnapshot;
   abort: AbortController;
   audio?: HuddleAudio;
+  transcript?: ReturnType<typeof createMicrophoneTranscript>;
   opening?: Promise<void>;
   admissions?: readonly string[];
   heartbeat?: ReturnType<typeof setInterval>;
@@ -49,7 +52,7 @@ export function createHuddles(
   dmAgent?: (
     connection: RelaySnapshot,
     destination: HuddleDestination,
-  ) => string | undefined,
+  ) => string | readonly string[] | undefined,
 ) {
   let snapshot = idle;
   let requests: ReturnType<typeof createHuddleRequests> | undefined;
@@ -295,43 +298,50 @@ export function createHuddles(
     };
     current = attempt;
     // Only a fresh start invites; joining someone else's room never adds a listener.
-    const key = discover ? dmAgent?.(connection, destination) : undefined;
+    const autoInvite = () => {
+      const result = dmAgent?.(connection, destination);
+      return typeof result === "string" ? [result] : (result ?? []);
+    };
+    const keys = discover ? autoInvite() : [];
     let invited = false;
     let inviteError: string | undefined;
-    const seated = (roomId: string) =>
-      !!key &&
+    const seated = (roomId: string, key: string) =>
       !!connection.session.channels.get?.(roomId)?.members?.includes(key);
     // Clear only this invitation's warning, once the room roster shows the agent.
     const confirmInvite = () => {
+      const roomId = snapshot.room;
       if (!inviteError || snapshot.error !== inviteError) return;
-      if (!snapshot.room || !seated(snapshot.room)) return;
+      if (!roomId || !keys.every((key) => seated(roomId, key))) return;
       inviteError = undefined;
       const { error: _invite, ...rest } = snapshot;
       update(rest);
     };
     const inviteAgent = async (roomId: string) => {
-      if (!key || invited) return;
+      if (!keys.length || invited) return;
       invited = true;
       try {
         await connection.session.channels.resolve?.([roomId]);
         if (!valid(attempt)) return;
-        if (dmAgent?.(connection, destination) !== key)
-          throw new Error("The agent is no longer available for voice");
+        const eligible = autoInvite();
         const channel = connection.session.channels.get?.(roomId);
         if (
           !channel?.huddle ||
           channel.parentChannelId !== destination.channelId
         )
           throw new Error("Couldn’t verify the Huddle room");
-        if (!seated(roomId))
-          await addChannelMember(
-            connection.session,
-            roomId,
-            key,
-            attempt.abort.signal,
-          );
+        for (const key of keys) {
+          if (!eligible.includes(key))
+            throw new Error("An agent is no longer available for voice");
+          if (!seated(roomId, key))
+            await addChannelMember(
+              connection.session,
+              roomId,
+              key,
+              attempt.abort.signal,
+            );
+        }
       } catch (error) {
-        if (!valid(attempt) || seated(roomId)) return;
+        if (!valid(attempt) || keys.every((key) => seated(roomId, key))) return;
         inviteError = `Couldn’t add the agent: ${message(error)}. Use Huddle options → Add someone to retry.`;
         update({ ...snapshot, error: inviteError });
       }
@@ -401,7 +411,54 @@ export function createHuddles(
           ? { phase: "connected", room: event.room }
           : {}),
       });
-      if (event.type === "connected") void inviteAgent(event.room);
+      if (event.type === "connected") {
+        const roomId = event.room;
+        void (async () => {
+          await connection.session.channels.resolve?.([roomId], {
+            signal: attempt.abort.signal,
+          });
+          if (!valid(attempt)) return;
+          const metadata = connection.session.channels.get?.(roomId);
+          const transcriptDestination =
+            metadata?.parentChannelId === destination.channelId &&
+            !metadata.cached
+              ? metadata.huddleTranscript
+              : undefined;
+          if (transcriptDestination) {
+            update({
+              ...snapshot,
+              destination: {
+                ...destination,
+                ...(transcriptDestination.root && {
+                  root: transcriptDestination.root,
+                }),
+              },
+              transcriptDestination,
+            });
+            const recognize = bridge.recognize;
+            if (parentAdmission && recognize)
+              attempt.transcript = createMicrophoneTranscript(
+                attempt.abort.signal,
+                (text) => {
+                  if (valid(attempt) && accessible() === "allowed")
+                    connection.session.messages.transcribe(
+                      transcriptDestination.channelId,
+                      transcriptDestination.root,
+                      text,
+                    );
+                },
+                (error) => {
+                  if (valid(attempt))
+                    update({ ...snapshot, error: message(error) });
+                },
+                (samples) => recognize(attempt.id, samples),
+              );
+          }
+          void inviteAgent(roomId);
+        })().catch(() => {
+          if (valid(attempt)) void inviteAgent(roomId);
+        });
+      }
     };
     try {
       if (discover) {
@@ -413,6 +470,7 @@ export function createHuddles(
         if (!valid(attempt)) return;
         room = rooms.find(
           (candidate) =>
+            candidate.root === destination.root &&
             !unavailable.has(`${destination.scope}:${candidate.id}`),
         )?.id;
       }
@@ -425,6 +483,7 @@ export function createHuddles(
           )
             return;
           activity(destination.viewer, samples);
+          attempt.transcript?.input(samples);
           void attempt.sender.send(samples);
         },
         () => {
@@ -527,7 +586,10 @@ export function createHuddles(
     mute() {
       if (!current || snapshot.phase !== "connected") return;
       const muted = !snapshot.muted;
-      if (muted) current.sender.clear();
+      if (muted) {
+        current.sender.clear();
+        current.transcript?.flush();
+      }
       current.audio?.mute(muted);
       if (muted && snapshot.destination)
         speakers.delete(snapshot.destination.viewer);

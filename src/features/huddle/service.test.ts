@@ -50,6 +50,7 @@ function harness(
     async () => [],
   );
   const archive = vi.fn(async () => {});
+  const transcribe = vi.fn(() => "outbox-id");
   const publish = vi.fn(async () => {});
   const writes = createOutbox(
     viewerKey.pubkey,
@@ -75,6 +76,7 @@ function harness(
     session: {
       ...store.session,
       read,
+      messages: { ...store.session.messages, transcribe },
       snapshotRead,
       relayAuthor: relayKey.pubkey,
       outbox: writes.outbox,
@@ -132,6 +134,7 @@ function harness(
     close: vi.fn(async () => {}),
     touch: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
+    recognize: vi.fn(async () => " spoken words "),
   };
   const openAudio = vi.fn<OpenHuddleAudio>(async (fn) => {
     send = fn;
@@ -140,6 +143,7 @@ function harness(
   const service = createHuddles(relay, bridge, openAudio, dmAgent);
   return {
     service,
+    transcribe,
     snapshotRead,
     archive,
     publish,
@@ -1102,3 +1106,59 @@ describe("explicit last-human hangup", () => {
     }
   });
 });
+
+it.each([undefined, "a".repeat(64)])(
+  "rejoins the verified transcript destination %s and posts one local utterance",
+  async (root) => {
+    const room = "00000000-0000-4000-8000-000000000002";
+    const transcript = {
+      channelId: destination.channelId,
+      ...(root && { root }),
+    };
+    const h = harness([
+      {
+        id: destination.channelId,
+        name: "Design",
+        members: [destination.viewer],
+      },
+      {
+        id: room,
+        name: "Huddle",
+        huddle: true,
+        parentChannelId: destination.channelId,
+        huddleTranscript: transcript,
+        members: [destination.viewer, botKey.pubkey],
+      },
+    ]);
+    try {
+      await h.service.join(destination, room);
+      h.receive({
+        type: "connected",
+        room,
+        participants: [destination.viewer, botKey.pubkey],
+      });
+      await vi.waitFor(() =>
+        expect(h.service.snapshot().transcriptDestination).toEqual(transcript),
+      );
+      const speech = new Array<number>(960).fill(0.05);
+      const silence = new Array<number>(960).fill(0);
+      for (let i = 0; i < 10; i++) h.send(speech);
+      h.receive({ type: "audio", peer: botKey.pubkey, samples: speech });
+      for (let i = 0; i < 35; i++) h.send(silence);
+      await vi.waitFor(() =>
+        expect(h.transcribe).toHaveBeenCalledWith(
+          destination.channelId,
+          root,
+          "spoken words",
+        ),
+      );
+      expect(h.transcribe).toHaveBeenCalledTimes(1);
+      h.service.mute();
+      for (let i = 0; i < 10; i++) h.send(speech);
+      for (let i = 0; i < 35; i++) h.send(silence);
+      expect(h.bridge.recognize).toHaveBeenCalledTimes(1);
+    } finally {
+      await h.dispose();
+    }
+  },
+);

@@ -40,6 +40,9 @@ export function createHuddleVoices(
     call: string,
     destination: HuddleDestination,
     room: string,
+    transcriptDestination:
+      | NonNullable<ReturnType<Huddles["snapshot"]>["transcriptDestination"]>
+      | undefined,
   ): Seat {
     const id = crypto.randomUUID();
     const abort = new AbortController();
@@ -119,7 +122,8 @@ export function createHuddleVoices(
         }, 5000);
         const opened = await voice({
           agent,
-          conversation: { channelId: room },
+          conversation: transcriptDestination ?? { channelId: room },
+          ...(transcriptDestination && { transcriptDestination }),
           signal: abort.signal,
           ended: fail,
           thinking: (active) => {
@@ -206,8 +210,23 @@ export function createHuddleVoices(
       (!huddles.voiceAgent?.() ||
         (channel.huddle === true &&
           channel.parentChannelId === destination?.channelId));
+    const transcriptDestination =
+      channel?.parentChannelId === destination?.channelId
+        ? channel?.huddleTranscript
+        : undefined;
+    const parent =
+      transcriptDestination &&
+      session.channels.get?.(transcriptDestination.channelId);
     const running = available
-      ? candidates.filter((agent) => channel.members?.includes(agent.pubkey))
+      ? candidates.filter(
+          (agent) =>
+            channel.members?.includes(agent.pubkey) &&
+            (!transcriptDestination ||
+              (agent.type === "buzz.codex/codex" &&
+                parent?.members?.includes(agent.pubkey) &&
+                !parent.archived &&
+                !parent.cached)),
+        )
       : [];
     for (const [key, seat] of seats) {
       const agent = running.find((agent) => agent.pubkey === key);
@@ -230,7 +249,10 @@ export function createHuddleVoices(
     for (const agent of running) {
       const voice = types.find((type) => type.key === agent.type)?.voice;
       if (voice && !seats.has(agent.pubkey))
-        seats.set(agent.pubkey, open(agent, voice, call.id, destination, room));
+        seats.set(
+          agent.pubkey,
+          open(agent, voice, call.id, destination, room, transcriptDestination),
+        );
     }
   }
   const stops = [

@@ -5,6 +5,7 @@ export type HuddleRoom = Readonly<{
   id: string;
   creator: string;
   startedAt: number;
+  root?: string;
 }>;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 function room(event: EventData): string | undefined {
@@ -33,12 +34,19 @@ export function recentHuddles(
     const id = room(event);
     if (event.kind !== 48100 || !id || id === parent) continue;
     const previous = starts.get(id);
+    const root = event.tags.find(
+      ([kind, value, , marker]) =>
+        kind === "e" &&
+        /^[0-9a-f]{64}$/.test(value ?? "") &&
+        marker === "reply",
+    )?.[1];
     // The initial creator's announcement owns this advisory room identity.
     if (!previous || event.created_at < previous.startedAt)
       starts.set(id, {
         id,
         creator: event.pubkey,
         startedAt: event.created_at,
+        ...(root && { root }),
       });
   }
   for (const event of scoped) {

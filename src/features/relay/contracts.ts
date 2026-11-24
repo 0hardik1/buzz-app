@@ -56,6 +56,7 @@ export type ChannelSummary = Readonly<{
   autoJoin?: true;
   /** Presentation-only parent from signed channel metadata; never grants access. */
   parentChannelId?: string | undefined;
+  huddleTranscript?: Readonly<{ channelId: string; root?: string }> | undefined;
   /** Marked Huddle room; presented through its parent conversation, not the sidebar. */
   huddle?: true;
   /** Metadata update time used for stable work-history ordering. */

@@ -1082,8 +1082,8 @@ export type ConfigBinding = Readonly<{
 export type AgentVoiceSeat<Config = unknown> = Readonly<
   {
     agent: Agent<Config>;
-    /** Always channel-scoped, regardless of the harness setting; never invent a root. */
-    conversation: Readonly<{ channelId: string }>;
+    /** The conversation that owns the work and its transcript. */
+    conversation: Readonly<{ channelId: string; root?: string }>;
     signal: AbortSignal;
     /** Final lines only: h-tag-only agent posts; own events never trigger this agent. */
     transcript(speaker: "owner" | "agent", text: string): Promise<void>;

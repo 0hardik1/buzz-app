@@ -3,11 +3,21 @@ import type { EventData } from "../relay/events";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const prefix = "Buzz Huddle (buzz.huddles/v1)\nparent:";
 export const huddleDescription = (parent: string) => `${prefix}${parent}`;
-export function huddleParent(description: string | undefined) {
+export function huddleRoomMetadata(description: string | undefined) {
   if (!description?.startsWith(prefix)) return;
-  const parent = description.slice(prefix.length);
-  return uuid.test(parent) ? parent : undefined;
+  const [parent, origin, ...extra] = description
+    .slice(prefix.length)
+    .split("\n");
+  if (!parent || !uuid.test(parent) || extra.length) return;
+  if (origin === undefined) return { parent };
+  if (origin === "transcripts:channel")
+    return { parent, transcriptDestination: { channelId: parent } };
+  const root = /^transcripts:thread:([0-9a-f]{64})$/.exec(origin)?.[1];
+  if (root)
+    return { parent, transcriptDestination: { channelId: parent, root } };
 }
+export const huddleParent = (description: string | undefined) =>
+  huddleRoomMetadata(description)?.parent;
 export const isHuddleRoom = (description: string | undefined) =>
   huddleParent(description) !== undefined;
 export function huddleRoom(event: Pick<EventData, "content">) {

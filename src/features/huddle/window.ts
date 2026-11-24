@@ -331,7 +331,14 @@ export function createHuddleWindow(
             publish(true);
             try {
               const call = huddles.snapshot();
-              if (discussion) closeDiscussion();
+              if (call.transcriptDestination) {
+                const { channelId, root } = call.transcriptDestination;
+                openLink?.(
+                  root
+                    ? `buzz://message?channel=${channelId}&id=${root}&thread=${root}`
+                    : `buzz://channel/${channelId}`,
+                );
+              } else if (discussion) closeDiscussion();
               else if (
                 call.room &&
                 call.destination &&

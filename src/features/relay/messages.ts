@@ -509,6 +509,16 @@ export function createMessages(
         ...(recovery ? [recovery] : []),
       );
     },
+    /** Speech is already delivered as audio, so it carries no wake recipients. */
+    transcribe(channelId: string, root: string | undefined, content: string) {
+      if (root && !/^[0-9a-f]{64}$/.test(root))
+        throw new Error("A valid thread root is required");
+      return writer(9, channelId).send({
+        kind: 9,
+        content: text(content),
+        tags: [["h", channelId], ...(root ? [["e", root, "", "reply"]] : [])],
+      });
+    },
     /** Forward only the reconciled row supplied by an authorized source reader. */
     forward(
       channelId: string,
