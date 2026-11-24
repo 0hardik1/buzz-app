@@ -661,6 +661,11 @@ export function EditableInput({
     // `buzz:paste-plain` sent just before its command, marks it as raw.
     let plainPaste = false;
     const editable = () => !current.current.disabled && !locked.current;
+    // A chat composer whose device keeps Markdown as typed is plain source: no
+    // typed conversion and no formatting commands, as the toolbar is hidden.
+    const markdownAsTyped = () =>
+      current.current.markdownAsTyped &&
+      current.current.markdownMode === "chat";
     // Selection events and completion read value/selection several times per
     // keystroke; projectComposerDocument memoizes per immutable document.
     const projection = () => projectComposerDocument(editor.state.doc);
@@ -2468,13 +2473,9 @@ export function EditableInput({
           // itself can be filtered out; then nothing converts. Completions
           // claim Space on keydown when a result has a spaceId, so that Space
           // never reaches this rule; a marker line has no completion trigger.
-          // A chat composer whose device keeps Markdown as typed never converts.
           if (
             from === to &&
-            !(
-              current.current.markdownAsTyped &&
-              current.current.markdownMode === "chat"
-            ) &&
+            !markdownAsTyped() &&
             (composerFenceDelimiters.has(text) ||
               composerPrefixDelimiters.has(text) ||
               composerInlineDelimiters.has(text)) &&
@@ -2533,9 +2534,11 @@ export function EditableInput({
             (current.current.markdownMode !== "document" ||
               format.mark !== "spoiler")
           ) {
-            if (!event.repeat) toggleFormat(format.mark);
+            if (!event.repeat && !markdownAsTyped()) toggleFormat(format.mark);
             return true;
           }
+          if (primary && linkBindings.some(pressed) && markdownAsTyped())
+            return true;
           if (primary && linkBindings.some(pressed)) {
             const edit = editLink();
             if (
@@ -2722,7 +2725,7 @@ export function EditableInput({
             );
             if (format) {
               event.preventDefault();
-              toggleFormat(format.mark);
+              if (!markdownAsTyped()) toggleFormat(format.mark);
               return true;
             }
             if (event.inputType.startsWith("history")) {

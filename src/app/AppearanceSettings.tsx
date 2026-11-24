@@ -499,7 +499,7 @@ export function AppearanceSettings({
             )}
             <SwitchPreferenceRow
               label="Keep Markdown as you type it"
-              description="Leaves **bold**, `code`, lists and other Markdown as plain characters in the message box instead of formatting them as you type. Sent messages still show the formatting."
+              description="Bold, code, lists and other Markdown stay as plain characters until you send. The formatting toolbar and shortcuts won’t work in the message box."
               checked={markdownAsTyped.enabled}
               onCheckedChange={setMarkdownAsTypedPreference}
             />

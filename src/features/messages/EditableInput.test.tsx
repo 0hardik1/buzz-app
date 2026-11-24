@@ -592,6 +592,12 @@ it("keeps typed Markdown as literal source while this device opts out of convers
     await h.user.keyboard("`x` ~~y~~{Enter}- one{Enter}> q{Enter}```");
     expect(h.input.querySelector("code, s, ul, blockquote, pre")).toBeNull();
     expect(h.markdown()).toBe("`x` ~~y~~\n- one\n> q\n```");
+    // Formatting shortcuts do nothing, as the toolbar is hidden.
+    for (const key of ["b", "i"])
+      expect(fireEvent.keyDown(h.input, { key, ctrlKey: true })).toBe(false);
+    await h.user.keyboard("z");
+    expect(h.input.querySelector("strong, em")).toBeNull();
+    expect(h.markdown()).toBe("`x` ~~y~~\n- one\n> q\n```z");
     // The unclosed literal fence would make later lines code; start over.
     act(() => h.input.reset(mentionDraft("")));
     await h.user.keyboard("**Hello**");

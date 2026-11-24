@@ -52,7 +52,7 @@ export function setMarkdownAsTypedPreference(enabled: boolean): void {
 export const markdownAsTypedSetting: DeviceSetting = {
   key: "conversations.markdown_as_typed",
   description:
-    "Keeps Markdown you type in messages as plain characters instead of formatting it as you type.",
+    "Keeps Markdown typed in messages as plain characters until sent, without the formatting toolbar or shortcuts.",
   schema: { type: "boolean" },
   applies:
     "Only typing in the message box; sent messages still render Markdown.",
