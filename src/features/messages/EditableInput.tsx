@@ -2537,9 +2537,7 @@ export function EditableInput({
             if (!event.repeat && !markdownAsTyped()) toggleFormat(format.mark);
             return true;
           }
-          if (primary && linkBindings.some(pressed) && markdownAsTyped())
-            return true;
-          if (primary && linkBindings.some(pressed)) {
+          if (primary && !markdownAsTyped() && linkBindings.some(pressed)) {
             const edit = editLink();
             if (
               edit &&

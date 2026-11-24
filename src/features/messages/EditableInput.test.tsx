@@ -595,6 +595,8 @@ it("keeps typed Markdown as literal source while this device opts out of convers
     // Formatting shortcuts do nothing, as the toolbar is hidden.
     for (const key of ["b", "i"])
       expect(fireEvent.keyDown(h.input, { key, ctrlKey: true })).toBe(false);
+    // The link chord isn't consumed, so app shortcuts such as Search still get it.
+    expect(fireEvent.keyDown(h.input, { key: "k", ctrlKey: true })).toBe(true);
     await h.user.keyboard("z");
     expect(h.input.querySelector("strong, em")).toBeNull();
     expect(h.markdown()).toBe("`x` ~~y~~\n- one\n> q\n```z");
