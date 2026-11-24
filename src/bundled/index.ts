@@ -77,6 +77,8 @@ import * as performanceDiagnostics from "./performance-diagnostics";
 
 import docsManifest from "./docs/manifest.json";
 import * as docs from "./docs";
+import canvasManifest from "./canvas/manifest.json";
+import * as canvas from "./canvas";
 
 import relayNotesManifest from "./relay-notes/manifest.json";
 import * as relayNotes from "./relay-notes";
@@ -183,6 +185,11 @@ export const bundledPlugins: readonly BundledPlugin[] = [
   {
     manifest: { ...docsManifest, apiVersion: 1 },
     module: docs,
+    enabledByDefault: false,
+  },
+  {
+    manifest: { ...canvasManifest, apiVersion: 1 },
+    module: canvas,
     enabledByDefault: false,
   },
   {

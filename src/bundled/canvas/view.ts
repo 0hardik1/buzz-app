@@ -19,6 +19,9 @@ export type CanvasViewType<S = unknown> = {
   parse(input: unknown): S | undefined;
   /** One line telling an agent what the view shows. Agents never see pixels. */
   describe(state: S): string;
+  /** The state of a new, empty view. With it people can add one from the
+   * canvas; without it only agents can open one. */
+  initial?: S;
   component: ComponentType<CanvasViewProps<S>>;
 };
 
