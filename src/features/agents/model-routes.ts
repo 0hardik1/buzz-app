@@ -167,8 +167,11 @@ let cache = new Map<
   Readonly<{ routes: HarnessRoutes; owners: ReadonlyMap<string, ModelRouter> }>
 >();
 const listeners = new Set<() => void>();
+// Counts the times the routes may have changed, for lists that hold them.
+let generation = 0;
 const changed = () => {
   cache = new Map();
+  generation++;
   for (const listener of listeners) listener();
 };
 
@@ -253,6 +256,9 @@ export function subscribeRoutes(listener: () => void) {
     listeners.delete(listener);
   };
 }
+/** A number that changes whenever any harness's routes may have: lists
+ * that hold routes in their models, as the composer's do, list again. */
+export const routesGeneration = () => generation;
 /** The routes for `harness`, rendering again when they change. */
 export function useModelRoutes(harness: string) {
   return useSyncExternalStore(
