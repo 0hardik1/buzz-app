@@ -56,7 +56,7 @@ export const sidebarTourPages: readonly TourPage[] = [
     id: "resize",
     title: "Resize a workspace",
     description:
-      "Drag the handle under a workspace to show more or fewer rows.",
+      "Drag the handle to show more or fewer rows. Double-click it to show all.",
     visual: (
       <SchematicScene>
         <SchematicCard
@@ -65,30 +65,6 @@ export const sidebarTourPages: readonly TourPage[] = [
           grip={
             <SchematicGrip tone="accent">
               <SchematicPointer motion="drag" />
-            </SchematicGrip>
-          }
-        >
-          <SchematicRow lead="channel" />
-          <SchematicRow lead="person" />
-          <SchematicRow lead="chat" />
-          <SchematicRow lead="channel" />
-          <SchematicRow lead="person" />
-        </SchematicCard>
-      </SchematicScene>
-    ),
-  },
-  {
-    id: "show-all",
-    title: "See everything at once",
-    description: "Double-click the handle under a workspace to show all of it.",
-    visual: (
-      <SchematicScene>
-        <SchematicCard
-          visibleRows={2}
-          motion="expand"
-          grip={
-            <SchematicGrip tone="accent">
-              <SchematicPointer motion="double-tap" />
             </SchematicGrip>
           }
         >
