@@ -358,7 +358,7 @@ function ActiveHuddle({
           session={connection.session}
           channelId={call.room}
           title="Huddle members"
-          description="People added here can join this Huddle and its thread. The original chat stays private."
+          description="Only members of the original conversation can be added to this Huddle."
           close={() => setMembersOpen(false)}
           trigger={trigger}
         />
