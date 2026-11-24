@@ -641,7 +641,7 @@ function ThreadMessages({
       if (channel?.readOnly && !channel.cached) {
         return channel.channelType === "stream" ||
           channel.channelType === "forum" ||
-          (channel.channelType === "solo" && channel.joinRole === "guest")
+          (channel.visibility === "public" && channel.joinRole === "guest")
           ? "joinable"
           : "preview";
       }
