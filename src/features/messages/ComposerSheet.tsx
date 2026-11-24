@@ -16,6 +16,7 @@ import {
 import { activeModal } from "../../shared/design-system/overlayLayer";
 import { DialogBarMaterial } from "../../shared/design-system/ui/DialogBarMaterial";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { TypingDots } from "../../shared/design-system/ui/TypingDots";
 import { useFinalFocusUnlessMoved } from "../../shared/design-system/ui/finalFocus";
 import type { ComposerOverlayHost } from "./composer-overlay";
 import {
@@ -165,15 +166,151 @@ const milliseconds = (value: string) =>
     ? Number.parseFloat(value)
     : Number.parseFloat(value) * 1000;
 
+/** The quick open's motion. It takes the sheet from a box just
+ * around the composer to its full height using only transforms, which WebKit
+ * runs on the compositor, so the thread mounting under it can't stall it: the
+ * surface slides up inside a clip at its final bottom edge
+ * (`data-sheet-clip`) while everything in it slides back down by the same
+ * amount, so nothing in it, the composer included, moves on screen; only the
+ * top edge rises. */
+export const QUICK_OPEN_MS = 150;
+// An even ease-out (quadratic): it slows steadily and is still visibly moving
+// in its last frames, rather than covering nine tenths of the way in the first
+// third and then creeping, which reads as stopping short and then hopping.
+const QUICK_OPEN_EASING = "cubic-bezier(0.5, 1, 0.89, 1)";
+const reveals = new WeakMap<HTMLElement, Animation[]>();
+function stopReveal(element: HTMLElement) {
+  for (const animation of reveals.get(element) ?? []) animation.cancel();
+  reveals.delete(element);
+  delete element.parentElement?.dataset.moving;
+}
+function revealFrom(
+  element: HTMLElement,
+  visible: number,
+  onFinish: () => void,
+) {
+  stopReveal(element);
+  const distance = Math.round(element.offsetHeight - visible);
+  if (distance < 1 || typeof element.animate !== "function" || immediate())
+    return onFinish();
+  const clip = element.parentElement;
+  if (clip) clip.dataset.moving = "";
+  const options: KeyframeAnimationOptions = {
+    duration: QUICK_OPEN_MS,
+    easing: QUICK_OPEN_EASING,
+  };
+  const surface = element.animate(
+    [{ transform: `translateY(${distance}px)` }, { transform: "none" }],
+    options,
+  );
+  const animations = [
+    surface,
+    ...[...element.children].map((child) =>
+      child.animate(
+        [{ transform: `translateY(${-distance}px)` }, { transform: "none" }],
+        options,
+      ),
+    ),
+  ];
+  reveals.set(element, animations);
+  surface.finished.then(
+    () => {
+      if (reveals.get(element) !== animations) return;
+      reveals.delete(element);
+      if (clip) delete clip.dataset.moving;
+      onFinish();
+    },
+    () => {},
+  );
+}
+
+/** The quick open's handoff. The view's composer stays where it
+ * is, drawn over the sheet, while its placeholder turns into the thread's in
+ * place. The thread mounts hidden under it and is drawn all at once, rows and
+ * reply box in one frame, once the open motion has finished and its rows are
+ * in. */
+function useQuickHandoff(
+  sheet: HTMLElement | null,
+  source: HTMLElement,
+  enabled: boolean,
+  placeholder: string | undefined,
+) {
+  useLayoutEffect(() => {
+    if (!sheet || !enabled) return;
+    source.dataset.composerAbove = "";
+    if (placeholder) {
+      source.style.setProperty(
+        "--thread-placeholder",
+        JSON.stringify(placeholder),
+      );
+      source.dataset.threadPlaceholder = "";
+    }
+    let revealed = false;
+    const check = () => {
+      if (revealed) return;
+      // The reply box names whom it replies to; follow it if it differs.
+      const box = sheet.querySelector<HTMLElement>(
+        "[data-message-composer] [data-placeholder]",
+      );
+      const named = box?.dataset.placeholder;
+      if (named && named !== placeholder) {
+        source.style.setProperty("--thread-placeholder", JSON.stringify(named));
+        source.dataset.threadPlaceholder = "";
+      }
+      if (!sheet.hasAttribute("data-opened")) return;
+      const ready = sheet.querySelector(
+        "[data-message-scroller]:is([data-thread-drawable=read]:not([data-positioning]), [data-thread-drawable=empty])",
+      );
+      if (!ready || !sheet.querySelector("[data-message-composer]")) return;
+      revealed = true;
+      // One frame: the rows and reply box show, the view's composer hides.
+      sheet.dataset.revealed = "";
+      source.dataset.composerCovered = "";
+      delete source.dataset.composerAbove;
+      observer.disconnect();
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(sheet, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: [
+        "data-opened",
+        "data-thread-drawable",
+        "data-positioning",
+      ],
+    });
+    check();
+    return () => {
+      observer.disconnect();
+      delete source.dataset.composerAbove;
+      delete source.dataset.composerCovered;
+      delete source.dataset.threadPlaceholder;
+      source.style.removeProperty("--thread-placeholder");
+    };
+  }, [sheet, source, enabled, placeholder]);
+}
+
 /** Grows the sheet up out of the composer as it opens and folds it back down
  * into the composer as it closes. Base UI owns the unmount timing. A media
  * sheet uses an interruptible CSS transition instead. */
 function useGrowth() {
   const last = useRef<{ open: boolean; animation?: Animation }>(undefined);
-  return (element: HTMLElement, open: boolean, mounting = false) => {
+  return (
+    element: HTMLElement,
+    open: boolean,
+    mounting = false,
+    still = false,
+  ) => {
     if (mounting) last.current = undefined;
     const previous = last.current;
     if (previous?.open === open) return;
+    stopReveal(element);
+    // A quick open runs its own reveal (`revealFrom`).
+    if (still) {
+      last.current = { open };
+      return;
+    }
     // Keep layout at its final size; reveal the surface without stretching
     // its text or editor.
     const painted = getComputedStyle(element);
@@ -495,7 +632,11 @@ export function ComposerSheet({
   onOpenAsTab,
   spotlight,
   onSpotlightAnchor,
+  quick,
 }: {
+  /** A thread's quick open, and the placeholder its reply box will
+   * show, which the view's composer turns into in place. */
+  quick?: { placeholder?: string | undefined } | undefined;
   open: boolean;
   onOpenChange(open: boolean): void;
   host: ComposerOverlayHost;
@@ -533,7 +674,13 @@ export function ComposerSheet({
   const style = useDockGeometry(dock, mounted);
   useCoveredComposer(composer, mounted, containsComposer, readerOnly);
   useHeldPane(dock, mounted);
-  useComposerHandoff(surface, composer, open, containsComposer);
+  useComposerHandoff(surface, composer, open, containsComposer && !quick);
+  useQuickHandoff(
+    surface,
+    composer,
+    open && !!quick && containsComposer,
+    quick?.placeholder,
+  );
   useStackedHeight(surface, dock, open && !containsComposer, readerOnly);
   const popup = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
@@ -567,69 +714,106 @@ export function ComposerSheet({
           className={styles.scrim}
           style={style.scrim}
         />
-        <BaseDialog.Popup
-          ref={(element) => {
-            // React reattaches this callback each render; grow once per mount.
-            if (element && element !== grown.current) {
-              grown.current = element;
-              setSurface(element);
-              grow(element, true, true);
+        <SheetClip quick={!!quick}>
+          <BaseDialog.Popup
+            ref={(element) => {
+              // React reattaches this callback each render; grow once per mount.
+              if (element && element !== grown.current) {
+                grown.current = element;
+                setSurface(element);
+                if (quick) {
+                  grow(element, true, true, true);
+                  // From a box a ring's width around the composer.
+                  const sheetBox = element.getBoundingClientRect();
+                  const composerBox = composer.getBoundingClientRect();
+                  const ring = composerBox.left - sheetBox.left;
+                  revealFrom(
+                    element,
+                    sheetBox.bottom - composerBox.top + ring,
+                    () => {
+                      element.dataset.opened = "";
+                    },
+                  );
+                } else grow(element, true, true);
+              }
+              popup.current = element;
+              focus.ref(element);
+            }}
+            className={styles.sheet}
+            data-details-sheet-surface=""
+            data-contained-composer={containsComposer || undefined}
+            data-reader-only={readerOnly || undefined}
+            data-tall={tall || undefined}
+            data-quick={quick ? "" : undefined}
+            // Threads and details fit their content and grow with it, up to the
+            // maximum; a panel takes the full height (`data-reader-only`).
+            data-height="content"
+            style={style.sheet}
+            // A thread places focus in its reply box; a reader takes it itself.
+            initialFocus={containsComposer ? false : popup}
+            finalFocus={focus.finalFocus}
+            // A panel under its header shows that header's material once
+            // scrolled.
+            onScrollCapture={
+              readerOnly
+                ? (event) =>
+                    event.currentTarget.toggleAttribute(
+                      "data-scrolled",
+                      event.target instanceof Element &&
+                        event.target.scrollTop > 0,
+                    )
+                : undefined
             }
-            popup.current = element;
-            focus.ref(element);
-          }}
-          className={styles.sheet}
-          data-details-sheet-surface=""
-          data-contained-composer={containsComposer || undefined}
-          data-reader-only={readerOnly || undefined}
-          data-tall={tall || undefined}
-          // Threads and details fit their content and grow with it, up to the
-          // maximum; a panel takes the full height (`data-reader-only`).
-          data-height="content"
-          style={style.sheet}
-          // A thread places focus in its reply box; a reader takes it itself.
-          initialFocus={containsComposer ? false : popup}
-          finalFocus={focus.finalFocus}
-          // A panel under its header shows that header's material once
-          // scrolled.
-          onScrollCapture={
-            readerOnly
-              ? (event) =>
-                  event.currentTarget.toggleAttribute(
-                    "data-scrolled",
-                    event.target instanceof Element &&
-                      event.target.scrollTop > 0,
-                  )
-              : undefined
-          }
-        >
-          <div className={styles.content}>
-            <SheetHeader
-              title={title}
-              description={description}
-              leading={leading}
-              closeLabel={closeLabel}
-              material={containsComposer || readerOnly}
-              onMoveToTab={onMoveToTab}
-              onOpenAsTab={onOpenAsTab}
-              spotlight={spotlight}
-              onSpotlightAnchor={onSpotlightAnchor}
-              covered={tall}
-            />
-            <div
-              className={`buzz-dialog-body ${styles.body}`}
-              data-sheet-body=""
-            >
-              <div className={styles.reader}>{children}</div>
+          >
+            <div className={styles.content}>
+              <SheetHeader
+                title={title}
+                description={description}
+                leading={leading}
+                closeLabel={closeLabel}
+                material={containsComposer || readerOnly}
+                onMoveToTab={onMoveToTab}
+                onOpenAsTab={onOpenAsTab}
+                spotlight={spotlight}
+                onSpotlightAnchor={onSpotlightAnchor}
+                covered={tall}
+              />
+              <div
+                className={`buzz-dialog-body ${styles.body}`}
+                data-sheet-body=""
+              >
+                <div className={styles.reader}>{children}</div>
+              </div>
             </div>
-          </div>
-          {/* The composer shows through here, inside the sheet's ring. */}
-          {!containsComposer && !readerOnly && (
-            <div className={styles.composerSpace} aria-hidden="true" />
-          )}
-        </BaseDialog.Popup>
+            {quick && (
+              <div className={styles.quickLoader} aria-hidden="true">
+                <TypingDots />
+              </div>
+            )}
+            {/* The composer shows through here, inside the sheet's ring. */}
+            {!containsComposer && !readerOnly && (
+              <div className={styles.composerSpace} aria-hidden="true" />
+            )}
+          </BaseDialog.Popup>
+        </SheetClip>
       </BaseDialog.Portal>
     </SheetRoot>
+  );
+}
+
+/** Clips the quick open's motion at the sheet's bottom edge. */
+function SheetClip({
+  quick,
+  children,
+}: {
+  quick: boolean;
+  children: ReactNode;
+}) {
+  if (!quick) return children;
+  return (
+    <div className={styles.sheetClip} data-sheet-clip="">
+      {children}
+    </div>
   );
 }
 
