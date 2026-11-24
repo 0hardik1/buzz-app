@@ -2049,7 +2049,9 @@ function Composer({
         const current = viewRevision(scope, draftKey);
         if (current !== undefined) {
           setAccepted(undefined);
-          loadSaved(current);
+          // The retirement transaction can settle before React renders the
+          // cleared acceptance. Keep the in-memory follow-up we already own.
+          if (current !== revision.current || restored) loadSaved(current);
           if (!stickyPicks && restored && current === JSON.stringify(restored))
             setPicks(recoveredPicks ?? {});
         }
