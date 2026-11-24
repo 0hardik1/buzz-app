@@ -43,6 +43,7 @@ import {
 } from "../solo/default-lifetime";
 import { canonicalDetailsName } from "../relay/channel-details-protocol";
 import { relativeTimestamp } from "../../shared/relative-timestamp";
+import type { Profile } from "../relay/contracts";
 import {
   useVerifiedNames,
   withVerifiedNames,
@@ -173,7 +174,16 @@ export function NewMessage({
   workspace,
   starred,
   solo,
+  dmIdentity,
 }: {
+  /** The picked people's identity as their DM shows in the sidebar. */
+  dmIdentity?:
+    | ((identity: {
+        members: readonly string[];
+        profiles: ReadonlyMap<string, Profile>;
+        fallback: string;
+      }) => ReactNode)
+    | undefined;
   /** A new Solo chat, shown while no person is picked: with the agent picked
    * in To, or the default one, and the page's title as its name. */
   solo?:
@@ -695,7 +705,6 @@ export function NewMessage({
     if (unknown.size)
       void session.profiles.ensure([...unknown]).catch(() => {});
   }, [channels, recipients, session, profiles, onOpenChat]);
-  const namedLabel = `With ${peopleNames}`;
   const openNamed = (channelId: string) => {
     if (!locked) onOpenChat?.(channelId);
   };
@@ -769,18 +778,21 @@ export function NewMessage({
                   shape: "circle",
                 }))}
               />
-              <NavigationSection label={namedLabel}>
+              <NavigationSection>
+                {/* Their DM as the sidebar shows it, new or with history. */}
                 <NavigationItem
-                  label="Direct message"
+                  label={existing?.name || people.map((p) => p.name).join(", ")}
+                  icon={dmIdentity?.({
+                    members: people.map((person) => person.pubkey),
+                    profiles,
+                    fallback: peopleNames,
+                  })}
                   selected={direct}
                   aria-current={false}
                   aria-pressed={existing ? undefined : direct}
                   disabled={locked}
-                  trailing={
-                    existing?.lastActivityAt
-                      ? relativeTimestamp(existing.lastActivityAt)
-                      : undefined
-                  }
+                  trailing="Direct message"
+                  aria-label={`Direct message with ${peopleNames}`}
                   onClick={() => {
                     if (existing) openNamed(existing.id);
                     else {
