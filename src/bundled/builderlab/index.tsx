@@ -70,8 +70,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
   }
   const session = dev?.session ?? createNativeSession(ctx.federatedIdentity);
   ctx.effect(() => () => session.dispose());
-  // Remote agents use the sign-in server of the community in view; the rest
-  // of Builderlab stays with the build's.
+  // Remote agents and speech use the sign-in server of the community in view;
+  // the rest of Builderlab stays with the build's.
   const agentSession = dev
     ? session
     : followCommunity(session, ctx.federatedIdentity, ctx.relay);
@@ -211,9 +211,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
       dev?.decide,
       openIdentity,
     );
+    // Speech bills the community in view, so like remote agents it signs in
+    // at that community's server: a Builderlab customer's has its own.
     offerBuilderlabSpeech(
       ctx,
-      session,
+      agentSession,
       loginAvailable,
       dev?.connectSpeech,
       openIdentity,

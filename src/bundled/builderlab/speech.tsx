@@ -1,6 +1,7 @@
 // Builderlab as a speech provider: native code posts the host's WebRTC offer
-// to Builderlab's transcription route with the user's Builderlab sign-in and
-// the community the call bills, and Builderlab answers it. The NIP-FI session
+// to the transcription route of the Builderlab that the billed community signs
+// in at, with the user's sign-in there and that community, and Builderlab
+// answers it. Its session follows the community in view, as remote agents do. The NIP-FI session
 // is named by its revision; its token never leaves native. It is offered
 // while the user is signed in, and ready only while that account may use
 // transcription, as Builderlab decisions are; see `offerBuilderlabSpeech`.

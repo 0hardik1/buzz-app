@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { Context } from "@deepseek-ai/cordis";
 import { afterEach, expect, it, vi } from "vitest";
+import { federatedFixture } from "../../features/federated-identity/testing";
 import { flush } from "../../features/relay/testing";
 import { SpeechService } from "../../features/speech/service";
-import type { Credential } from "./session";
+import {
+  createNativeSession,
+  followCommunity,
+  type Credential,
+} from "./session";
 import {
   builderlabSpeechProvider,
   nativeBuilderlabSpeech,
@@ -185,4 +190,62 @@ it("offers Builderlab while signed in, and listens with it while the account may
   await browser.await();
   await flush();
   expect(keys()).toEqual(["on-device"]);
+});
+
+it("listens with the sign-in of the community in view, a Builderlab customer's own", async () => {
+  const build = federatedFixture("build");
+  const peer = federatedFixture("peer");
+  const authority = peer.service.snapshot().authority;
+  if (!authority) throw new Error("Missing fixture authority");
+  peer.publish({
+    authority: {
+      ...authority,
+      id: "bb-block",
+      identityOrigin: "https://block.example",
+      apiBasePath: "/api/goose/",
+    },
+  });
+  const identity = {
+    ...build.service,
+    forCommunity: (origin: string) =>
+      origin === "wss://buzz.block.example" ? peer.service : build.service,
+  };
+  const relay = {
+    snapshot: () => ({}),
+    selected: () => "wss://buzz.block.example",
+    subscribe: () => () => {},
+  };
+  const account = (subject: string, transcription: boolean) => ({
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      subject,
+      capabilities: { can_use_hosted_transcription: transcription },
+    }),
+  });
+  // The build's server (bb-public) offers no hosted speech; the community's does.
+  build.request.mockImplementation(async ({ relay: named }) =>
+    account(named ? "block" : "public", !!named),
+  );
+  build.publish({ status: "signed-in", revision: "build:1" });
+  peer.publish({ status: "signed-in", revision: "peer:1" });
+  const session = createNativeSession(identity);
+  const community = followCommunity(session, identity, relay);
+  const native = vi.fn<BuilderlabSpeechConnect>(async () => ({
+    outcome: "answered",
+    sdp: "v=0 answer",
+  }));
+  const provider = builderlabSpeechProvider(community, true, native);
+  await expect.poll(() => provider.status()).toBe("ready");
+  const call = { ...request, community: "wss://buzz.block.example" };
+  await expect(provider.connect(call, { signal })).resolves.toEqual({
+    outcome: "answered",
+    sdp: "v=0 answer",
+  });
+  expect(native).toHaveBeenCalledWith(
+    call,
+    expect.objectContaining({ revision: "peer:1" }),
+  );
+  community.dispose();
+  session.dispose();
 });

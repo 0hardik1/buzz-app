@@ -6,10 +6,12 @@
 //! - Hosted providers transcribe over WebRTC. The webview holds the peer
 //!   connection, since it has the microphone, and sends its SDP offer here.
 //!   `speech_connect` answers it through the provider: `builderlab` posts it
-//!   to the build's Builderlab (`v3/builderlab/transcription/calls`) with the
-//!   same sign-in decisions send (an FI build's native NIP-FI session, or the
-//!   live development broker's) and the community the call bills. Builderlab
-//!   answers with OpenAI's SDP, and audio then streams peer to peer.
+//!   to `v3/builderlab/transcription/calls` at the Builderlab of the community
+//!   the call bills, with that community in `x-buzz-community`. An FI build
+//!   signs in with the community's NIP-FI session (a Builderlab customer's
+//!   community has its own server, as remote agents use); live development
+//!   uses the broker's sign-in. Builderlab answers with OpenAI's SDP, and
+//!   audio then streams peer to peer.
 //! - On-device: Apple speech (`speech.swift`, linked in by build.rs) on macOS,
 //!   the free fallback. It runs one listen at a time and sends its events to
 //!   the webview on the channel it passed.
@@ -315,6 +317,16 @@ fn federated_sign_in(
     .flatten()
 }
 
+/// The sign-in server of the community (its relay URL) a call bills: a
+/// Builderlab customer's community has its own, and any other the build's.
+pub(crate) fn community_server(
+    fi: &FederatedIdentity,
+    community: &str,
+) -> Option<FederatedIdentity> {
+    let relay = crate::federated_identity::config::canonical_relay(community).ok()?;
+    fi.server_for(&relay).ok()
+}
+
 /// Answers a hosted provider's WebRTC offer. An FI build names its native
 /// session by `federated` revision, and the token stays here; only that
 /// session may answer, so a sign-out or account switch during the call drops
@@ -340,7 +352,20 @@ pub(crate) async fn speech_connect(
         if broker.is_some() {
             return Err("Invalid federated session".into());
         }
-        let Some((cancel, endpoint, sign_in)) = federated_sign_in(&fi, &revision) else {
+        // The community's own sign-in server answers: a Builderlab
+        // customer's community bills, and transcribes, at its server, not
+        // the build's.
+        let Some(community) = request.community.as_deref() else {
+            return Ok(Connected::Failed {
+                reason: Failure::InvalidRequest,
+            });
+        };
+        let Some(server) = community_server(&fi, community) else {
+            return Ok(Connected::Failed {
+                reason: Failure::InvalidRequest,
+            });
+        };
+        let Some((cancel, endpoint, sign_in)) = federated_sign_in(&server, &revision) else {
             return Ok(missing);
         };
         let Some(endpoint) = endpoint else {
@@ -349,15 +374,14 @@ pub(crate) async fn speech_connect(
         let connected = tokio::select! {
             biased;
             () = cancel.cancelled() => return Ok(missing),
-            connected = builderlab::connect(&endpoint, &sign_in, &request.offer, request.community.as_deref(), request.max_seconds, timeout) => connected,
+            connected = builderlab::connect(&endpoint, &sign_in, &request.offer, Some(community), request.max_seconds, timeout) => connected,
         };
         if cancel.is_cancelled() {
             return Ok(missing);
         }
         return Ok(match connected {
             Err(builderlab::Refused::SessionExpired) => {
-                let fi = fi.inner().clone();
-                tokio::spawn(async move { fi.recheck(&revision).await });
+                tokio::spawn(async move { server.recheck(&revision).await });
                 Connected::Failed {
                     reason: Failure::Unauthorized,
                 }
