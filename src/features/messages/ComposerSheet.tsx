@@ -111,6 +111,46 @@ function useDockGeometry(dock: HTMLElement, mounted: boolean) {
   return style;
 }
 
+/** A layer over another sheet's composer grows that sheet to fit it: while
+ * open, details publish the height their content needs, whatever height they
+ * fill now, to the sheet beneath; a panel asks for the full height. */
+function useStackedHeight(
+  popup: HTMLElement | null,
+  dock: HTMLElement,
+  enabled: boolean,
+  full: boolean,
+) {
+  useLayoutEffect(() => {
+    const beneath = dock.parentElement?.closest<HTMLElement>(
+      "[data-details-sheet-surface]",
+    );
+    const body = popup?.querySelector<HTMLElement>("[data-sheet-body]");
+    const content = body?.parentElement;
+    const header = content?.firstElementChild;
+    if (!enabled || !popup || !beneath || !body || !content || !header) return;
+    // Details fill the height they are given; their content needs the header,
+    // the whole body, and what lies outside the content: the composer's space.
+    const update = () =>
+      beneath.style.setProperty(
+        "--layer-height",
+        full
+          ? "var(--sheet-max-height)"
+          : `${popup.offsetHeight - content.offsetHeight + header.getBoundingClientRect().height + body.scrollHeight}px`,
+      );
+    update();
+    const observer =
+      full || typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(update);
+    observer?.observe(popup);
+    if (body.firstElementChild) observer?.observe(body.firstElementChild);
+    return () => {
+      observer?.disconnect();
+      beneath.style.removeProperty("--layer-height");
+    };
+  }, [popup, dock, enabled, full]);
+}
+
 const immediate = () =>
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
   document.documentElement.hasAttribute("data-keyboard-navigation");
@@ -283,6 +323,7 @@ export function SheetHeader({
   onOpenAsTab,
   spotlight,
   onSpotlightAnchor,
+  covered = false,
 }: {
   title: ReactNode;
   description?: ReactNode;
@@ -295,9 +336,12 @@ export function SheetHeader({
   onOpenAsTab?: (() => void) | undefined;
   spotlight?: InlineThreadIntroStep | undefined;
   onSpotlightAnchor?: ((element: HTMLElement | null) => void) | undefined;
+  /** A layer covers it: its controls leave the focus order as well as the
+   * pointer's reach, so a hidden Close can't dismiss both. */
+  covered?: boolean | undefined;
 }) {
   return (
-    <header className={`buzz-dialog-header ${styles.header}`}>
+    <header className={`buzz-dialog-header ${styles.header}`} inert={covered}>
       {material && <DialogBarMaterial className={styles.headerMaterial} />}
       <div className={styles.byline}>
         {leading}
@@ -459,8 +503,8 @@ export function ComposerSheet({
   /** A panel: it takes the full height and covers the composer, which it
    * leaves untouched underneath. */
   readerOnly?: boolean;
-  /** Takes the full height while true, as a thread does under a panel, and
-   * settles back to its content after. */
+  /** A layer sits over it: it grows to fit that layer and its covered header
+   * is inert, then settles back to its content after. */
   tall?: boolean;
   /** Once a close has finished its motion. */
   onClosed?: (() => void) | undefined;
@@ -480,7 +524,9 @@ export function ComposerSheet({
   const [surface, setSurface] = useState<HTMLDivElement | null>(null);
   const style = useDockGeometry(dock, mounted);
   useCoveredComposer(composer, mounted, containsComposer, readerOnly);
+  useHeldPane(dock, mounted);
   useComposerHandoff(surface, composer, open, containsComposer);
+  useStackedHeight(surface, dock, open && !containsComposer, readerOnly);
   const popup = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
   const grown = useRef<HTMLDivElement | null>(null);
@@ -511,7 +557,6 @@ export function ComposerSheet({
           ref={backdrop}
           forceRender
           className={styles.scrim}
-          data-panel={readerOnly || undefined}
           style={style.scrim}
         />
         <BaseDialog.Popup
@@ -561,8 +606,12 @@ export function ComposerSheet({
               onOpenAsTab={onOpenAsTab}
               spotlight={spotlight}
               onSpotlightAnchor={onSpotlightAnchor}
+              covered={tall}
             />
-            <div className={`buzz-dialog-body ${styles.body}`}>
+            <div
+              className={`buzz-dialog-body ${styles.body}`}
+              data-sheet-body=""
+            >
               <div className={styles.reader}>{children}</div>
             </div>
           </div>
@@ -574,6 +623,25 @@ export function ComposerSheet({
       </BaseDialog.Portal>
     </SheetRoot>
   );
+}
+
+// Sheets drawn in each pane's dock: one may still be closing as the next opens.
+const heldPanes = new WeakMap<HTMLElement, number>();
+/** Marks the pane `dock` is in (`data-holds-sheet`) while a sheet is drawn in
+ * the dock, so the reader under the sheet hides its jump control. */
+function useHeldPane(dock: HTMLElement, mounted: boolean) {
+  useLayoutEffect(() => {
+    const pane = dock.parentElement;
+    if (!mounted || !pane) return;
+    heldPanes.set(pane, (heldPanes.get(pane) ?? 0) + 1);
+    pane.dataset.holdsSheet = "";
+    return () => {
+      const held = (heldPanes.get(pane) ?? 1) - 1;
+      if (held) return void heldPanes.set(pane, held);
+      heldPanes.delete(pane);
+      delete pane.dataset.holdsSheet;
+    };
+  }, [dock, mounted]);
 }
 
 /** The view's own composer stays usable under a details reader; a sheet's

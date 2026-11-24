@@ -24,6 +24,7 @@ import { TypingPresentation } from "../conversation/typing-presentation";
 import { useTypingBroadcast } from "./useTypingBroadcast";
 import { TypingIndicator } from "./TypingIndicator";
 import { useComposerDockRef, useComposerScope } from "./composer-overlay";
+import { useComposerWrites } from "./composer-writes";
 import { LayerAddressContext, layerInView } from "./view-layer";
 import { retireReplyTarget, threadDraftKey } from "./reply-target";
 import { useEffectEvent } from "react";
@@ -629,10 +630,10 @@ function Composer({
     (channel) => !!channel && !channel.readOnly && !channel.archived,
   );
   const readOnly = !submission && !!session.channels?.get && !writable;
-  const cached = useListedChannel(
-    listed,
+  const { cached, readingOnly } = useComposerWrites(
+    session,
     channelId,
-    (channel) => !!channel?.cached,
+    soloConversation,
   );
   const disabled = requestedDisabled || readOnly;
   const [sending, setSending] = useState(false);
@@ -4004,7 +4005,19 @@ function Composer({
       }
     }
   }
-  const readingOnly = !outbox?.supports(9) && !cached;
+  const isEmptyForShortcuts = () =>
+    !editingDisabled &&
+    !editDisabled &&
+    !submission &&
+    !editing.target &&
+    ((valueRef.current.text === "" &&
+      !valueRef.current.recipients.length &&
+      composerMarkdown(valueRef.current) === "") ||
+      automaticTag.current === JSON.stringify(valueRef.current)) &&
+    !valueRef.current.chatCards?.length &&
+    !valueRef.current.forward &&
+    !valueRef.current.gifs?.length &&
+    !attachments.items.length;
   // The attachments section animates out over 150 ms; the form's gap and
   // padding (data-attachments) collapse when it has, not when the list empties.
   // An edit unmounts the section at once, so no exit completes during one.
@@ -4388,6 +4401,7 @@ function Composer({
             )}
             <div className={styles.composerInput}>
               <RichComposerInput
+                isEmptyForShortcuts={isEmptyForShortcuts}
                 ref={input}
                 id={inputId}
                 disabled={editingDisabled}
@@ -4530,19 +4544,7 @@ function Composer({
                     !event.ctrlKey &&
                     !event.repeat &&
                     !event.defaultPrevented &&
-                    !editingDisabled &&
-                    !editDisabled &&
-                    !submission &&
-                    !editing.target &&
-                    ((valueRef.current.text === "" &&
-                      !valueRef.current.recipients.length &&
-                      composerMarkdown(valueRef.current) === "") ||
-                      automaticTag.current ===
-                        JSON.stringify(valueRef.current)) &&
-                    !valueRef.current.chatCards?.length &&
-                    !valueRef.current.forward &&
-                    !valueRef.current.gifs?.length &&
-                    !attachments.items.length
+                    isEmptyForShortcuts()
                   ) {
                     // The default selects the newest message; the preference
                     // and ⌘↑ edit using the same conversation-scoped lookup.

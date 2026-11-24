@@ -728,8 +728,9 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   min-width: 0;
 }
 /* Soften the scroll edge without reserving a blank strip above the composer. */
-:is(.feed[data-jump-visible], .threadHistoryFrame:has(> [data-jump-visible]))
-+ .composerContext::before {
+/* Attributes, not :has(): a :has() here restyles the whole conversation, under
+   its size container, whenever scrolling changes what it might match. */
+:is(.feed, .threadHistoryFrame)[data-jump-visible] + .composerContext::before {
   content: "";
   position: absolute;
   inset-inline: 0;
@@ -1127,8 +1128,9 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 .threadHistory[data-positioning] > [data-thread-rows] {
   opacity: 0;
 }
-/* Fills whichever message area is waiting. The placeholders wait one state
-   change before appearing, so a read that lands at once never flashes them. */
+/* Fills whichever message area is waiting. A thread draws nothing in it; a
+   timeline's placeholders wait one state change before appearing, so a read
+   that lands at once never flashes them. */
 .threadLoading {
   flex: 1;
   display: flex;
@@ -1145,8 +1147,8 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   inset: 0;
 }
 /* A thread sheet sizes to its content, so its waiting area keeps a height of
-   its own, room for the placeholders under its header, rather than filling
-   (and collapsing with) the sheet. */
+   its own under its header rather than filling (and collapsing with) the
+   sheet. */
 [data-details-sheet-surface][data-height="content"] .threadLoading {
   flex: none;
   min-height: calc(var(--sheet-header-height) + 4 * var(--space-16));
@@ -4522,11 +4524,21 @@ html[data-keyboard-navigation]
 .composer[data-composer-covered] {
   visibility: hidden;
 }
-/* Only the reader under a sheet hides its jump control, not the sheet's own. */
-:has(> .composerDock > .detailsSheetLayer) > :not(.composerDock) .jumpToLatest {
+/* Only the reader under a sheet hides its jump control, not the sheet's own.
+   ComposerSheet marks the pane that holds the sheet's dock. */
+[data-holds-sheet] > :not(.composerDock) .jumpToLatest {
   display: none;
 }
 
+/* In a dialog the reader scrolls below the header and above the bottom inset,
+   so its scrollbar stays off the dialog's rounded corners. */
+.detailsDialogScroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-inline: calc(-1 * var(--dialog-padding));
+  padding-inline: var(--dialog-padding);
+}
 /* The details reader's sections sit below its dialog title in hierarchy. */
 .detailsReader .text :is(h1, h2) {
   font-size: var(--text-label);
