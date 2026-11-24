@@ -1,8 +1,5 @@
 import { expect } from "@playwright/test";
-import {
-  SIDEBAR_COORDINATES,
-  WORKSPACE_PREFERENCE_COORDINATES,
-} from "../../src/features/relay/sidebar-preferences.ts";
+import { isSidebarPreferencesBatch } from "../../src/features/relay/sidebar-preferences.ts";
 import { verifyEvent } from "nostr-tools";
 import { createHash } from "node:crypto";
 
@@ -515,13 +512,16 @@ export function policyRelay({
           );
         }
         if (filters.length !== 1) {
-          // Only the account preference batch reads several coordinates.
-          expect(filters.length).toBeLessThanOrEqual(4);
+          const legacySortAndFilter =
+            filters.length === 2 &&
+            filters
+              .map((filter) => filter["#d"]?.[0])
+              .sort()
+              .join() === "channel-filter,channel-sort";
+          expect(
+            legacySortAndFilter || isSidebarPreferencesBatch(filters),
+          ).toBe(true);
           for (const filter of filters) {
-            expect([
-              ...SIDEBAR_COORDINATES,
-              ...WORKSPACE_PREFERENCE_COORDINATES,
-            ]).toContain(filter["#d"]?.[0]);
             expect(filter.kinds).toEqual([30078]);
             expect(filter.authors).toEqual([viewer]);
             expect(filter.limit).toBe(1);
