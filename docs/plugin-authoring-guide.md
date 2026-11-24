@@ -112,6 +112,18 @@ holds. Keep its controls in view with `position: sticky; bottom: 0` and an
 opaque background, and draw its outline with a box shadow rather than a bottom
 border.
 
+Check `ctx.conversation.workspaceSlots?.aside === true` before passing `aside`
+to `ui.Workspace`. The host places it: a column of `asideWidth` (default 320)
+beside the reader, which narrows to leave it room, or, when the reader would
+get too narrow, an overlay over the history's end edge. Fill the box and scroll
+your content inside it; use `ui` popovers so they can escape over the history.
+Drive it from your own header control with `asideOpen` and
+`onAsideOpenChange`: docked, it shows by default; floating, it shows only once
+opened. The host closes it as it floats, restores the docked state when the
+reader widens, and closes the overlay on Escape or a press elsewhere in the
+reader, reporting each change. Without that control a floating aside stays
+closed. Messages under the overlay are not marked read.
+
 For `ctx.agents.ui.Transcript`, give each turn a unique `turnId` that stays the same across reads. Return a new turn when it changes. Leave previously returned turns and their items untouched.
 
 ## Migration writes

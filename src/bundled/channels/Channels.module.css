@@ -51,10 +51,47 @@
 .soloConversation {
   container: solo-conversation / inline-size;
 }
+/* A workspace's main reader and the page's aside (WorkspaceRow). Isolated, a
+   floating aside stacks over the reader, never over a narrow dock. */
+.workspaceRow {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .workspaceReader {
   flex: 1;
   min-height: 0;
   min-width: 0;
+}
+/* The aside's box, which its content fills and scrolls itself. */
+.workspaceAside,
+.floatingAside {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+.workspaceAside {
+  flex: none;
+  border-inline-start: 1px solid var(--border-standard);
+}
+/* Over the history's end edge, beside its scrollbar, never over the composer. */
+.floatingAside {
+  @apply floating-surface;
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--aside-top, 0px) + var(--space-2));
+  inset-inline-end: calc(var(--aside-scrollbar, 0px) + var(--space-2));
+  block-size: calc(var(--aside-height, 100%) - 2 * var(--space-2));
+  max-inline-size: calc(100% - 2 * var(--space-2));
+  overflow: hidden;
+}
+.workspaceAside[hidden],
+.floatingAside[hidden] {
+  display: none;
 }
 .conversation
   :is(
