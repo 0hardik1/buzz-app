@@ -8,7 +8,7 @@ import { relayedFromClaim, relayNotice } from "./relayed-from";
 import { pluginRequestId } from "./plugin-request";
 import { emojiTags } from "./emoji";
 import { objectBody } from "./body";
-import { huddleRoom } from "../huddle/lifecycle";
+import { huddleLifecycleBody, huddleRoom } from "../huddle/lifecycle";
 import { newer } from "./events";
 import type { EventData } from "./events";
 import {
@@ -351,6 +351,9 @@ export function foldMessages(
           content: event.kind === 48100 ? "Huddle started" : "Huddle ended",
           huddle: {
             room,
+            ...(huddleLifecycleBody(event)?.transcripts_in_origin === true && {
+              inlineTranscripts: true as const,
+            }),
             state:
               event.kind === 48100 ? ("started" as const) : ("ended" as const),
           },
@@ -650,13 +653,15 @@ export function collapseHuddleCards(
     const start = starts.get(key(row));
     return start?.authorId === row.authorId && start.createdAt <= row.createdAt;
   });
-  if (!starts.size) return authorized;
+  if (!starts.size)
+    return authorized.filter((row) => !row.huddle?.inlineTranscripts);
   const ends = new Map<string, number>();
   for (const row of authorized) {
     if (row.huddle?.state === "ended")
       ends.set(key(row), Math.max(ends.get(key(row)) ?? 0, row.createdAt));
   }
   return authorized.flatMap((row) => {
+    if (row.huddle?.inlineTranscripts) return [];
     if (row.huddle?.state === "ended" && starts.has(key(row))) return [];
     if (row.huddle?.state === "started" && starts.get(key(row)) !== row)
       return [];

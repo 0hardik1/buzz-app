@@ -14229,3 +14229,140 @@ describe("gateway turns", () => {
     await f.complete(2);
   });
 });
+
+it("switches active Solo work to voice and back to text on the same Codex thread", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  f.soloChannels.add("channel");
+  const d = f.delivery("finish my work");
+  const { config } = scoped(d, "channel");
+  const signal = new AbortController();
+  try {
+    await f.runtime.run({ ...d, config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const connected = await join(f, d, {
+      config,
+      conversation: { channelId: "channel" },
+      signal: signal.signal,
+      resumeOnClose: () => true,
+      speakText: vi.fn(),
+    });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(f.starts()[1]?.params).toMatchObject({
+      threadId: "thread-1",
+    });
+    expect(JSON.stringify(f.starts()[1]?.params)).toContain(
+      "voice session can speak it",
+    );
+    signal.abort();
+    await connected.close();
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+    const text = f.starts()[2]?.params;
+    expect(text).toMatchObject({ threadId: "thread-1" });
+    expect(JSON.stringify(text)).toContain("interrupted when the Huddle ended");
+    expect(JSON.stringify(text)).not.toContain("voice session can speak it");
+    expect(
+      f.sent
+        .filter((wire) => wire.method === "turn/interrupt")
+        .map((wire) => wire.params),
+    ).toEqual([
+      { threadId: "thread-1", turnId: "turn-1" },
+      { threadId: "thread-1", turnId: "turn-2" },
+    ]);
+    await f.complete(2);
+  } finally {
+    signal.abort();
+    f.runtime.dispose();
+  }
+});
+
+it("resumes a delegated spoken turn as a normal text turn after leaving", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  f.soloChannels.add("channel");
+  const d = f.delivery("spoken work");
+  const { config } = scoped(d, "channel");
+  const signal = new AbortController();
+  try {
+    const connected = await join(f, d, {
+      config,
+      conversation: { channelId: "channel" },
+      signal: signal.signal,
+      resumeOnClose: () => true,
+    });
+    f.emit({
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "speech-1" } },
+    });
+    await vi.waitFor(() =>
+      expect(
+        f.runtime
+          .sessions(d.agent.key)
+          .some((view) => view.status === "Working"),
+      ).toBe(true),
+    );
+    signal.abort();
+    await connected.close();
+
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(f.starts()[0]?.params).toMatchObject({ threadId: "thread-1" });
+    expect(JSON.stringify(f.starts()[0]?.params)).toContain(
+      "interrupted when the Huddle ended",
+    );
+    expect(
+      f.sent.find((wire) => wire.method === "turn/interrupt")?.params,
+    ).toEqual({ threadId: "thread-1", turnId: "speech-1" });
+    await f.complete(0);
+  } finally {
+    signal.abort();
+    f.runtime.dispose();
+  }
+});
+
+it("publishes a completed Huddle answer once and sends the same answer to audio", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  f.soloChannels.add("channel");
+  const d = f.delivery("finish this");
+  const { config } = scoped(d, "channel");
+  const speaker = vi.fn();
+  const signal = new AbortController();
+  try {
+    const connected = await join(f, d, {
+      config,
+      conversation: { channelId: "channel" },
+      signal: signal.signal,
+      resumeOnClose: () => true,
+      speakText: speaker,
+    });
+    await f.runtime.run({ ...d, config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    f.emit({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          phase: "final_answer",
+          text: "Copper orchard.",
+        },
+      },
+    });
+    await f.complete(0, "");
+    await vi.waitFor(() =>
+      expect(speaker).toHaveBeenCalledExactlyOnceWith("Copper orchard."),
+    );
+    expect(f.publish).toHaveBeenCalledTimes(1);
+    expect(f.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Copper orchard.",
+        tags: expect.arrayContaining([["h", "channel"]]),
+      }),
+    );
+    await connected.close();
+  } finally {
+    signal.abort();
+    f.runtime.dispose();
+  }
+});

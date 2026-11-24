@@ -244,6 +244,7 @@ type VoiceContinuation = {
   key: string;
   threadId: string;
   requests: TextRequest[];
+  leaving?: true;
 };
 /** `at` is when the binding last took in a message or ended a turn; bindings
  * saved before it existed have none. `tools` is the `addedKey` of the
@@ -277,6 +278,7 @@ type Active = {
   nativeCompleted?: Promise<string>;
   voiceRetirement?: Promise<void>;
   voiceHandoff?: VoiceContinuation[];
+  resumeSpeechInText?: VoiceContinuation[];
   rejectedSpeech?: Promise<void>;
   steering: Promise<void>;
   reply: Request;
@@ -335,6 +337,8 @@ type Lane = {
   voice?: {
     loaded: Loaded;
     signal: AbortSignal;
+    origin?: Readonly<{ channelId: string; root?: string }>;
+    speakText?: (text: string) => void;
     restore(): Promise<void>;
     rejectedSpeechClosing?: Promise<void>;
     /** Ends the seat, and tells its owner why. */
@@ -515,7 +519,11 @@ function restoreNotes(request: Request) {
     );
 }
 /** The note at the end of a request's turn input, if any. */
-function noteOf(request: Request, continuation = false) {
+function noteOf(
+  request: Request,
+  continuation?: VoiceContinuation,
+  speaking = false,
+) {
   request.notes ??=
     request.agent.notes?.(
       request.conversation.channelId,
@@ -525,10 +533,15 @@ function noteOf(request: Request, continuation = false) {
     request.sessionContext,
     request.invocationContext,
     continuation
-      ? "Continue the work interrupted while joining the Huddle. Check the thread history for actions that already completed before proceeding."
+      ? continuation.leaving
+        ? "Continue the work interrupted when the Huddle ended. Check the Codex history for actions that already completed. Post your reply as a normal text message in this conversation."
+        : "Continue the work interrupted while joining the Huddle. Check the thread history for actions that already completed before proceeding."
       : request.resumed
         ? RESUMED_PROMPT
         : undefined,
+    speaking
+      ? "For this request in the Huddle, put your answer in your final response so the voice session can speak it. Buzz posts that same reply in this conversation. Use send only for separate messages the user explicitly requests."
+      : undefined,
     ...request.notes,
     turnNote(
       request.agent,
@@ -2033,8 +2046,8 @@ export class CodexRuntime {
     const settings = this.resolveConfig(seat.config);
     if (!validWorkspace(settings.workspace))
       throw new Error("Choose an absolute Codex workspace first");
-    const { channelId } = seat.conversation;
-    const key = scopedKey(settings.scope, channelId);
+    const { channelId, root } = seat.conversation;
+    const key = scopedKey(settings.scope, channelId, root);
     if (settings.scope === "community" && !finishPreemption) {
       let connection: AgentVoiceConnection | undefined;
       const continuations: VoiceContinuation[] = [];
@@ -2046,7 +2059,15 @@ export class CodexRuntime {
         if (seat.signal.aborted) return;
         const entry = this.entries.get(agent.key);
         const active = entry?.lanes.get(key)?.active;
-        if (entry && active && !active.finished && active !== interrupting) {
+        if (
+          entry &&
+          active &&
+          !active.finished &&
+          active !== interrupting &&
+          (!seat.resumeOnClose ||
+            (active.reply.conversation.channelId === channelId &&
+              active.reply.replyRoot === root))
+        ) {
           interrupting = active;
           interrupted = this.interruptForVoice(
             entry,
@@ -2099,6 +2120,15 @@ export class CodexRuntime {
       if (!connection) throw new Error("Voice startup was interrupted");
       return connection;
     }
+    const inOrigin = !!seat.resumeOnClose;
+    const solo =
+      inOrigin && (await reads.soloChat(agent.owner, channelId, seat.signal));
+    const readChannelCanvas = reads.canvas?.bind(reads);
+    const canvasRead =
+      solo && readChannelCanvas
+        ? await readCanvas(() => readChannelCanvas(channelId, agent.owner))
+        : undefined;
+    const canvas = canvasRead && project(canvasRead.text, false);
     const routing = this.route(agent);
     if (routing) await routing;
     await rememberCommunitySource(
@@ -2116,7 +2146,13 @@ export class CodexRuntime {
     const continuations: VoiceContinuation[] = [];
     try {
       const active = lane.active;
-      if (active && !finishPreemption)
+      if (
+        active &&
+        !finishPreemption &&
+        (!inOrigin ||
+          (active.reply.conversation.channelId === channelId &&
+            active.reply.replyRoot === root))
+      )
         await this.interruptForVoice(entry, key, active, continuations);
     } catch (error) {
       delete lane.voiceOpening;
@@ -2142,13 +2178,20 @@ export class CodexRuntime {
       agent,
       settings,
       team: seat.team ?? "",
+      ...(solo && { solo: true }),
+      ...(canvas && {
+        canvas,
+        ...(settings.scope !== "community" && { project: canvas.section }),
+      }),
+      ...(root && { toolRoot: root, replyRoot: root, sourceRoot: root }),
       ...(seat.synced ? { synced: seat.synced } : {}),
       activityScope: channelId,
       conversation: {
         channelId,
         name: reads.channelLabel(channelId)?.name ?? channelId,
         ...(settings.scope === "community" ? { community: true } : {}),
-        topLevel: true,
+        ...(root && settings.scope === "thread" && { root }),
+        ...(!root && { topLevel: true }),
       },
       answered() {},
       failActivity: (reason) => {
@@ -2165,9 +2208,34 @@ export class CodexRuntime {
       seat.thinking?.(delegatedThinking || realtimeThinking);
     let off = () => {};
     let closing: Promise<void> | undefined;
-    const close = (rejected?: { typed: Active; drained: Promise<void> }) => {
+    const close = (
+      rejected?: { typed: Active; drained: Promise<void> },
+      leaving = false,
+    ) => {
       if (closing) return closing;
       signal.removeEventListener("abort", onAbort);
+      const handoffs: VoiceContinuation[] = [];
+      const active = lane.active;
+      let interruption: Promise<void> | undefined;
+      if (
+        leaving &&
+        active &&
+        !active.finished &&
+        active.reply.conversation.channelId === channelId &&
+        active.reply.replyRoot === root
+      ) {
+        if (Object.hasOwn(active.reply, "adopted"))
+          active.resumeSpeechInText = handoffs;
+        else
+          interruption = this.interruptForVoice(
+            entry,
+            key,
+            active,
+            handoffs,
+          ).catch((error) =>
+            this.status(agent.key, key, "Needs attention", message(error)),
+          );
+      }
       abort.abort();
       off();
       // Stop media, await the surviving typed turn, then unsubscribe.
@@ -2180,7 +2248,7 @@ export class CodexRuntime {
         ? Promise.all([rejected.typed.released, rejected.drained])
         : tail.catch(() => {});
       closing = (async () => {
-        await Promise.all([opened?.close(), drained]);
+        await Promise.all([opened?.close(), drained, interruption]);
         if (media !== opened) await media?.close();
         if (loaded) {
           await server.rpc.releaseThread(loaded.threadId).catch(() => {});
@@ -2189,6 +2257,8 @@ export class CodexRuntime {
         delete lane.voice;
         if (!lane.active && !lane.queued && entry.lanes.get(key) === lane)
           entry.lanes.delete(key);
+        for (const continuation of handoffs) continuation.leaving = true;
+        this.resumeVoiceWork(key, handoffs);
       })();
       if (rejected && lane.voice) {
         lane.voice.rejectedSpeechClosing = closing;
@@ -2202,7 +2272,7 @@ export class CodexRuntime {
       return closing;
     };
     const onAbort = () => {
-      void close();
+      void close(undefined, seat.resumeOnClose?.() === true);
     };
     signal.addEventListener("abort", onAbort, { once: true });
     const opening = lane.tail
@@ -2236,12 +2306,15 @@ export class CodexRuntime {
         const memory = await this.core(agent.key, signal);
         const policy = () =>
           settings.scope === "community"
-            ? [NO_PROJECT.section, turnNote(agent, channelId, undefined, true)]
+            ? [
+                (request.canvas ?? NO_PROJECT).section,
+                turnNote(agent, channelId, root, !root),
+              ]
                 .filter(Boolean)
                 .join("\n\n")
             : "";
         const voiceInstructions = (updates?: string | null) =>
-          `${contextText(agent, settings, request.team, memory, this.repositories(reads.scope), updates)}\nFor every spoken request, apply the room's current source policy below, replacing policies retained from other conversations.\n${policy()}\nVoice work acts for owner ${agent.owner}. Buzz tools default to room ${channelId} at top level. This is the room's existing conversation. A turn that starts with <realtime_delegation> is a spoken request: the voice model speaks only your final answer, so put the result there in a few plain spoken sentences, not in a send. When you delegate, say only a short acknowledgement, then wait: never state a fact the delegated work has not returned yet.`;
+          `${contextText(agent, settings, request.team, memory, this.repositories(reads.scope), updates)}\nFor every spoken request, apply the room's current source policy below, replacing policies retained from other conversations.\n${policy()}\nVoice work acts for owner ${agent.owner}. Buzz tools default to the existing conversation in channel ${channelId}${root ? `, thread ${root}` : " at top level"}. A turn that starts with <realtime_delegation> is a spoken request: the voice model speaks only your final answer, so put the result there in a few plain spoken sentences, not in a send. When you delegate, say only a short acknowledgement, then wait: never state a fact the delegated work has not returned yet.`;
         loaded = await this.loadThread(
           request,
           entry,
@@ -2278,6 +2351,8 @@ export class CodexRuntime {
         lane.voice = {
           loaded,
           signal,
+          ...(inOrigin && { origin: seat.conversation }),
+          ...(seat.speakText && { speakText: seat.speakText }),
           end(error) {
             void close();
             seat.ended(error);
@@ -2301,7 +2376,7 @@ export class CodexRuntime {
                 ],
               });
               signal.throwIfAborted();
-              entry.project.resolve(channelId, NO_PROJECT);
+              entry.project.resolve(channelId, request.canvas ?? NO_PROJECT);
             } catch (error) {
               if (!signal.aborted) {
                 void close();
@@ -2353,8 +2428,23 @@ export class CodexRuntime {
           ) {
             // execute installs the normal Request synchronously, before the next RPC tool call.
             const previous = lane.tail;
+            const wake: ConversationWake | undefined = inOrigin
+              ? {
+                  type: "plugin",
+                  plugin: "buzz.huddles",
+                  id: p.turn.id,
+                  at: Date.now(),
+                  channel: channelId,
+                  ...(root && { root }),
+                  text: "Continue the preceding spoken request in the existing Codex session.",
+                }
+              : undefined;
             const delegated = this.execute(
-              { ...request, adopted: p.turn.id },
+              {
+                ...request,
+                ...(wake && { wake, event: wakeAnchor(wake) }),
+                adopted: p.turn.id,
+              },
               "",
               key,
               lane,
@@ -2392,7 +2482,7 @@ export class CodexRuntime {
         );
         signal.throwIfAborted();
         if (settings.scope === "community")
-          entry.project.resolve(channelId, NO_PROJECT);
+          entry.project.resolve(channelId, request.canvas ?? NO_PROJECT);
         this.save(request, entry, key, {
           threadId,
           workspace: loaded.workspace,
@@ -4424,12 +4514,20 @@ export class CodexRuntime {
     const { settings, agent } = request;
     // A community wake can report its deadline before Codex has stopped.
     const waitForNative = request.unaddressed !== undefined;
+    let textReply: string | undefined;
     const followed = follow(
       server.rpc,
       waitForNative ? undefined : signal,
       active,
       (method, item) => {
         if (signal.aborted) return;
+        if (
+          method === "item/completed" &&
+          item.type === "agentMessage" &&
+          (item.phase === "final_answer" || item.phase === undefined) &&
+          item.text?.trim()
+        )
+          textReply = item.text;
         const step = method === "item/started" ? codexStep(item) : undefined;
         if (step)
           for (const taken of active.activity.values())
@@ -4450,6 +4548,7 @@ export class CodexRuntime {
     let explain: (() => string | undefined) | undefined;
     let turnFailed = false;
     let continuing = false;
+    let speaking = false;
     let turnMayBeRunning = adopted !== undefined;
     /** The voice seat whose thread this turn runs on, if any. */
     let seat: Lane["voice"];
@@ -4552,6 +4651,7 @@ export class CodexRuntime {
         );
       if (request.adopted !== undefined) {
         ready();
+        this.status(agent.key, key, "Working");
       } else {
         const [context, memory] = await Promise.all([
           this.history(request, signal),
@@ -4638,6 +4738,11 @@ export class CodexRuntime {
               .filter(Boolean)
               .join("\n\n") + "\n\n";
         active.threadId = threadId;
+        speaking =
+          !!seat?.speakText &&
+          seat.origin?.channelId === request.conversation.channelId &&
+          seat.origin.root === request.replyRoot &&
+          !seat.signal.aborted;
         const turnParams = {
           threadId: active.threadId,
           input: input(
@@ -4651,7 +4756,7 @@ export class CodexRuntime {
                 ]
                   .filter(Boolean)
                   .join("\n\n")) ??
-              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request, !!continuation), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
+              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request, continuation, speaking), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
           ),
           model,
           effort,
@@ -4769,6 +4874,10 @@ export class CodexRuntime {
           (taken) => taken.finalDelivery instanceof Error,
         )?.finalDelivery;
         if (failed instanceof Error) throw failed;
+        if (speaking && textReply && request.finalDelivery !== true) {
+          await this.publish(request, textReply);
+          if (!seat?.signal.aborted) seat?.speakText?.(textReply);
+        }
         // A turn may end without a reply when there is nothing new to say.
         for (const taken of active.requests) taken.answered();
         this.status(agent.key, key, "Idle", notice);
@@ -4777,7 +4886,17 @@ export class CodexRuntime {
       turnFailed = true;
       // Refused before any turn began, it took nothing in.
       if (error instanceof Refused && !active.turnId) restoreNotes(request);
-      for (const taken of active.requests) taken.failActivity(message(error));
+      const speechHandoff = active.resumeSpeechInText;
+      const speechEvent = request.event;
+      const threadToResume = active.threadId;
+      const resumeSpeech =
+        speechHandoff &&
+        speechEvent &&
+        threadToResume &&
+        !entry.abort.signal.aborted &&
+        !active.finished;
+      if (!resumeSpeech)
+        for (const taken of active.requests) taken.failActivity(message(error));
       const ended = active.finished;
       const drainingWake = waitForNative && signal.aborted;
       if (!drainingWake) active.finished = true;
@@ -4791,7 +4910,13 @@ export class CodexRuntime {
         active.threadId &&
         active.turnId
       ) {
-        if (drainingWake) {
+        if (resumeSpeech) {
+          await this.drainRejectedSpeech(
+            server.rpc,
+            active.threadId,
+            active.turnId,
+          );
+        } else if (drainingWake) {
           await this.drainInterruptedTurn(
             server.rpc,
             active.threadId,
@@ -4813,6 +4938,20 @@ export class CodexRuntime {
         }
       }
       active.finished = true;
+      if (resumeSpeech) {
+        const { adopted: _adopted, ...rest } = request;
+        const resumed: TextRequest = { ...rest, event: speechEvent };
+        const handoff = {
+          entry,
+          key,
+          threadId: threadToResume,
+          requests: [resumed],
+        };
+        resumed.voiceContinuation = handoff;
+        entry.waiting.add(resumed);
+        speechHandoff.push(handoff);
+        continuing = true;
+      }
       const why = explain?.();
       if (!signal.aborted) {
         const reason = `Codex could not finish: ${message(error)}.`;

@@ -75,6 +75,7 @@ fn main() {
             "huddle_close",
             "huddle_pcm",
             "huddle_recognize",
+            "huddle_speak",
             "huddle_touch",
             "pairing_account",
             "pairing_start",

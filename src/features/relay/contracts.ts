@@ -179,6 +179,7 @@ export type ChannelMessage = Readonly<{
   huddle?: Readonly<{
     room: string;
     state: "started" | "ended";
+    inlineTranscripts?: true;
     endedAt?: number;
   }>;
   /** Current body came from a replacement edit; original recipients do not bind its prose. */

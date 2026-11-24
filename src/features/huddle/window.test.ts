@@ -30,6 +30,7 @@ function harness() {
     remoteVoiceError() {},
     voiceListening() {},
     voiceThinking() {},
+    subscribePeerAudio: () => () => {},
     snapshot: () => snapshot,
     subscribe(fn) {
       listeners.add(fn);

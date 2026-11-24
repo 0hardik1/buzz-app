@@ -516,8 +516,11 @@ async fn run(
             // archive that shared room on our own failed/cancelled connection.
             advertised = true;
             let mut start = lifecycle(48100, &call.parent, &room);
-            if let Some(root) = call.origin.as_ref().and_then(|origin| origin.root.as_ref()) {
-                start.tags.push(vec!["e".into(), root.clone(), String::new(), "reply".into()]);
+            if let Some(origin) = &call.origin {
+                start.content = json!({"ephemeral_channel_id": room, "transcripts_in_origin": true}).to_string();
+                if let Some(root) = &origin.root {
+                    start.tags.push(vec!["e".into(), root.clone(), String::new(), "reply".into()]);
+                }
             }
             publish(host, fi, &call.community, start, &call.viewer).await?;
         }
@@ -632,6 +635,29 @@ pub(crate) async fn huddle_recognize(
     tokio::select! {
         _ = stop.changed() => Err("The Huddle ended".into()),
         result = speech::recognize(samples) => result,
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn huddle_speak(
+    huddles: tauri::State<'_, Huddles>,
+    id: String,
+    text: String,
+) -> Result<()> {
+    if text.trim().is_empty() || text.len() > 3200 {
+        return Err("Invalid Huddle reply length".into());
+    }
+    let (mut stop, pcm) = huddles
+        .0
+        .lock()
+        .map_err(|_| "Huddle unavailable")?
+        .get(&id)
+        .filter(|call| call.agent.is_some() && !*call.stop.borrow())
+        .map(|call| (call.stop.subscribe(), call.pcm.clone()))
+        .ok_or("The agent’s Huddle seat has ended")?;
+    tokio::select! {
+        _ = stop.changed() => Ok(()),
+        result = speech::synthesize(text, pcm) => result,
     }
 }
 

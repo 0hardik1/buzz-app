@@ -20,13 +20,19 @@ export const huddleParent = (description: string | undefined) =>
   huddleRoomMetadata(description)?.parent;
 export const isHuddleRoom = (description: string | undefined) =>
   huddleParent(description) !== undefined;
-export function huddleRoom(event: Pick<EventData, "content">) {
+export function huddleLifecycleBody(event: Pick<EventData, "content">) {
   try {
-    const id = JSON.parse(event.content)?.ephemeral_channel_id;
-    return typeof id === "string" && uuid.test(id) ? id : undefined;
+    return JSON.parse(event.content) as {
+      ephemeral_channel_id?: unknown;
+      transcripts_in_origin?: unknown;
+    } | null;
   } catch {
     return undefined;
   }
+}
+export function huddleRoom(event: Pick<EventData, "content">) {
+  const id = huddleLifecycleBody(event)?.ephemeral_channel_id;
+  return typeof id === "string" && uuid.test(id) ? id : undefined;
 }
 /** Relay-signed participation is display evidence, never permission to join. */
 export function huddleLifecycle(

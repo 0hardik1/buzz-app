@@ -15,6 +15,8 @@ type Seat = {
   agent: Agent;
   voice: RegisteredAgentType["voice"];
   stop(): Promise<void>;
+  input(samples: number[], source?: string): void;
+  mixesPeers: boolean;
 };
 
 /** A local call or verified owner participation on another device supplies the call.
@@ -23,7 +25,10 @@ export function createHuddleVoices(
   huddles: Pick<
     Huddles,
     "snapshot" | "subscribe" | "voiceListening" | "voiceThinking"
-  > & { voiceAgent?(): string | undefined },
+  > &
+    Partial<Pick<Huddles, "subscribePeerAudio">> & {
+      voiceAgent?(): string | undefined;
+    },
   agents: Pick<Agents, "snapshot" | "subscribe" | "types" | "reserveVoice">,
   relay: RelayData,
   bridge: HuddleBridge,
@@ -52,6 +57,8 @@ export function createHuddleVoices(
     let starting: Promise<void> | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let release: (() => void) | undefined;
+    let speech = Promise.resolve();
+    let queuedSpeech = 0;
     const fail = (error?: unknown) => {
       if (abort.signal.aborted) return;
       void stop();
@@ -65,6 +72,15 @@ export function createHuddleVoices(
       abort.signal,
       fail,
     );
+    function input(samples: number[], source?: string) {
+      if (abort.signal.aborted) return;
+      try {
+        if (source) connection?.input(samples, source);
+        else connection?.input(samples);
+      } catch (error) {
+        fail(error);
+      }
+    }
     function stop() {
       if (closing) return closing;
       abort.abort();
@@ -105,13 +121,8 @@ export function createHuddleVoices(
             )
               return fail("The owner left the Huddle");
             // Defense in depth; privacy tests count at the native decode site.
-            if (event.type === "audio" && event.peer === agent.owner) {
-              try {
-                connection?.input(event.samples);
-              } catch (error) {
-                fail(error);
-              }
-            }
+            if (event.type === "audio" && event.peer === agent.owner)
+              input(event.samples);
           },
           agent.pubkey,
         );
@@ -120,10 +131,41 @@ export function createHuddleVoices(
         heartbeat = setInterval(() => {
           void bridge.touch(id).catch(fail);
         }, 5000);
+        const speak = bridge.speak;
         const opened = await voice({
           agent,
           conversation: transcriptDestination ?? { channelId: room },
-          ...(transcriptDestination && { transcriptDestination }),
+          ...(transcriptDestination && {
+            transcriptDestination,
+            ...(speak && {
+              speakText: (text: string) => {
+                if (abort.signal.aborted || queuedSpeech >= 3) return;
+                // Keep native input bounded. The full answer stays in the chat.
+                const summary = Array.from(text).slice(0, 750).join("");
+                queuedSpeech++;
+                speech = speech
+                  .then(async () => {
+                    if (!abort.signal.aborted) await speak(id, summary);
+                  })
+                  .catch((error) => {
+                    if (!abort.signal.aborted)
+                      report(call, `${agent.name}: ${String(error)}`);
+                  })
+                  .finally(() => {
+                    queuedSpeech--;
+                  });
+              },
+            }),
+            resumeOnClose: () => {
+              const current = huddles.snapshot();
+              return (
+                current.id === call &&
+                current.phase === "leaving" &&
+                relay.snapshot().session === session &&
+                relay.snapshot().status === "ready"
+              );
+            },
+          }),
           signal: abort.signal,
           ended: fail,
           thinking: (active) => {
@@ -139,7 +181,14 @@ export function createHuddleVoices(
         }
       })
       .catch(fail);
-    return { call, agent, voice, stop };
+    return {
+      call,
+      agent,
+      voice,
+      stop,
+      input,
+      mixesPeers: !!transcriptDestination,
+    };
   }
   function sync() {
     if (disposed) return;
@@ -255,6 +304,20 @@ export function createHuddleVoices(
         );
     }
   }
+  // The human connection already receives playback. Mix only the other
+  // authorized Codex seats on this device into each agent's microphone track.
+  const stopPeerAudio = huddles.subscribePeerAudio?.((call, peer, samples) => {
+    const source = seats.get(peer);
+    if (
+      !source?.mixesPeers ||
+      source.call !== call ||
+      !huddles.snapshot().listening?.includes(peer)
+    )
+      return;
+    for (const seat of seats.values())
+      if (seat !== source && seat.mixesPeers && seat.call === call)
+        seat.input(samples, peer);
+  });
   const stops = [
     huddles.subscribe(sync),
     agents.subscribe(sync),
@@ -264,6 +327,7 @@ export function createHuddleVoices(
   return async () => {
     disposed = true;
     offMembers();
+    stopPeerAudio?.();
     for (const stop of stops) stop();
     await Promise.all([...seats.values()].map((seat) => seat.stop()));
     seats.clear();

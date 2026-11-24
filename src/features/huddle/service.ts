@@ -65,6 +65,9 @@ export function createHuddles(
   let activityTimer: ReturnType<typeof setInterval> | undefined;
   let closing: Promise<void> | undefined;
   const listeners = new Set<() => void>();
+  const peerAudio = new Set<
+    (id: string, peer: string, samples: number[]) => void
+  >();
   const unavailable = new Set<string>();
   const update = (next: HuddleSnapshot) => {
     snapshot = next;
@@ -388,6 +391,12 @@ export function createHuddles(
       if (event.type === "audio") {
         activity(event.peer, event.samples);
         attempt.audio?.play(event.peer, event.samples);
+        if (
+          snapshot.transcriptDestination &&
+          snapshot.participants.includes(event.peer)
+        )
+          for (const listener of peerAudio)
+            listener(attempt.id, event.peer, event.samples);
         return;
       }
       // Native roster snapshots are unordered. Keep arrival order for the stack;
@@ -425,10 +434,11 @@ export function createHuddles(
               ? metadata.huddleTranscript
               : undefined;
           if (transcriptDestination) {
+            const { root: _launchRoot, ...place } = destination;
             update({
               ...snapshot,
               destination: {
-                ...destination,
+                ...place,
                 ...(transcriptDestination.root && {
                   root: transcriptDestination.root,
                 }),
@@ -580,6 +590,14 @@ export function createHuddles(
         listeners.delete(listener);
       };
     },
+    subscribePeerAudio(
+      listener: (id: string, peer: string, samples: number[]) => void,
+    ) {
+      peerAudio.add(listener);
+      return () => {
+        peerAudio.delete(listener);
+      };
+    },
     join,
     start: (destination: HuddleDestination) =>
       join(destination, undefined, true),
@@ -610,6 +628,7 @@ export function createHuddles(
       unsubscribe();
       await leave();
       listeners.clear();
+      peerAudio.clear();
     },
   };
 }

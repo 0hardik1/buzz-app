@@ -137,6 +137,9 @@ function setup() {
   const report = vi.fn();
   const listening = vi.fn();
   const thinking = vi.fn();
+  let audioListener:
+    | ((id: string, peer: string, samples: number[]) => void)
+    | undefined;
   const start = () => {
     const dispose = createHuddleVoices(
       {
@@ -144,6 +147,12 @@ function setup() {
         subscribe: h.subscribe,
         voiceListening: listening,
         voiceThinking: thinking,
+        subscribePeerAudio(listener) {
+          audioListener = listener;
+          return () => {
+            audioListener = undefined;
+          };
+        },
       },
       agents,
       relay,
@@ -165,6 +174,18 @@ function setup() {
     thinking,
     resolveRoom,
     start,
+    peerAudio: (id: string, peer: string, samples: number[]) =>
+      audioListener?.(id, peer, samples),
+    registerCodex() {
+      types = [
+        { key: "buzz.codex/codex", voice },
+      ] as unknown as RegisteredAgentType[];
+      running = running.map((agent) => ({
+        ...agent,
+        type: "buzz.codex/codex",
+      }));
+      a.notify();
+    },
     call: (patch: Partial<HuddleSnapshot>) => {
       call = { ...call, ...patch };
       h.notify();
@@ -600,4 +621,38 @@ it("reserves each seat before its bridge opens, and opens none it can't reserve"
   expect(f.report.mock.calls.at(-1)?.[1]).toContain("restarting");
   dispose();
   await vi.waitFor(() => expect(order).toContain("end a"));
+});
+
+it("mixes other admitted local Codex seats and excludes self and unknown speakers", async () => {
+  const h = setup();
+  const transcript = { channelId: "parent", root: "b".repeat(64) };
+  h.registerCodex();
+  h.call({
+    listening: ["a", "b"],
+    participants: ["owner", "a", "b", "stranger"],
+  });
+  h.room({
+    huddle: true,
+    parentChannelId: "parent",
+    huddleTranscript: transcript,
+  });
+  h.start();
+  await vi.waitFor(() => expect(h.connections.size).toBe(2));
+  expect(h.seatArgs.get("a")).toMatchObject({
+    conversation: transcript,
+    transcriptDestination: transcript,
+  });
+  expect(h.bridge.open.mock.calls.map((call) => call[2])).toEqual([
+    "room",
+    "room",
+  ]);
+  const samples = [0.1, 0.2];
+  h.peerAudio("old-huddle", "a", samples);
+  h.peerAudio("human", "stranger", samples);
+  h.peerAudio("human", "a", samples);
+  expect(h.connections.get("a")?.input).not.toHaveBeenCalled();
+  expect(h.connections.get("b")?.input).toHaveBeenCalledExactlyOnceWith(
+    samples,
+    "a",
+  );
 });

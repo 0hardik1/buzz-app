@@ -1084,6 +1084,10 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
     agent: Agent<Config>;
     /** The conversation that owns the work and its transcript. */
     conversation: Readonly<{ channelId: string; root?: string }>;
+    /** Continue in text when the host ends a conversation's Huddle. */
+    resumeOnClose?(): boolean;
+    /** Play an existing text reply into this Huddle under the agent’s seat. */
+    speakText?(text: string): void;
     signal: AbortSignal;
     /** Final lines only: h-tag-only agent posts; own events never trigger this agent. */
     transcript(speaker: "owner" | "agent", text: string): Promise<void>;
@@ -1109,8 +1113,9 @@ type HostedAgentType = Omit<AgentType, "voice"> & {
   voice?(seat: AgentVoicePipe): Promise<AgentVoiceConnection>;
 };
 export type AgentVoiceConnection = Readonly<{
-  /** Owner-only 48 kHz mono frames of up to 5760 samples (native plays out 10 ms frames). Borrowed for this call. */
-  input(samples: number[]): void;
+  /** 48 kHz mono frames of up to 5760 samples. The default source is the
+   * owner; the host supplies a verified peer key for each additional source. */
+  input(samples: number[], source?: string): void;
   /** Host aborts signal, then awaits close to finish teardown. Idempotent. */
   close(): void | Promise<void>;
 }>;

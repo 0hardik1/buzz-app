@@ -4,6 +4,7 @@ import {
 } from "../relay/channel-lifecycle-protocol";
 import type { RelaySession } from "../relay/session";
 import type { HuddleDestination } from "./bridge";
+import { huddleRoomMetadata } from "./lifecycle";
 
 /** Explicit hangup only; failed joins and lost connections remain relay-owned. */
 export async function endLastHumanHuddle(
@@ -101,11 +102,18 @@ export async function endLastHumanHuddle(
     )
       return;
   }
+  const inline =
+    session.channels.get?.(room)?.huddleTranscript ??
+    huddleRoomMetadata(exactLifecycleTag(metadata, "about"))
+      ?.transcriptDestination;
   const id = outbox.send(
     {
       kind: 48103,
       tags: [["h", channelId]],
-      content: JSON.stringify({ ephemeral_channel_id: room }),
+      content: JSON.stringify({
+        ephemeral_channel_id: room,
+        ...(inline && { transcripts_in_origin: true }),
+      }),
     },
     undefined,
     current,

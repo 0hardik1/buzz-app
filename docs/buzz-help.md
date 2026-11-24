@@ -176,17 +176,19 @@ if that desktop app is up and running.
 
 ## Huddles
 
-Huddles need the desktop app. The headphone button in a channel or DM header
-starts or joins one. Only Codex agents have voice. Your running Codex agent
-joins when it's a member of the huddle: starting a huddle in its DM adds it,
-and otherwise you add it from the huddle's members. Transcripts post in the
-huddle's room. Each agent's **Huddle voice** setting picks its voice. An agent
-hears whatever your microphone picks up, including people near you, and audio
-sent just before someone leaves can be credited to whoever takes their place.
+Huddles need the desktop app. Use the headphone button in a channel or DM,
+**Start a huddle** in the Solo chat menu, or **Start huddle in thread** on a
+message. Speech appears in the originating conversation under each speaker's
+name. On macOS, Buzz uses on-device speech recognition to transcribe your
+microphone. People can keep reading and typing in the same conversation
+during the Huddle.
 
-If joining interrupts a Codex agent's typed work, it continues in the same
-session once the voice seat opens. Closing the Huddle lets that work finish.
-Use **Stop** on the work to cancel it.
+Your running Codex agents in a Solo chat can join when you start the Huddle.
+In other channels, use the Huddle member controls to add an agent already
+in the conversation. Each agent's **Huddle voice** setting picks its voice.
+Work continuing in the Huddle uses the same Codex session. When you leave,
+unfinished Codex work in this conversation can continue in text. Use **Stop**
+on the work to cancel it.
 
 ## Workflows
 

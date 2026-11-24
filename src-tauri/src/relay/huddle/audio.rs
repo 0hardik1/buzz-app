@@ -821,6 +821,7 @@ mod tests {
                 viewer,
                 parent: uuid::Uuid::new_v4().to_string(),
                 room: None,
+                origin: None,
                 agent: None,
             };
             (
