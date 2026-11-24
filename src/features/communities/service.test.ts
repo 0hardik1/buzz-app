@@ -1445,20 +1445,83 @@ it("binds repository requests to each plugin scope and retains snapshot identiti
   expect(a.relay.snapshot()).toBe(first);
   const detached = a.relay.snapshot;
   expect(detached()).toBe(first);
-  expect(b.relay.snapshot().session).not.toBe(first.session);
+  expect(b.relay.snapshot()).toBe(first);
+  expect(client.relay.snapshot()).toBe(first);
+  expect(b.relay.snapshot().session).toBe(first.session);
+  assert.exists(a.relay.channelRepository);
+  assert.exists(b.relay.channelRepository);
+  assert.exists(ctx.relay.channelRepository);
+  expect(a.relay.channelRepository.available).toBe(true);
+  expect(ctx.relay.channelRepository.available).toBe(false);
   await expect(
-    first.session.channelRepository.create({
-      channel: "channel",
-      name: "docs",
-    }),
+    a.relay.channelRepository.create({ channel: "channel", name: "docs" }),
   ).rejects.toThrow("Cancelled");
   await expect(
-    b.relay
-      .snapshot()
-      .session.channelRepository.create({ channel: "channel", name: "docs" }),
+    b.relay.channelRepository.create({ channel: "channel", name: "docs" }),
   ).rejects.toThrow("Cancelled");
+  await expect(
+    ctx.relay.channelRepository.create({ channel: "channel", name: "docs" }),
+  ).rejects.toThrow();
   expect(create.mock.calls.map((call) => call[0])).toEqual([
     { channel: "channel", name: "docs", plugin: "one.plugin" },
     { channel: "channel", name: "docs", plugin: "two.plugin" },
   ]);
+});
+
+it("refuses repository requests when the selected session is unavailable", async () => {
+  setup();
+  const ctx = roots.at(-1);
+  assert.exists(ctx);
+  const plugin = ctx.extend({
+    pluginOwner: { id: "example.plugin", revision: "1" },
+  });
+  assert.exists(plugin.relay.channelRepository);
+  expect(plugin.relay.channelRepository.available).toBe(false);
+  await expect(
+    plugin.relay.channelRepository.create({ channel: "channel", name: "docs" }),
+  ).rejects.toThrow("unavailable");
+});
+
+it("uses the selected community when a repository request starts", async () => {
+  setup();
+  const ctx = new Context();
+  roots.push(ctx);
+  const first = vi.fn(async () => "first");
+  const second = vi.fn(async () => "second");
+  const client = createCommunities(
+    ctx,
+    false,
+    undefined,
+    "",
+    undefined,
+    Promise.resolve(viewer),
+    async (id) => ({
+      viewer,
+      relayAuthor: "b".repeat(64),
+      media: () => undefined,
+      query: async () => [],
+      channelRepository: id.includes("second") ? second : first,
+    }),
+  );
+  await flush();
+  client.joined(
+    { id: "https://first.test", name: "First" },
+    { name: "Person", picture: "" },
+  );
+  await flush();
+  const plugin = ctx.extend({
+    pluginOwner: { id: "example.plugin", revision: "1" },
+  });
+  const capability = plugin.relay.channelRepository;
+  assert.exists(capability);
+  client.joined(
+    { id: "https://second.test", name: "Second" },
+    { name: "Person", picture: "" },
+  );
+  await flush();
+  await expect(
+    capability.create({ channel: "channel", name: "docs" }),
+  ).resolves.toBe("second");
+  expect(first).not.toHaveBeenCalled();
+  expect(second).toHaveBeenCalledOnce();
 });

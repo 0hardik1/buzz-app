@@ -59,6 +59,10 @@ export type RelaySnapshot = Readonly<{
   refusal?: CommunityRefusal;
 }>;
 export type RelayData = {
+  channelRepository?: {
+    readonly available: boolean;
+    create(input: { channel: string; name: string }): Promise<string>;
+  };
   snapshot(): RelaySnapshot;
   subscribe(listener: () => void): () => void;
   /** Reconnects. Automatic callers (timers, network hints) use this. */

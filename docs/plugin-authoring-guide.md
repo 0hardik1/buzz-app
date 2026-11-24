@@ -109,9 +109,9 @@ Both calls report relay migration throttling with an error that starts with
 
 ## Channel repositories
 
-On desktop, a plugin can check `session.channelRepository.available` and call
-`await session.channelRepository.create({ channel, name })` on the selected
-community session. The person must be a channel owner or admin and approve the
+On desktop, a plugin can check `ctx.relay.channelRepository?.available` and call
+`await ctx.relay.channelRepository.create({ channel, name })` for the selected
+community. The person must be a channel owner or admin and approve the
 native confirmation. The app builds the announcement and fixes its protections:
 no force-push or branch deletion, and the main branch requires the relay's Owner
 role. The repository creator is also treated as Owner by the relay. The plugin
