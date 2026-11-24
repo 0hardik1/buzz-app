@@ -206,26 +206,40 @@ it("shares a Claude agent's model as the claude runtime and imports it back", ()
   ).toBeUndefined();
 });
 
-it("registers review models from the discovered catalog", async () => {
-  vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  vi.spyOn(ClaudeSetup.prototype, "catalog").mockResolvedValue([
-    { value: "opus", displayName: "Opus" },
-    { value: "haiku" },
-  ] as never);
-  const registerModels = vi.fn();
-  apply({
-    settingsCards: { register: vi.fn() },
-    agentProtection: { registerModels },
-    pluginOwner: { id: "buzz.claude-code", revision: "r1" },
-    host: { request: vi.fn() },
-    agents: { register: vi.fn(), relay: () => undefined },
-    effect: vi.fn(),
-  } as never);
-  await expect(registerModels.mock.calls[0]?.[0].models()).resolves.toEqual([
-    { id: "opus", label: "Opus" },
-    { id: "haiku", label: "haiku" },
-  ]);
-});
+it.each([
+  ["a saved key", true, true],
+  ["only a device-list key", false, true],
+  ["only its own sign-in", false, true],
+  ["nothing", false, false],
+])(
+  "lists review models with %s only when a key is saved",
+  async (_, saved, ready) => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    vi.spyOn(ClaudeAuth.prototype, "has").mockResolvedValue(saved);
+    vi.spyOn(ClaudeAuth.prototype, "protectedReady").mockResolvedValue(ready);
+    vi.spyOn(ClaudeSetup.prototype, "catalog").mockResolvedValue([
+      { value: "opus", displayName: "Opus" },
+      { value: "haiku" },
+    ] as never);
+    const registerModels = vi.fn();
+    apply({
+      settingsCards: { register: vi.fn() },
+      agentProtection: { registerModels },
+      pluginOwner: { id: "buzz.claude-code", revision: "r1" },
+      host: { request: vi.fn() },
+      agents: { register: vi.fn(), relay: () => undefined },
+      effect: vi.fn(),
+    } as never);
+    await expect(registerModels.mock.calls[0]?.[0].models()).resolves.toEqual(
+      saved
+        ? [
+            { id: "opus", label: "Opus" },
+            { id: "haiku", label: "haiku" },
+          ]
+        : [],
+    );
+  },
+);
 
 it.each([true, false])(
   "links failed turns to the available auth setup (settings=%s)",

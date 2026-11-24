@@ -183,7 +183,8 @@ export class ClaudeAuth {
   /** Whether `keySaved` is an answer yet, not its starting value. */
   private keyKnown = false;
 
-  private has() {
+  /** Whether a key is saved: the only key reviews run with. */
+  has() {
     const store = this.store;
     if (!store) return Promise.resolve(false);
     if (this.saved) return this.saved;

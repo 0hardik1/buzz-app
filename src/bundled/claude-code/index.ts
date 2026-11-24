@@ -92,11 +92,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
     });
   ctx.agentProtection.registerModels({
     label: "Claude",
+    // Only what a review can run: it needs the saved key, never a sign-in
+    // or a device-list key.
     models: async () =>
-      (await setup.catalog()).map((model) => ({
-        id: model.value,
-        label: model.displayName ?? model.value,
-      })),
+      !(await setup.auth.has())
+        ? []
+        : (await setup.catalog()).map((model) => ({
+            id: model.value,
+            label: model.displayName ?? model.value,
+          })),
     complete: (model, prompt, signal) => setup.review(model, prompt, signal),
   });
   // A candidate needs Claude signed in and its model and level listed.
