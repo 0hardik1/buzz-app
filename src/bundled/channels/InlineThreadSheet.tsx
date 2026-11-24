@@ -15,6 +15,7 @@ import {
   introducesInlineThreads,
 } from "../../features/messages/InlineThreadIntro";
 import { LayerReader } from "../../features/messages/LayerReader";
+import type { PageNavigation } from "../../features/navigation/service";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import type { RelaySession } from "../../features/relay/session";
 import type { Seen } from "../../features/seen/service";
@@ -29,6 +30,7 @@ export function InlineThreadSheet({
   channel,
   rootId,
   messageId,
+  linkNavigation,
   tall,
   seen,
   close,
@@ -41,6 +43,7 @@ export function InlineThreadSheet({
   rootId: string;
   /** The reply a link named, which the thread opens at. */
   messageId?: string | undefined;
+  linkNavigation?: PageNavigation | undefined;
   /** A layer sits over it: it grows to fit that layer until it closes. */
   tall: boolean;
   /** Records that the viewer has been shown the intro. */
@@ -92,6 +95,7 @@ export function InlineThreadSheet({
               <ConversationThread
                 messageId={messageId ?? rootId}
                 revealSelected={messageId !== undefined}
+                linkNavigation={linkNavigation}
                 focusRequest={1}
                 onResolvedRoot={onResolvedRoot}
               />
