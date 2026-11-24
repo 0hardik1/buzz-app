@@ -149,6 +149,15 @@ const { session: sharedSession } = createRelaySession(
     scope: "https://relay.example.test",
     relayAuthor: relay.pubkey,
     ...(lateArchives ? { archiveAuthority: relay.pubkey } : {}),
+    ...(new URLSearchParams(location.search).has("editable-access")
+      ? {
+          channelDetails: {
+            sign: async (template: import("nostr-tools").EventTemplate) =>
+              signed(viewer, template),
+            publish: async () => {},
+          },
+        }
+      : {}),
     media: () => {
       searchWork.images++;
       return undefined;

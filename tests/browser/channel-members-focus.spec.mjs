@@ -860,7 +860,7 @@ test("final invitation expansion continues keyboard focus at the first new row",
 test("member tabs support arrow keys, activation and paging focus", async ({
   page,
 }) => {
-  await page.goto(`${url}?administration&search-scale`);
+  await page.goto(`${url}?administration&search-scale&editable-access`);
   await page.getByRole("button", { name: "Access", exact: true }).click();
   const dialog = page.getByRole("dialog", {
     name: "Manage members",
@@ -876,6 +876,13 @@ test("member tabs support arrow keys, activation and paging focus", async ({
   await page.keyboard.press("Tab");
   await expect(filter).toBeFocused();
   await page.keyboard.press("Tab");
+  const general = dialog.getByRole("combobox", {
+    name: "General access",
+    exact: true,
+  });
+  await expect(general).toBeEnabled();
+  await expect(general).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(people).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await expect(agents).toBeFocused();
@@ -887,7 +894,9 @@ test("member tabs support arrow keys, activation and paging focus", async ({
     await panel.getAttribute("id"),
   );
   await page.keyboard.press("Tab");
-  await expect(panel).toBeFocused();
+  await expect(
+    panel.getByRole("button", { name: /^Open profile for / }).first(),
+  ).toBeFocused();
   const pages = panel.getByRole("navigation", { name: "Agents member pages" });
   await pages.getByRole("button", { name: "Next", exact: true }).click();
   await expect(panel).toBeFocused();

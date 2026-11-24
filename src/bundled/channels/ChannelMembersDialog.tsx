@@ -2499,6 +2499,7 @@ export function ChannelMembersDialog({
             aria-label="Member list"
             data-refreshing={refreshing}
           >
+            {accessControl}
             {showTabs && (
               <div ref={measureMemberTabs} className={styles.memberTabs}>
                 <Tabs
@@ -2517,11 +2518,6 @@ export function ChannelMembersDialog({
                   }}
                 />
               </div>
-            )}
-            {showTabs && accessControl ? (
-              <div className={styles.memberAccess}>{accessControl}</div>
-            ) : (
-              accessControl
             )}
             {!memberActions &&
               !canAdd &&
@@ -2590,7 +2586,7 @@ export function ChannelMembersDialog({
                           : undefined
                       }
                       aria-label={showTabs ? undefined : group.name}
-                      tabIndex={showTabs ? 0 : undefined}
+                      tabIndex={showTabs ? -1 : undefined}
                     >
                       {(!showTabs || group.name === memberGroup) && (
                         <>

@@ -80,10 +80,6 @@
   padding: var(--space-2) var(--space-control-inset);
   background: var(--surface-popover);
 }
-.memberAccess {
-  /* General scrolls above the tabs; keyboard navigation reaches the tabs first. */
-  order: -1;
-}
 .loadingMembers {
   display: grid;
   flex: 1;
