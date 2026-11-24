@@ -64,7 +64,8 @@ if that desktop app is up and running.
   shows.
 - **Search**: the top bar (⌘K or ⌘T; Ctrl elsewhere). ⌘F searches the current
   conversation. ⌘/ lists shortcuts.
-- **Settings** groups:
+- **Settings** (⌘,, or **Buzz → Settings…** in the Mac app; Ctrl+, elsewhere)
+  groups:
   - **Community**: **Profile**, **Local settings** (community address,
     repositories folder, cache, **New Solo chats** lifetime), **Mobile app**
     (or **Pair mobile**) and **Leave or remove**.
@@ -276,6 +277,8 @@ mentions still work.
    defaults**.
 5. **For a workflow or a watch**, the workflow's **Runs** tab or the agent's
    **Attention** tab shows what happened.
+6. **In a DM you're not in**, a desktop agent still answers mentions, but allow
+   about a minute. It reads that DM as itself, which gives you no access to it.
 
 ### Can't open, sign in or connect
 
