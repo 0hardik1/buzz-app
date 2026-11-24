@@ -12879,6 +12879,41 @@ it("honors owner Stop after the interrupted turn ends and before the Huddle open
   }
 });
 
+it("continues typed work when its later steered wake expires during Huddle admission", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  const first = f.delivery("Continue this work");
+  const { config } = scoped(first);
+  f.soloChannels.add("channel");
+  f.huddleChannels.add("room");
+  let current = true;
+  vi.mocked(openVoice).mockImplementationOnce(async () => {
+    current = false;
+    return { input() {}, async close() {} };
+  });
+  await f.runtime.run({ ...first, config });
+  const original = f.workingUntil.mock.calls.at(-1)?.[0];
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  await f.runtime.run({
+    ...pluginWake(f),
+    config,
+    current: () => current,
+  });
+  const wake = f.workingUntil.mock.calls.at(-1)?.[0];
+  expect(f.sent.some((wire) => wire.method === "turn/steer")).toBe(true);
+  const connection = await join(f, first);
+  try {
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(inputText(f.starts()[1]!)).toContain("Continue this work");
+    await f.complete(1);
+    await expect(original).resolves.toEqual({ ok: true });
+    await expect(wake).resolves.toEqual({ ok: true });
+  } finally {
+    f.runtime.dispose();
+    await connection.close();
+  }
+});
+
 it.each(["close", "stop"] as const)(
   "keeps continued work on the original thread when the owner chooses %s",
   async (action) => {

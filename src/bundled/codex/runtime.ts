@@ -3256,6 +3256,13 @@ export class CodexRuntime {
   private resumeVoiceWork(key: string, continuations: VoiceContinuation[]) {
     for (const continuation of continuations) {
       const { entry } = continuation;
+      continuation.requests = continuation.requests.filter((pending) => {
+        if (pending.current?.() !== false) return true;
+        entry.waiting.delete(pending);
+        delete pending.voiceContinuation;
+        pending.answered();
+        return false;
+      });
       const request = continuation.requests.at(-1);
       if (!request) continue;
       const lane = laneFor(entry, key, request.settings.scope === "community");
@@ -3384,6 +3391,7 @@ export class CodexRuntime {
     continuation?: VoiceContinuation,
   ) {
     const current = lane;
+    const requests = continuation?.requests ?? [request];
     current.queued++;
     let began!: (active?: Active) => void;
     const next: Next = {
@@ -3407,33 +3415,28 @@ export class CodexRuntime {
         if (!continuation) entry.waiting.delete(request);
         if (!ready) return;
         if (entry.abort.signal.aborted) {
-          for (const pending of continuation?.requests ?? [request])
+          for (const pending of requests)
             pending.failActivity("Codex was stopped");
           return;
         }
         if (request.current && !request.current()) {
-          request.answered();
+          for (const pending of requests) pending.answered();
           return;
         }
-        try {
-          await entry.after;
-          // A rerun waits for the retired Huddle seat to let go of the lane.
-          while (
-            await this.execute(
-              request,
-              text,
-              key,
-              current,
-              entry,
-              next,
-              continuation,
-            )
+        await entry.after;
+        // A rerun waits for the retired Huddle seat to let go of the lane.
+        while (
+          await this.execute(
+            request,
+            text,
+            key,
+            current,
+            entry,
+            next,
+            continuation,
           )
-            await current.voice?.rejectedSpeechClosing;
-        } catch (error) {
-          request.failActivity(message(error));
-          throw error;
-        }
+        )
+          await current.voice?.rejectedSpeechClosing;
       })
       // Messages that joined a turn that never began queue on their own.
       .finally(() => {
@@ -3451,11 +3454,12 @@ export class CodexRuntime {
     void job
       .catch(async (error) => {
         entry.waiting.delete(request);
-        request.failActivity(message(error));
+        for (const pending of requests) pending.failActivity(message(error));
         const reason = `Codex could not start: ${message(error)}.`;
         this.status(request.agent.key, key, "Needs attention", reason);
-        await this.publish(request, reason).catch((failure) =>
-          console.error("Codex could not publish its failure", failure),
+        await this.publishOwed({ reply: request, requests }, reason).catch(
+          (failure) =>
+            console.error("Codex could not publish its failure", failure),
         );
       })
       .finally(() => {
@@ -3510,7 +3514,10 @@ export class CodexRuntime {
   /** Posts a failure where the turn still owes an answer. The latest
    * conversation gets `content`; another a community turn took in gets a
    * generic retry notice, so one conversation's details stay out of it. */
-  private async publishOwed(active: Active, content: string) {
+  private async publishOwed(
+    active: Pick<Active, "reply" | "requests">,
+    content: string,
+  ) {
     const where = (taken: Request) =>
       `${taken.conversation.channelId}/${taken.replyRoot ?? ""}`;
     if (
@@ -4290,6 +4297,7 @@ export class CodexRuntime {
     continuation?: VoiceContinuation,
   ) {
     const { adopted } = request;
+    const requests = continuation?.requests ?? [request];
     let ready!: () => void;
     let notReady!: (error: unknown) => void;
     let release!: () => void;
@@ -4315,12 +4323,12 @@ export class CodexRuntime {
     }
     if (signal.aborted) {
       // As a turn cancelled once started ends, without publishing.
-      if (entry.abort.signal.aborted) request.failActivity("Codex was stopped");
-      else {
-        request.failActivity(message(signal.reason));
-        if (request.unaddressed?.signal.aborted)
-          this.status(request.agent.key, key, "Stopped");
-      }
+      const reason = entry.abort.signal.aborted
+        ? "Codex was stopped"
+        : message(signal.reason);
+      for (const pending of requests) pending.failActivity(reason);
+      if (!entry.abort.signal.aborted && request.unaddressed?.signal.aborted)
+        this.status(request.agent.key, key, "Stopped");
       return;
     }
     const server = this.open(request.agent);
@@ -4342,7 +4350,7 @@ export class CodexRuntime {
       workspace: lane.voice?.loaded.workspace ?? request.settings.workspace,
       signal,
       tools: new AbortController(),
-      requests: continuation?.requests ?? [request],
+      requests: [...requests],
       activity: new Map(),
     };
     void active.ready.catch(() => undefined);
@@ -4497,7 +4505,7 @@ export class CodexRuntime {
         signal.throwIfAborted();
         if (request.current && !request.current()) {
           restoreNotes(request);
-          request.answered();
+          for (const pending of active.requests) pending.answered();
           this.status(agent.key, key, "Idle");
           active.finished = true;
           ready();
@@ -4533,7 +4541,7 @@ export class CodexRuntime {
           restoreNotes(request);
           if (again) active.requests = [];
           else {
-            request.answered();
+            for (const pending of active.requests) pending.answered();
             this.status(agent.key, key, "Idle");
           }
           active.finished = true;
