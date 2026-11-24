@@ -5260,6 +5260,52 @@ describe("voice launch and transcripts", () => {
       await f.ctx.fiber.dispose();
     }
   });
+
+  it.each([undefined, "a".repeat(64)])(
+    "posts agent speech to the specified channel or thread and leaves human publication to the host (%s)",
+    async (root) => {
+      const voice = vi.fn(async (_seat: AgentVoiceSeat<Config>) => ({
+        input: vi.fn(),
+        close: vi.fn(),
+      }));
+      const f = await setup({ voice });
+      try {
+        await f.service.create({ type: "example/echo", name: "Echo" });
+        const agent = f.service.find(bot);
+        const open = f.service
+          .types()
+          .find((type) => type.key === "example/echo")?.voice;
+        if (!agent || !open) throw new Error("Missing voice fixture");
+        const controller = new AbortController();
+        await open({
+          agent,
+          conversation: { channelId: "76777eba-0881-43cf-9b24-9f1136d8dc72" },
+          transcriptDestination: {
+            channelId: channel,
+            ...(root ? { root } : {}),
+          },
+          signal: controller.signal,
+          output: async () => {},
+          ended: () => {},
+        });
+        const seat = voice.mock.calls[0]?.[0];
+        if (!seat) throw new Error("Missing opened seat");
+        await seat.transcript("owner", "Human speech");
+        await seat.transcript("agent", "Spoken answer");
+        controller.abort();
+        await seat.transcript("agent", "Late answer");
+        const lines = await published(f.native, 9);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatchObject({
+          pubkey: bot,
+          tags: [["h", channel], ...(root ? [["e", root, "", "reply"]] : [])],
+          content: "Spoken answer",
+        });
+      } finally {
+        await f.ctx.fiber.dispose();
+      }
+    },
+  );
 });
 
 describe("a type without synced settings", () => {

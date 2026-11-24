@@ -1101,7 +1101,10 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
 export type AgentVoicePipe = Omit<
   AgentVoiceSeat,
   "config" | "revisions" | "synced" | "team" | "transcript"
->;
+> & {
+  /** Publish only this agent's speech to the host-selected conversation. */
+  transcriptDestination?: Readonly<{ channelId: string; root?: string }>;
+};
 type HostedAgentType = Omit<AgentType, "voice"> & {
   voice?(seat: AgentVoicePipe): Promise<AgentVoiceConnection>;
 };
