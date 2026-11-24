@@ -31,6 +31,9 @@ function harness() {
     },
     voiceError() {},
     remoteVoiceError() {},
+    subscribeLocalMicrophone() {
+      return undefined;
+    },
     voiceListening() {},
     voiceThinking() {},
     subscribePeerAudio: () => () => {},

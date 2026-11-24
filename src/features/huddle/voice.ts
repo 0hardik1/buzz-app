@@ -26,7 +26,7 @@ export function createHuddleVoices(
     Huddles,
     "snapshot" | "subscribe" | "voiceListening" | "voiceThinking"
   > &
-    Partial<Pick<Huddles, "subscribePeerAudio" | "openLocalPlayout">> & {
+    Partial<Pick<Huddles, "subscribePeerAudio" | "openLocalPlayout" | "subscribeLocalMicrophone">> & {
       voiceAgent?(): string | undefined;
     },
   agents: Pick<Agents, "snapshot" | "subscribe" | "types" | "reserveVoice">,
@@ -53,6 +53,7 @@ export function createHuddleVoices(
     const callSession = session;
     const abort = new AbortController();
     let connection: AgentVoiceConnection | undefined;
+    let stopLocalMicrophone: (() => void) | undefined;
     let opening: Promise<void> | undefined;
     let closing: Promise<void> | undefined;
     let starting: Promise<void> | undefined;
@@ -68,6 +69,14 @@ export function createHuddleVoices(
         call,
         `${agent.name}: ${error instanceof Error ? error.message : error || "Voice disconnected"}. Leave and rejoin the Huddle to retry.`,
       );
+    };
+    const input = (samples: number[]) => {
+      if (abort.signal.aborted) return;
+      try {
+        connection?.input(samples);
+      } catch (error) {
+        fail(error);
+      }
     };
     const sender = createPcmSender(
       (samples) => bridge.send(id, samples),
@@ -87,6 +96,7 @@ export function createHuddleVoices(
       if (closing) return closing;
       abort.abort();
       localPlayout?.close();
+      stopLocalMicrophone?.();
       clearInterval(heartbeat);
       release?.();
       closing = Promise.allSettled([
@@ -124,7 +134,11 @@ export function createHuddleVoices(
             )
               return fail("The owner left the Huddle");
             // Defense in depth; privacy tests count at the native decode site.
-            if (event.type === "audio" && event.peer === agent.owner)
+            if (
+              event.type === "audio" &&
+              event.peer === agent.owner &&
+              !stopLocalMicrophone
+            )
               input(event.samples);
           },
           agent.pubkey,
@@ -189,6 +203,7 @@ export function createHuddleVoices(
         if (abort.signal.aborted) await opened.close();
         else {
           connection = opened;
+          stopLocalMicrophone = huddles.subscribeLocalMicrophone?.(call, input);
           huddles.voiceListening(call, agent.pubkey, true);
         }
       })

@@ -316,6 +316,7 @@ export function withRemoteDmVoiceCalls(
       ["connecting", "connected", "leaving"].includes(huddles.snapshot().phase)
         ? undefined
         : remote.voiceAgent(),
+    subscribeLocalMicrophone: huddles.subscribeLocalMicrophone,
     voiceListening: huddles.voiceListening,
     voiceThinking: huddles.voiceThinking,
     subscribePeerAudio: huddles.subscribePeerAudio,

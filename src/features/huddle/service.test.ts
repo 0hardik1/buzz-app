@@ -4,6 +4,7 @@ vi.mock("../channel-members/members", () => ({
 }));
 import { Context } from "@deepseek-ai/cordis";
 import { describe, expect, it, vi } from "vitest";
+import type { Agent, Agents, RegisteredAgentType } from "../agents/service";
 import type { ChannelSummary } from "../relay/contracts";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import { keypair, signed } from "../relay/testing";
@@ -13,6 +14,7 @@ import { createRelaySession } from "../relay/session";
 import type { HuddleAudio, OpenHuddleAudio } from "./audio";
 import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import { createHuddles, provideHuddleStatus } from "./service";
+import { createHuddleVoices } from "./voice";
 
 const viewerKey = keypair();
 const relayKey = keypair();
@@ -144,6 +146,7 @@ function harness(
   return {
     service,
     transcribe,
+    relay,
     snapshotRead,
     archive,
     publish,
@@ -262,6 +265,109 @@ describe("Huddle lifetime", () => {
     h.receive({ type: "connected", room: "late", participants: [] });
     expect(h.service.snapshot().phase).toBe("idle");
     await h.dispose();
+  });
+  it("delivers local microphone audio to Codex while the relay send stalls", async () => {
+    const h = harness([
+      {
+        id: destination.channelId,
+        name: "Design",
+        members: [destination.viewer],
+      },
+      {
+        id: "room",
+        name: "Huddle",
+        members: [destination.viewer, botKey.pubkey],
+      },
+    ]);
+    const input = vi.fn<(samples: number[]) => void>();
+    const agent = {
+      key: "codex",
+      pubkey: botKey.pubkey,
+      owner: destination.viewer,
+      relay: destination.relayUrl,
+      type: "codex",
+      place: "here",
+    } as Agent;
+    const types = [
+      {
+        key: agent.type,
+        voice: async () => ({ input, close: () => {} }),
+      },
+    ] as unknown as RegisteredAgentType[];
+    const agents = {
+      snapshot: () => ({ status: "ready", running: [agent] }),
+      subscribe: () => () => {},
+      types: () => types,
+      reserveVoice: () => () => {},
+    } as unknown as Pick<
+      Agents,
+      "snapshot" | "subscribe" | "types" | "reserveVoice"
+    >;
+    let receive = (_: HuddleUpdate) => {};
+    const bridge: HuddleBridge = {
+      ...h.bridge,
+      open: async (_id, _context, _room, update) => {
+        receive = update;
+      },
+    };
+    const report = vi.fn();
+    const stop = createHuddleVoices(h.service, agents, h.relay, bridge, report);
+    const stalled = deferred<void>();
+    vi.mocked(h.bridge.send).mockReturnValueOnce(stalled.promise);
+    try {
+      await h.service.join(destination);
+      h.receive({
+        type: "connected",
+        room: "room",
+        participants: [botKey.pubkey],
+      });
+      await vi.waitFor(() =>
+        expect(h.service.snapshot().listening).toContain(botKey.pubkey),
+      );
+
+      const delayedFrame = Array<number>(960).fill(0.01);
+      const frames = [
+        delayedFrame,
+        ...Array.from({ length: 11 }, (_, i) =>
+          Array<number>(960).fill((i + 2) / 100),
+        ),
+      ];
+      for (const frame of frames) h.send(frame);
+      expect(h.bridge.send).toHaveBeenCalledTimes(1);
+      expect(input).toHaveBeenCalledTimes(frames.length);
+      expect(input.mock.calls.map(([frame]) => frame[0])).toEqual(
+        frames.map((frame) => frame[0]),
+      );
+      receive({
+        type: "audio",
+        peer: destination.viewer,
+        samples: delayedFrame,
+      });
+      expect(input).toHaveBeenCalledTimes(frames.length);
+
+      h.service.mute();
+      h.send(Array(960).fill(0.5));
+      receive({
+        type: "audio",
+        peer: destination.viewer,
+        samples: delayedFrame,
+      });
+      expect(input).toHaveBeenCalledTimes(frames.length);
+
+      await h.service.leave();
+      h.send(delayedFrame);
+      receive({
+        type: "audio",
+        peer: destination.viewer,
+        samples: delayedFrame,
+      });
+      expect(input).toHaveBeenCalledTimes(frames.length);
+      expect(report).not.toHaveBeenCalled();
+    } finally {
+      stalled.resolve();
+      await stop();
+      await h.dispose();
+    }
   });
   it("cancels an outstanding permission prompt and allows another attempt", async () => {
     const h = harness();

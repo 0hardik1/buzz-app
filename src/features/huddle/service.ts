@@ -40,6 +40,7 @@ type Attempt = {
   stopAudioSettings?: () => void;
   sender: ReturnType<typeof createPcmSender>;
   localPlayout: Map<string, { playing: boolean }>;
+  microphoneListeners: Set<(samples: number[]) => void>;
 };
 const idle: HuddleSnapshot = { phase: "idle", muted: false, participants: [] };
 const message = (error: unknown) =>
@@ -293,6 +294,7 @@ export function createHuddles(
       connection,
       abort,
       localPlayout: new Map(),
+      microphoneListeners: new Set(),
       sender: createPcmSender(
         (samples) => bridge.send(id, samples),
         abort.signal,
@@ -498,6 +500,7 @@ export function createHuddles(
           activity(destination.viewer, samples);
           attempt.transcript?.input(samples);
           void attempt.sender.send(samples);
+          for (const listener of attempt.microphoneListeners) listener(samples);
         },
         () => {
           if (valid(attempt))
@@ -592,6 +595,18 @@ export function createHuddles(
         close() {
           if (active()) attempt.localPlayout.delete(peer);
         },
+      };
+    },
+    subscribeLocalMicrophone(
+      call: string,
+      listener: (samples: number[]) => void,
+    ) {
+      const attempt = current;
+      if (!attempt || attempt.id !== call || snapshot.phase !== "connected")
+        return;
+      attempt.microphoneListeners.add(listener);
+      return () => {
+        attempt.microphoneListeners.delete(listener);
       };
     },
     voiceListening: voiceSeat("listening"),
