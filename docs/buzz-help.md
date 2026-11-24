@@ -266,6 +266,17 @@ mentions still work.
 
 ## Troubleshooting
 
+### Buzz asks for FFmpeg when I upload a file
+
+On desktop, select **Install** when a video or voice note needs FFmpeg.
+For a HEIC photo, select **Install or update** to get FFmpeg 8 or newer.
+Buzz uses Homebrew on macOS, Windows App Installer (winget) on Windows,
+or PackageKit on Linux. Approve any system prompt. When installation
+finishes, Buzz retries the selected file automatically.
+
+In a browser or detached Huddle window, install or update FFmpeg on the
+computer running Buzz, then select **Retry upload**.
+
 ### An agent ignores a mention
 
 1. **Is it yours?** It won't do work for anyone but its owner.

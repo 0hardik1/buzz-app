@@ -1,6 +1,6 @@
 import { isHeic } from "../relay/video-preparation";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
 import styles from "./ComposerAttachments.module.css";
 
@@ -15,26 +15,42 @@ export function FfmpegInstall({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const selection = useRef<{ file: File } | null>(null);
+  useLayoutEffect(() => {
+    selection.current = { file };
+    setBusy(false);
+    setError("");
+    return () => {
+      selection.current = null;
+    };
+  }, [file]);
   const desktop = isTauri() && window.location.pathname !== "/huddle.html";
   const needsUpdate =
     /\.(heic|heif)$/i.test(file.name) || /^image\/hei[cf]/.test(file.type);
   async function install() {
+    const current = selection.current;
+    if (!current) return;
     setBusy(true);
     try {
       if (desktop) {
-        const header = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
+        const header = new Uint8Array(
+          await current.file.slice(0, 4096).arrayBuffer(),
+        );
+        if (selection.current !== current) return;
         await invoke("install_ffmpeg", {
           requireVersion8: isHeic(header, file.name),
         });
       }
+      if (selection.current !== current) return;
       setError("");
       retry();
     } catch (cause) {
+      if (selection.current !== current) return;
       setError(
         typeof cause === "string" ? cause : "Installation failed. Try again.",
       );
     } finally {
-      setBusy(false);
+      if (selection.current === current) setBusy(false);
     }
   }
   return (
