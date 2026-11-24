@@ -2027,11 +2027,12 @@ export class CodexRuntime {
         throw error;
       } finally {
         off();
-        // The Huddle can cancel its own opening while Codex is still draining.
+        // A cancelled startup skips the lane wait. Wait for the text turn to
+        // record its continuation, including steering that was still in flight.
         if (!connection)
-          void interrupted
-            .catch(() => {})
-            .then(() => this.resumeVoiceWork(key, continuations));
+          void Promise.allSettled([interrupted, interrupting?.released]).then(
+            () => this.resumeVoiceWork(key, continuations),
+          );
       }
       if (!connection) throw new Error("Voice startup was interrupted");
       return connection;

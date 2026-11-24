@@ -12846,6 +12846,44 @@ it.each(["channel", "community"] as const)(
   },
 );
 
+it("continues community work when Huddle startup is cancelled during a pending steer", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  const first = f.delivery("Continue this work");
+  const { config } = scoped(first);
+  const steering = deferred<void>();
+  const seat = new AbortController();
+  f.held.set("turn/steer", steering.promise);
+  f.huddleChannels.add("room");
+  await f.runtime.run({ ...first, config });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  const followup = f.runtime.run({ ...f.delivery("One more detail"), config });
+  try {
+    await vi.waitFor(() =>
+      expect(f.sent.some((wire) => wire.method === "turn/steer")).toBe(true),
+    );
+    const opening = join(f, first, { config, signal: seat.signal });
+    await vi.waitFor(() =>
+      expect(f.sent.some((wire) => wire.method === "turn/interrupt")).toBe(
+        true,
+      ),
+    );
+    seat.abort(new Error("Huddle cancelled"));
+    await expect(opening).rejects.toBe(seat.signal.reason);
+    steering.resolve();
+    await followup;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(f.starts()[1]?.params).toMatchObject({ threadId: "thread-1" });
+    expect(inputText(f.starts()[1])).toContain("One more detail");
+    await f.complete(1);
+  } finally {
+    seat.abort();
+    steering.resolve();
+    f.runtime.dispose();
+    await followup;
+  }
+});
+
 it("honors owner Stop after the interrupted turn ends and before the Huddle opens", async () => {
   vi.stubGlobal("RTCPeerConnection", class {});
   const f = fixture();
@@ -12904,7 +12942,7 @@ it("continues typed work when its later steered wake expires during Huddle admis
   const connection = await join(f, first);
   try {
     await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
-    expect(inputText(f.starts()[1]!)).toContain("Continue this work");
+    expect(inputText(f.starts()[1])).toContain("Continue this work");
     await f.complete(1);
     await expect(original).resolves.toEqual({ ok: true });
     await expect(wake).resolves.toEqual({ ok: true });
