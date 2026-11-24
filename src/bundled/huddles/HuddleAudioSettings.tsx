@@ -73,6 +73,13 @@ export function HuddleAudioSettings({
                   setRouting("agentCrossTalk", enabled)
                 }
               />
+              <Switch
+                label="Live agent transcripts"
+                checked={routing.liveTranscript}
+                onCheckedChange={(enabled) =>
+                  setRouting("liveTranscript", enabled)
+                }
+              />
             </>
           )}
           {state ? (

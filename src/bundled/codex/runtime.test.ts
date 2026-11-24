@@ -8009,7 +8009,19 @@ describe("voice seats", () => {
     expect(late?.result).toMatchObject({ success: false });
   });
   it("posts only nonempty final transcripts without notifying or replying", async () => {
-    const f = await seated();
+    const transcriptDelta = vi.fn();
+    const f = await seated({ transcriptDelta });
+    for (const [threadId, role, delta] of [
+      ["thread-1", "assistant", "spoken"],
+      ["thread-1", "assistant", " words"],
+      ["thread-1", "user", "owner audio"],
+      ["thread-2", "assistant", "another thread"],
+    ])
+      f.emit({
+        method: "thread/realtime/transcript/delta",
+        params: { threadId, role, delta },
+      });
+    expect(transcriptDelta.mock.calls).toEqual([["spoken"], [" words"]]);
     for (const [method, text] of [
       ["thread/realtime/transcript/done", "hello @someone"],
       ["thread/realtime/transcript/done", "  "],

@@ -31,6 +31,7 @@ pub(crate) struct View {
 struct AudioRouting {
     direct_audio: bool,
     agent_cross_talk: bool,
+    live_transcript: bool,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -156,6 +157,7 @@ pub(crate) enum Action {
     OutputDevice,
     DirectAudio,
     AgentCrossTalk,
+    LiveTranscript,
     Mute,
     Leave,
     Minimize,
@@ -490,7 +492,10 @@ pub(crate) fn huddle_window_action<R: tauri::Runtime>(
         if text.as_ref().is_none_or(|id| id.len() > 4096) {
             return Err("Invalid audio device".into());
         }
-    } else if matches!(action, Action::DirectAudio | Action::AgentCrossTalk) {
+    } else if matches!(
+        action,
+        Action::DirectAudio | Action::AgentCrossTalk | Action::LiveTranscript
+    ) {
         if !matches!(text.as_deref(), Some("on" | "off")) {
             return Err("Invalid Huddle routing setting".into());
         }

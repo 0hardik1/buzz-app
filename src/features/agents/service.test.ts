@@ -5277,8 +5277,10 @@ describe("voice launch and transcripts", () => {
           .find((type) => type.key === "example/echo")?.voice;
         if (!agent || !open) throw new Error("Missing voice fixture");
         const controller = new AbortController();
+        let stream = true;
         await open({
           agent,
+          streamTranscript: () => stream,
           conversation: { channelId: "76777eba-0881-43cf-9b24-9f1136d8dc72" },
           transcriptDestination: {
             channelId: channel,
@@ -5291,16 +5293,36 @@ describe("voice launch and transcripts", () => {
         const seat = voice.mock.calls[0]?.[0];
         if (!seat) throw new Error("Missing opened seat");
         await seat.transcript("owner", "Human speech");
+        seat.transcriptDelta?.("Spoken");
+        await vi.waitFor(async () =>
+          expect(await published(f.native, 9)).toHaveLength(1),
+        );
         await seat.transcript("agent", "Spoken answer");
+        stream = false;
+        seat.transcriptDelta?.("An unfinished line");
+        expect(await published(f.native, 9)).toHaveLength(1);
+        await seat.transcript("agent", "Finished line");
         controller.abort();
+        seat.transcriptDelta?.("Late fragment");
         await seat.transcript("agent", "Late answer");
         const lines = await published(f.native, 9);
-        expect(lines).toHaveLength(1);
+        expect(lines).toHaveLength(2);
         expect(lines[0]).toMatchObject({
           pubkey: bot,
           tags: [["h", channel], ...(root ? [["e", root, "", "reply"]] : [])],
-          content: "Spoken answer",
+          content: "Spoken",
         });
+        expect(lines[1]?.content).toBe("Finished line");
+        expect(await published(f.native, 40003)).toEqual([
+          expect.objectContaining({
+            pubkey: bot,
+            tags: [
+              ["h", channel],
+              ["e", lines[0]?.id],
+            ],
+            content: "Spoken answer",
+          }),
+        ]);
       } finally {
         await f.ctx.fiber.dispose();
       }

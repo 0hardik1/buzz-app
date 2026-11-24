@@ -1089,7 +1089,9 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
     /** Play an existing text reply into this Huddle under the agent’s seat. */
     speakText?(text: string): void;
     signal: AbortSignal;
-    /** Final lines only: h-tag-only agent posts; own events never trigger this agent. */
+    /** Agent speech fragments in the host-selected conversation. */
+    transcriptDelta?(delta: string): void;
+    /** Completes a live transcript or posts one finalized line. */
     transcript(speaker: "owner" | "agent", text: string): Promise<void>;
     /** 48 kHz mono; native accepts exactly 960 finite samples with |s| <= 1,
      * dropping frames when its capacity-5 queue is full. */
@@ -1104,10 +1106,11 @@ export type AgentVoiceSeat<Config = unknown> = Readonly<
 /** Host pipe before the agents service resolves launch settings and transcript policy. */
 export type AgentVoicePipe = Omit<
   AgentVoiceSeat,
-  "config" | "revisions" | "synced" | "team" | "transcript"
+  "config" | "revisions" | "synced" | "team" | "transcript" | "transcriptDelta"
 > & {
   /** Publish only this agent's speech to the host-selected conversation. */
   transcriptDestination?: Readonly<{ channelId: string; root?: string }>;
+  streamTranscript?(): boolean;
 };
 type HostedAgentType = Omit<AgentType, "voice"> & {
   voice?(seat: AgentVoicePipe): Promise<AgentVoiceConnection>;

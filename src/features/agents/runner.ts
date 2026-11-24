@@ -94,6 +94,7 @@ import {
   type Membership,
   unconfirmedAgentEvent,
 } from "./native";
+import { streamVoiceTranscript } from "./voice-transcript";
 import type { AgentKey } from "./membership";
 import { setAttention, type AgentRecord, type TimerProgress } from "./store";
 import type { Start } from "./agent-start";
@@ -1170,8 +1171,20 @@ export class AgentRunners {
     const team = this.host.team(agent.key);
     seat.signal.throwIfAborted();
     const ownerName = this.host.displayName(agent, agent.owner) ?? agent.owner;
+    const destination = seat.transcriptDestination;
+    const streaming =
+      destination && seat.streamTranscript
+        ? streamVoiceTranscript(
+            destination,
+            seat.signal,
+            seat.streamTranscript,
+            (event) =>
+              handle.publish(event, () => seat.signal.throwIfAborted()),
+          )
+        : undefined;
     return voice({
       ...seat,
+      ...(streaming && { transcriptDelta: streaming.append }),
       agent,
       config: start.config,
       revisions: start.revisions,
@@ -1179,8 +1192,8 @@ export class AgentRunners {
       ...(team && { team }),
       async transcript(speaker, text) {
         if (seat.signal.aborted || !text.trim()) return;
-        const destination = seat.transcriptDestination;
         if (destination && speaker === "owner") return;
+        if (streaming) return streaming.finish(text);
         const name = speaker === "owner" ? ownerName : agent.name;
         await handle.publish(
           {

@@ -330,7 +330,9 @@ export function createHuddleWindow(
               text,
             );
           else if (
-            (action === "directAudio" || action === "agentCrossTalk") &&
+            (action === "directAudio" ||
+              action === "agentCrossTalk" ||
+              action === "liveTranscript") &&
             (text === "on" || text === "off")
           )
             huddles.setRouting(action, text === "on");

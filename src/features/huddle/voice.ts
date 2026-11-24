@@ -153,6 +153,8 @@ export function createHuddleVoices(
           conversation: transcriptDestination ?? { channelId: room },
           ...(transcriptDestination && {
             transcriptDestination,
+            streamTranscript: () =>
+              huddles.snapshot().routing?.liveTranscript === true,
             ...(speak && {
               speakText: (text: string) => {
                 if (abort.signal.aborted || queuedSpeech >= 3) return;

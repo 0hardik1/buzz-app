@@ -189,6 +189,8 @@ in the conversation. Each agent's **Huddle voice** setting picks its voice.
 In **Audio settings**, **Direct audio with local agents** lets your microphone
 and speakers bypass the relay for agents running on the same device.
 **Let agents hear each other** controls audio between those agents independently.
+**Live agent transcripts** shows the agent's speech in the conversation as it
+arrives. Turn it off to receive only finished transcripts.
 Work continuing in the Huddle uses the same Codex session. When you leave,
 unfinished Codex work in this conversation can continue in text. Use **Stop**
 on the work to cancel it.

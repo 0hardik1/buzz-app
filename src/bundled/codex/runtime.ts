@@ -2393,6 +2393,7 @@ export class CodexRuntime {
                 turn?: { id: string };
                 role?: string;
                 text?: string;
+                delta?: string;
               }
             | undefined;
           if (signal.aborted || p?.threadId !== threadId) return;
@@ -2452,6 +2453,12 @@ export class CodexRuntime {
             );
             lane.tail = Promise.all([previous, delegated]).then(() => {});
           }
+          if (
+            method === "thread/realtime/transcript/delta" &&
+            p.role === "assistant" &&
+            typeof p.delta === "string"
+          )
+            seat.transcriptDelta?.(p.delta);
           if (
             method === "thread/realtime/transcript/done" &&
             p.text?.trim() &&

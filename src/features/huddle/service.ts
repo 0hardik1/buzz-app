@@ -11,7 +11,10 @@ import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import type { HuddleAudio, OpenHuddleAudio } from "./audio";
 import type { Context } from "@deepseek-ai/cordis";
 
-export type HuddleRoutingOption = "directAudio" | "agentCrossTalk";
+export type HuddleRoutingOption =
+  | "directAudio"
+  | "agentCrossTalk"
+  | "liveTranscript";
 type HuddleRouting = Record<HuddleRoutingOption, boolean>;
 
 export type HuddleSnapshot = Readonly<{
@@ -64,6 +67,7 @@ export function createHuddles(
   const routing: HuddleRouting = {
     directAudio: true,
     agentCrossTalk: true,
+    liveTranscript: true,
   };
   for (const option of Object.keys(routing) as HuddleRoutingOption[]) {
     try {
