@@ -237,7 +237,8 @@ test("native history restores the reminder draft, explicit dismissal retires it,
   page,
 }) => {
   await page.goto(`${url}?width=900&demo`);
-  const open = page.getByRole("button", { name: "New reminder" });
+  // The header action; an empty page repeats it in its empty state.
+  const open = page.getByRole("button", { name: "New reminder" }).first();
   const dialog = page.getByRole("dialog", { name: "New reminder" });
   const note = dialog.getByRole("textbox", { name: "Reminder text" });
   await open.click();
