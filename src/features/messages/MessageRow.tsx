@@ -319,6 +319,8 @@ function MessageRowContent({
   onOpenMediaReview,
   agentPubkeys,
 }: MessageContentProps) {
+  // Keep completed inline seeks in the row across collapse and show.
+  const [playedSeekRequest, setPlayedSeekRequest] = useState<number>();
   const [avatarFocused, setAvatarFocused] = useState(false);
   // Compact is a flat list: everyone's rows start at the left, with no own surface.
   const flat = useMessageDensity() === "compact";
@@ -805,6 +807,12 @@ function MessageRowContent({
   // forgets them.
   const attachmentMedia = (url: string, size?: "small") =>
     media(url, size, row.channelId);
+  const seekTarget =
+    mediaSeekRequest === undefined
+      ? undefined
+      : row.attachments.find((item) => item.kind === "video");
+  const pendingSeek =
+    mediaSeekRequest === undefined || playedSeekRequest !== mediaSeekRequest;
   const attachmentContent = (copied = false) =>
     attachmentGroups.some(
       (group) => copiedUrls.has(group[0]?.url ?? "") === copied,
@@ -976,11 +984,17 @@ function MessageRowContent({
                       : `Open video ${index + 1} of ${group.length}`
                   }
                   mode={mediaMode}
-                  {...(attachment.kind === "video" && mediaSeekTo !== undefined
+                  {...(attachment.kind === "video" &&
+                  mediaSeekTo !== undefined &&
+                  pendingSeek &&
+                  (mediaSeekRequest === undefined || attachment === seekTarget)
                     ? {
                         seekTo: mediaSeekTo,
                         ...(mediaSeekRequest !== undefined
-                          ? { seekRequest: mediaSeekRequest }
+                          ? {
+                              seekRequest: mediaSeekRequest,
+                              onSeekApplied: setPlayedSeekRequest,
+                            }
                           : {}),
                       }
                     : {})}
@@ -1005,10 +1019,6 @@ function MessageRowContent({
             });
             const first = group[0];
             if (first && images && !drawn(first)) {
-              const seekTarget =
-                mediaSeekRequest === undefined
-                  ? undefined
-                  : row.attachments.find((item) => item.kind === "video");
               return (
                 <CollapsibleMediaGroup
                   key={first.url}

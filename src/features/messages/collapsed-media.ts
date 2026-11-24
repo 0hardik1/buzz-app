@@ -1,14 +1,41 @@
-import { readView, subscribeView, writeView } from "../../shared/view-state";
+import {
+  readView,
+  subscribeView,
+  viewScopePurgeToken,
+  viewRevision,
+  writeView,
+} from "../../shared/view-state";
 
 const viewKey = "collapsed-media";
 const limit = 500;
-const pageGroups = new Map<string | undefined, string[]>();
+type PageGroups = {
+  keys: string[];
+  purgeToken: string | null | undefined;
+  savedRevision: string | null | undefined;
+};
+const pageGroups = new Map<string | undefined, PageGroups>();
 const pageChanges = new EventTarget();
 const pageEvent = (scope: string | undefined) => JSON.stringify([scope]);
 
+// A blocked storage read cannot establish that a saved value changed.
+function changedSince(
+  before: string | null | undefined,
+  now: string | null | undefined,
+) {
+  return before !== undefined && now !== undefined && before !== now;
+}
+
 function groups(scope: string | undefined): string[] {
   const unsaved = pageGroups.get(scope);
-  if (unsaved) return unsaved;
+  if (unsaved) {
+    if (
+      scope === undefined ||
+      (!changedSince(unsaved.purgeToken, viewScopePurgeToken(scope)) &&
+        !changedSince(unsaved.savedRevision, viewRevision(scope, viewKey)))
+    )
+      return unsaved.keys;
+    pageGroups.delete(scope);
+  }
   if (scope === undefined) return [];
   const saved = readView<unknown>(scope, viewKey, []);
   return Array.isArray(saved)
@@ -33,7 +60,12 @@ export function setMediaCollapsed(
   // A successful write notifies synchronously. Its readers must see the saved list.
   pageGroups.delete(scope);
   if (scope !== undefined && writeView(scope, viewKey, next)) return;
-  pageGroups.set(scope, next);
+  pageGroups.set(scope, {
+    keys: next,
+    purgeToken: scope === undefined ? undefined : viewScopePurgeToken(scope),
+    savedRevision:
+      scope === undefined ? undefined : viewRevision(scope, viewKey),
+  });
   pageChanges.dispatchEvent(new Event(pageEvent(scope)));
 }
 
@@ -46,8 +78,15 @@ export function subscribeCollapsedMedia(
       ? undefined
       : subscribeView(
           scope,
-          () => {
-            pageGroups.delete(scope);
+          (key, removed) => {
+            if (
+              key === viewKey ||
+              removed?.some((entry) => entry.key === viewKey)
+            )
+              pageGroups.delete(scope);
+            else if (removed) return;
+            // A notification with no details can also be an empty draft clear.
+            // groups() checks the scope purge token before using the fallback.
             listener();
           },
           viewKey,

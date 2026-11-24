@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from "vitest";
-import { readView } from "../../shared/view-state";
+import {
+  clearView,
+  clearViewScope,
+  readView,
+  writeView,
+} from "../../shared/view-state";
 import {
   mediaCollapsed,
   setMediaCollapsed,
@@ -46,6 +51,9 @@ it("keeps a group choice in this page when storage is full and saves it when sto
   const stop = subscribeCollapsedMedia(scope, () =>
     seen.push(mediaCollapsed(scope, "one")),
   );
+  const draft = "draft:general";
+  writeView(scope, draft, { text: "Saved draft" });
+  writeView(scope, `${draft}:files`, ["attachment"]);
   const writer = vi
     .spyOn(Storage.prototype, "setItem")
     .mockImplementationOnce(() => {
@@ -56,9 +64,28 @@ it("keeps a group choice in this page when storage is full and saves it when sto
     expect(mediaCollapsed(scope, "one")).toBe(true);
     expect(mediaCollapsed("other-scope", "one")).toBe(false);
     expect(readView(scope, "collapsed-media", [])).toEqual([]);
+    clearView(scope, draft, `${draft}:files`);
+    expect(mediaCollapsed(scope, "one")).toBe(true);
+    clearView(scope, draft, `${draft}:files`);
+    expect(mediaCollapsed(scope, "one")).toBe(true);
     setMediaCollapsed(scope, "two", true);
     expect(readView(scope, "collapsed-media", [])).toEqual(["one", "two"]);
-    expect(seen).toEqual([true, true]);
+    expect(seen).toContain(true);
+    expect(seen).not.toContain(false);
+
+    writer.mockImplementationOnce(() => {
+      throw new Error("Storage full");
+    });
+    setMediaCollapsed(scope, "three", true);
+    clearView(scope, "collapsed-media", draft);
+    expect(mediaCollapsed(scope, "three")).toBe(false);
+
+    writer.mockImplementationOnce(() => {
+      throw new Error("Storage full");
+    });
+    setMediaCollapsed(scope, "one", true);
+    clearViewScope(scope);
+    expect(mediaCollapsed(scope, "one")).toBe(false);
   } finally {
     writer.mockRestore();
     stop();

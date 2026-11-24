@@ -5836,6 +5836,7 @@ it("a timecode opens only its video group and saves that choice", () => {
     retry: undefined,
   };
   const toggle = (name: string) => screen.getByRole("button", { name });
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   try {
     const view = renderDom(<MessageRow {...props} />);
     fireEvent.click(toggle("Image"));
@@ -5845,10 +5846,32 @@ it("a timecode opens only its video group and saves that choice", () => {
     );
     expect(toggle("Video")).toHaveAttribute("aria-expanded", "true");
     expect(toggle("Image")).toHaveAttribute("aria-expanded", "false");
+    const video = () => {
+      const element = view.container.querySelector("video");
+      if (!element) throw new Error("Expected the inline video to be visible");
+      return element;
+    };
+    fireEvent.loadedMetadata(video());
+    expect(video().currentTime).toBe(5);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(toggle("Video"));
+    fireEvent.click(toggle("Video"));
+    fireEvent.loadedMetadata(video());
+    expect(video().paused).toBe(true);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <MessageRow {...props} mediaSeekTo={5} mediaSeekRequest={2} />,
+    );
+    fireEvent.loadedMetadata(video());
+    expect(video().currentTime).toBe(5);
+    expect(play).toHaveBeenCalledTimes(2);
     view.unmount();
     renderDom(<MessageRow {...props} />);
     expect(toggle("Video")).toHaveAttribute("aria-expanded", "true");
   } finally {
+    play.mockRestore();
     cleanup();
   }
 });
