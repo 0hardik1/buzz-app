@@ -79,6 +79,7 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
   const submitted = useRef<string | undefined>(undefined);
   const initial = useRef<string | undefined>(undefined);
   const [attachments, setAttachments] = useState<readonly EditAttachment[]>([]);
+  const [lockedUrls, setLockedUrls] = useState<readonly string[]>([]);
   const [error, setError] = useState<string>();
   const pending = useSyncExternalStore(
     session.outbox?.subscribe ?? subscribe,
@@ -136,6 +137,7 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
       );
       initial.current = normalize(draft.text);
       setAttachments(draft.attachments);
+      setLockedUrls(draft.locked);
       return draft.text;
     },
     startDraft(draft: DraftMessageEdit) {
@@ -143,6 +145,7 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
       setError(undefined);
       initial.current = draft.content;
       setAttachments([]);
+      setLockedUrls([]);
       return draft.content;
     },
     save(body: string, current: ChannelMessage | undefined) {
@@ -180,7 +183,7 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
         return;
       }
       if (
-        attachments.length === target.attachments.length &&
+        attachments.length + lockedUrls.length === target.attachments.length &&
         (body === initial.current || content === source(target))
       ) {
         close();
@@ -191,7 +194,10 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
           target.id,
           content,
           current.attachmentSourceId ?? current.id,
-          attachments.map(({ attachment }) => attachment.url),
+          [
+            ...lockedUrls,
+            ...attachments.map(({ attachment }) => attachment.url),
+          ],
         );
         submitted.current = id;
         setOperation(id);

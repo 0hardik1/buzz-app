@@ -50,27 +50,37 @@ export function messageEditText(
     .join("");
 }
 
-/** A sent attachment the edit keeps, with the Markdown that placed it. */
+type Source = Readonly<{ url: string; start: number; end: number }>;
+
+/** A sent attachment the edit keeps, with the Markdown that placed it. Nested
+ * sources are other attachments inside that Markdown, relative to it. */
 export type EditAttachment = Readonly<{
   attachment: Attachment;
-  markdown: readonly string[];
+  markdown: readonly Readonly<{ text: string; nested: readonly Source[] }>[];
 }>;
 
 /** Editable prose without attachment Markdown; attachments are kept separately.
- * Only Markdown that places a row attachment leaves the prose, outermost first. */
+ * Only Markdown that places a row attachment leaves the prose, outermost first.
+ * A forward's media belongs to its quoted copy, so it stays put and is locked. */
 export function messageEditDraft(
   row: ChannelMessage,
   profiles: ReadonlyMap<string, Profile>,
   agents: AgentLibrary["identities"] = [],
 ) {
   const body = messageEditText(row, profiles, agents);
+  if (row.forward)
+    return {
+      text: body.trim(),
+      attachments: [] as EditAttachment[],
+      locked: row.attachments.map(({ url }) => url),
+    };
   const urls = new Set(row.attachments.map(({ url }) => url));
-  const ranges: { url: string; start: number; end: number }[] = [];
-  for (const range of [...projectMarkdownAttachments(body, urls).sources].sort(
-    (a, b) => a.start - b.start || b.end - a.end,
-  ))
-    if (urls.has(range.url) && !(range.start < (ranges.at(-1)?.end ?? 0)))
-      ranges.push(range);
+  const sources = [...projectMarkdownAttachments(body, urls).sources]
+    .filter(({ url }) => urls.has(url))
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+  const ranges: Source[] = [];
+  for (const range of sources)
+    if (!(range.start < (ranges.at(-1)?.end ?? 0))) ranges.push(range);
   let text = "";
   let offset = 0;
   for (const { start, end } of ranges) {
@@ -83,17 +93,45 @@ export function messageEditDraft(
       attachment,
       markdown: ranges
         .filter(({ url }) => url === attachment.url)
-        .map(({ start, end }) => body.slice(start, end)),
+        .map((outer) => ({
+          text: body.slice(outer.start, outer.end),
+          nested: sources
+            .filter(
+              (inner) =>
+                inner !== outer &&
+                inner.start >= outer.start &&
+                inner.end <= outer.end,
+            )
+            .map((inner) => ({
+              url: inner.url,
+              start: inner.start - outer.start,
+              end: inner.end - outer.start,
+            })),
+        })),
     })),
+    locked: [] as string[],
   };
 }
 
-/** Kept attachments follow the prose, as a new message places its uploads. */
+/** Kept attachments follow the prose, as a new message places its uploads.
+ * Removed attachments nested in kept Markdown are cut out of it. */
 export function messageEditContent(
   text: string,
   attachments: readonly EditAttachment[],
 ) {
-  const files = attachments.flatMap(({ markdown }) => markdown);
+  const kept = new Set(attachments.map(({ attachment }) => attachment.url));
+  const files = attachments.flatMap(({ markdown }) =>
+    markdown.map(({ text: source, nested }) => {
+      let result = "";
+      let offset = 0;
+      for (const { url, start, end } of nested) {
+        if (kept.has(url) || start < offset) continue;
+        result += source.slice(offset, start);
+        offset = end;
+      }
+      return result + source.slice(offset);
+    }),
+  );
   return files.length
     ? [text.trim(), ...files].filter(Boolean).join("\n\n")
     : text;
