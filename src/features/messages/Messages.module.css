@@ -4461,7 +4461,8 @@ html[data-keyboard-navigation]
    as the chat. */
 @container messages (max-width: 30rem) {
   .relayedHeader > [data-relayed-from]:not([data-relayed-from="dm"]),
-  .relayedHeader > .relayedName:not(.relayedRunItems .relayedName) {
+  .relayedHeader
+    > .relayedName:not(.relayedRunItems .relayedName, [data-thread-title] *) {
     display: none;
   }
 }
@@ -4474,6 +4475,17 @@ html[data-keyboard-navigation]
   flex: none;
   inline-size: var(--space-4);
   block-size: var(--space-4);
+}
+/* Reactions and the work the title started sit under its text. */
+.threadTitleBelow {
+  padding: 0 var(--space-2) var(--space-1) var(--relayed-text-start);
+}
+/* The line is one row tall, so its hover toolbar sits above it, as a
+   continuation message's does. */
+@media (hover: hover) and (pointer: fine) {
+  .relayedRow[data-thread-title] .messageActionsSlot {
+    top: 0;
+  }
 }
 .threadTitleText {
   flex: 1 1 0;
