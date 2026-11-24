@@ -83,6 +83,7 @@ import {
   composerInlineDelimiters,
 } from "./composer-inline-input";
 import { applyComposerEmoticon } from "./composer-emoticons";
+import { emoticonPreference } from "./emoticon-preference";
 import {
   composerMarkdown,
   type ComposerMarkdownMode,
@@ -1115,11 +1116,13 @@ export function EditableInput({
         tr.setMeta("composer-normalized", true).setMeta("addToHistory", false),
       );
     };
+    const emoticons = () =>
+      current.current.markdownMode === "chat" && emoticonPreference.read();
     /** Convert a just-typed chat emoticon at the caret, as its own undo step. */
     const convertEmoticon = () => {
       const { selection } = editor.state;
       if (
-        current.current.markdownMode !== "chat" ||
+        !emoticons() ||
         !editable() ||
         !selection.empty ||
         typed?.doc !== editor.state.doc ||
@@ -2503,7 +2506,7 @@ export function EditableInput({
               block ||
               applyComposerInlineInput(conversion, text) ||
               (text === " " &&
-                current.current.markdownMode === "chat" &&
+                emoticons() &&
                 editor.state.selection.empty &&
                 applyComposerEmoticon(
                   conversion,

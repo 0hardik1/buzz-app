@@ -20,6 +20,7 @@ import {
 } from "vitest";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { Node as EditorNode } from "prosemirror-model";
+import { emoticonPreference } from "./emoticon-preference";
 import { MessageMarkdown } from "./MessageMarkdown";
 import {
   EditableInput,
@@ -5032,4 +5033,16 @@ it("converts a typed emoticon on Space, and one undo restores it", async () => {
   expect(h.input).toHaveValue("nice 🙂 ");
   act(() => h.input.undo(false));
   expect(h.input).toHaveValue("nice :) ");
+});
+
+it("keeps typed emoticons when conversion is turned off", async () => {
+  emoticonPreference.set(false);
+  try {
+    const h = mount();
+    await h.user.keyboard(":) :P");
+    act(() => h.input.convertEmoticon());
+    expect(h.input).toHaveValue(":) :P");
+  } finally {
+    emoticonPreference.set(true);
+  }
 });
