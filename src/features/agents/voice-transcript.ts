@@ -67,7 +67,8 @@ export function streamVoiceTranscript(
   return {
     append(delta: string) {
       if (signal.aborted) return;
-      const line = (draft ??= { text: "", enabled: enabled() });
+      draft ??= { text: "", enabled: enabled() };
+      const line = draft;
       if (!line.enabled || line.paused) return;
       line.text += delta;
       if (line.pending) return;
