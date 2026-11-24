@@ -1179,9 +1179,97 @@ fn every_process_is_told_the_buzz_version_a_plugin_cannot_change() {
             ("BUZZ_VERSION".to_string(), plugin_value),
             ("PLUGIN_SETTING".to_string(), Some("kept".to_string())),
         ]);
-        set_environment(&mut command, OsStr::new("/bin"), &environment, "0.7.12").unwrap();
+        let login_shell = [
+            ("PATH", "/profile/bin"),
+            ("PROFILE_SETTING", "forwarded"),
+            ("PLUGIN_SETTING", "from-profile"),
+            ("BUZZ_RESOLVING_ENVIRONMENT", "1"),
+            ("NOSTR_KEY", "from-profile"),
+        ]
+        .map(|(name, value)| (name.into(), value.into()));
+        let agent_env = [
+            ("PROFILE_SETTING", "from-list"),
+            ("PLUGIN_SETTING", "from-list"),
+            ("LIST_SETTING", "listed"),
+            ("BUZZ_FROM_LIST", "1"),
+            ("NOSTR_FROM_LIST", "1"),
+        ]
+        .map(|(name, value)| (name.into(), value.into()));
+        set_environment(
+            &mut command,
+            &login_shell,
+            &agent_env,
+            OsStr::new("/bin"),
+            &environment,
+            "0.7.12",
+        )
+        .unwrap();
         assert_eq!(get(&command, "BUZZ_VERSION").as_deref(), Some("0.7.12"));
         assert_eq!(get(&command, "PLUGIN_SETTING").as_deref(), Some("kept"));
         assert_eq!(get(&command, "PATH").as_deref(), Some("/bin"));
+        assert_eq!(
+            get(&command, "PROFILE_SETTING").as_deref(),
+            Some("from-list")
+        );
+        assert_eq!(get(&command, "LIST_SETTING").as_deref(), Some("listed"));
+        assert_eq!(get(&command, "BUZZ_FROM_LIST"), None);
+        assert_eq!(get(&command, "NOSTR_FROM_LIST"), None);
+        assert_eq!(get(&command, "BUZZ_RESOLVING_ENVIRONMENT"), None);
+        assert_eq!(get(&command, "NOSTR_KEY"), None);
+    }
+}
+
+#[test]
+fn an_agents_saved_anthropic_key_survives_its_harness_removing_inherited_ones() {
+    let get = |command: &Command, name: &str| {
+        command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == name)
+            .and_then(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+    };
+    let removed = HashMap::from([("ANTHROPIC_API_KEY".to_owned(), None)]);
+    let saved = [("ANTHROPIC_API_KEY".into(), "sk-ant-agent".into())];
+    for (agent_env, expected) in [(&saved[..], Some("sk-ant-agent")), (&[][..], None)] {
+        let mut command = Command::new("/usr/bin/true");
+        set_environment(
+            &mut command,
+            &[],
+            agent_env,
+            OsStr::new("/bin"),
+            &removed,
+            "0.7.12",
+        )
+        .unwrap();
+        assert_eq!(get(&command, "ANTHROPIC_API_KEY").as_deref(), expected);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn host_programs_never_load_an_appimage_bundle() {
+    let appdir = Path::new("/tmp/.mount_BuzzX1");
+    for (value, expected) in [
+        // linuxdeploy's launcher, started without a library path of its own.
+        ("/tmp/.mount_BuzzX1/usr/lib:", Some(None)),
+        (
+            "/tmp/.mount_BuzzX1/usr/lib:/opt/mine/lib",
+            Some(Some("/opt/mine/lib")),
+        ),
+        ("/tmp/.mount_BuzzX1", Some(None)),
+        (
+            "/usr/share:/tmp/.mount_BuzzX1/usr/share",
+            Some(Some("/usr/share")),
+        ),
+        // Another AppImage's mount, or none, is the person's own.
+        ("/tmp/.mount_BuzzX10/usr/lib", None),
+        ("/opt/mine/lib", None),
+        ("", None),
+    ] {
+        assert_eq!(
+            without_bundle_paths(OsStr::new(value), appdir),
+            expected.map(|kept| kept.map(OsString::from)),
+            "{value}"
+        );
     }
 }

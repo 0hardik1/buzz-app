@@ -9,6 +9,7 @@ export function openVoice(
   ended: (error?: Error) => void,
   instructions: string,
   thinking?: (active: boolean) => void,
+  voice?: string,
 ) {
   return openVoiceMedia("Codex", signal, output, ended, {
     subscribe: (answer, fail) =>
@@ -34,6 +35,7 @@ export function openVoice(
         outputModality: "audio",
         clientManagedHandoffs: false,
         realtimeStartInstructions: instructions,
+        ...(voice ? { voice } : {}),
       }),
     stop: () => rpc.request("thread/realtime/stop", { threadId }),
     thinking,

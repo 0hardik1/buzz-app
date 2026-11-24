@@ -1,14 +1,20 @@
+import { sessionScope } from "../../features/agent-harness/session-scope";
 import { ModelDiscoveryRecovery } from "../../features/agents/ModelDiscoveryRecovery";
 import activityStyles from "../../features/agents/ActivityLayout.module.css";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { useClockFormat } from "../../shared/clock-preference";
 import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
-import { AgentSaveButton } from "../../features/agents/AgentSaveButton";
+import {
+  AgentSaveButton,
+  ClearModelOverrides,
+} from "../../features/agents/AgentSaveButton";
 import { ProviderDialogActions } from "../../features/agents/ProviderDialogActions";
 // Claude's provider controls, New agent choices, and agent settings.
 import {
+  Fragment,
   type ReactNode,
+  useContext,
   useEffect,
   useRef,
   useId,
@@ -16,13 +22,35 @@ import {
   useSyncExternalStore,
 } from "react";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
-import { TranscriptPanel } from "../../features/agents/TranscriptPanel";
+import { TranscriptPreviewNotice } from "../TranscriptPreviewNotice";
+import { TranscriptFocus } from "../../features/agents/ActivityTranscript";
+import {
+  type ClaudeTranscript,
+  type WorkingPoll,
+  TURN_LIMIT,
+} from "./transcript";
+import {
+  TranscriptPanel,
+  withLatest,
+} from "../../features/agents/TranscriptPanel";
 import { AgentInstructions } from "../../features/agents/AgentInstructions";
 import { CreateModelChoices } from "../../features/agents/CreateModelChoices";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { Accordion } from "../../shared/design-system/ui/Accordion";
 import { ModelPicker } from "../../features/agents/ModelPicker";
+import { AISettings, runsOnDetails } from "../../features/agents/AISettings";
+import { CompactionField } from "../../features/agents/Compaction";
+import { withCompactAt } from "../../features/agents/compact-at";
+import {
+  candidatesFor,
+  followRecommended,
+  offRecommended,
+  onRecommended,
+  type RecommendedRun,
+  recommendedRun,
+  withRecommended,
+} from "../../features/agents/recommended";
 import {
   ConversationName,
   OpenedConversation,
@@ -34,7 +62,10 @@ import type {
   AgentViewProps,
 } from "../../features/agents/service";
 import { PanelSubview } from "../../features/panels/PanelSubview";
-import { CircleNotchIcon } from "../../shared/design-system/icons";
+import {
+  CircleNotchIcon,
+  ClaudeLogoIcon,
+} from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
@@ -62,8 +93,10 @@ import {
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-const label = ({ channelId, name, root }: SavedConversation) =>
-  `${name || channelId.slice(0, 8)} · ${root ? `thread ${root.slice(0, 8)}` : "channel"}`;
+const label = ({ channelId, name, root, community }: SavedConversation) =>
+  community
+    ? "Community session"
+    : `${name || channelId.slice(0, 8)} · ${root ? `thread ${root.slice(0, 8)}` : "channel"}`;
 const CONVERSATION_LIMIT = 30;
 
 const options = (choices: readonly (readonly [string, string])[]) => [
@@ -164,6 +197,7 @@ const thinkingOptions = (
 const SCOPES = options([
   ["thread", "One session per thread"],
   ["channel", "One session per channel"],
+  ["community", "One session per community"],
 ]);
 
 /** A model field's stand-in while Claude cannot run. `inline` asks for
@@ -344,13 +378,29 @@ export function createTabs({
   defaults,
   runtime,
   openSetup,
+  recommended = recommendedRun("claude-code", (candidate) =>
+    setup.offers(candidate),
+  ),
 }: Readonly<{
   setup: ClaudeSetup;
   defaults: ClaudeDefaults;
   runtime: ClaudeRuntime;
   /** Opens Claude's setup in Settings → Agent setup. */
   openSetup?: () => void;
+  /** What agents on Recommended run on; the plugin shares its runtime's. */
+  recommended?: RecommendedRun;
 }>) {
+  /** What an agent on Recommended runs on, found once it is shown on it. */
+  function useRecommended(on: boolean) {
+    const resolved = useSyncExternalStore(
+      recommended.subscribe,
+      recommended.current,
+    );
+    useEffect(() => {
+      if (on) void recommended.find();
+    }, [on]);
+    return resolved;
+  }
   /** Whether `agent` runs on an execution target; undefined while that is
    * being resolved, and for no agent. */
   function useRemote(agent: AgentViewProps<Config>["agent"] | undefined) {
@@ -391,16 +441,12 @@ export function createTabs({
     useEffect(() => {
       if (enabled && !state.status && !state.checking) void setup.check();
     }, [enabled, state.status, state.checking]);
-    // Once per change of readiness: a failed load waits for Try again.
+    // On opening and each change of readiness, unless the list is fresh: a
+    // failed load waits for Try again until then.
     useEffect(() => {
-      if (
-        enabled &&
-        !state.checking &&
-        state.status?.state === "ready" &&
-        state.models.length === 0
-      )
+      if (enabled && !state.checking && state.status?.state === "ready")
         void setup.loadModels();
-    }, [enabled, state.status, state.checking, state.models.length]);
+    }, [enabled, state.status, state.checking]);
     return enabled
       ? state
       : { ...state, models: [], modelsChecking: false, modelsError: "" };
@@ -412,7 +458,17 @@ export function createTabs({
     onReadyChange,
     ...props
   }: AgentCreateProps<Config>) {
-    const current = readConfig(config);
+    // A pick here takes the agent off Recommended, from what it runs on; a
+    // remote target runs it on its own default.
+    const execution = useRemote(props.agent);
+    const resolved = useRecommended(onRecommended(config));
+    const current = offRecommended(
+      followRecommended(
+        config,
+        readConfig(config),
+        execution?.remote ? null : resolved,
+      ),
+    );
     const state = useSetupCatalog();
     const providerDefaults = useSyncExternalStore(
       defaults.subscribe,
@@ -454,15 +510,20 @@ export function createTabs({
         {...props}
         models={modelChoices(state.models)}
         value={current.model}
-        defaultModel={providerDefaultModel(
-          providerDefaults.model,
-          state.models,
-        )}
+        defaultModel={
+          providerDefaults.model
+            ? providerDefaultModel(providerDefaults.model, state.models)
+            : undefined
+        }
         defaultLabel={providerDefaultLabel(
           providerDefaults.model,
           state.models,
         )}
-        defaultDescription="Following the provider's model default"
+        defaultDescription={
+          providerDefaults.model
+            ? `Currently ${providerDefaultLabel(providerDefaults.model, state.models)}`
+            : "Follows Claude Code settings"
+        }
         loading={state.modelsChecking}
         error={state.modelsError}
         retry={() => void setup.loadModels(true)}
@@ -663,11 +724,13 @@ export function createTabs({
    * setup beside Harness, and so does the agent. */
   function CreateConfiguration({
     harnessControl,
+    rowsOnly,
     onReadyChange,
     agent,
     ...props
   }: AgentCreateProps<Config> & {
     harnessControl: ReactNode;
+    rowsOnly?: boolean;
     onReadyChange?: (ready: boolean) => void;
   }) {
     const { state, resolving, signedOut } = useCredentials(agent);
@@ -675,8 +738,9 @@ export function createTabs({
     // installed waits for the download, as it did with the Model row alone.
     const ready = !!state.status && !signedOut && !resolving;
     useEffect(() => onReadyChange?.(ready), [onReadyChange, ready]);
+    const Group = rowsOnly ? Fragment : SettingsGroup;
     return (
-      <SettingsGroup>
+      <Group>
         {harnessControl}
         <PreferenceRow
           title="Model"
@@ -699,7 +763,7 @@ export function createTabs({
           title="Thinking"
           trailing={<CreateThinking {...(agent && { agent })} {...props} />}
         />
-      </SettingsGroup>
+      </Group>
     );
   }
 
@@ -764,8 +828,8 @@ export function createTabs({
                   saved.model)
                 : ""
             }
-            defaultModel={providerDefaultModel("", state.models)}
             defaultLabel={providerDefaultLabel("", state.models)}
+            defaultDescription="Follows Claude Code settings"
             onConfigure={onConfigure}
             onChange={(model) => {
               defaults.save({ model }).then(
@@ -809,6 +873,19 @@ export function createTabs({
           : status?.state === "signed-out" && setup.auth.signIn
             ? ({ step: "sign-in", label: "Sign in" } as const)
             : undefined;
+    // Looks again for a setup made with the Claude CLI meanwhile.
+    const refreshing =
+      keyEntry && status?.state === "signed-out" && !state.running;
+    const done = useRef<HTMLButtonElement>(null);
+    const refreshFocused = useRef(false);
+    // Finding a setup removes Refresh, which WebKit leaves focus outside the
+    // dialog for: hand it to Done, unless the person has moved it themselves.
+    useEffect(() => {
+      if (refreshing || !refreshFocused.current) return;
+      refreshFocused.current = false;
+      const active = document.activeElement;
+      if (!active || active === document.body) done.current?.focus();
+    }, [refreshing]);
     const latestOutputLine = state.output
       .replaceAll("\r", "\n")
       .split("\n")
@@ -878,7 +955,25 @@ export function createTabs({
           <SignedIn setup={setup} onSaved={onClose} />
         )}
         <ProviderDialogActions>
+          {refreshing && (
+            <Button
+              disabled={state.checking}
+              // Natively disabled, it would blur out of the open dialog.
+              focusableWhenDisabled
+              onFocus={() => {
+                refreshFocused.current = true;
+              }}
+              onBlur={(event) => {
+                // Removal blurs with nowhere to go; moving on has somewhere.
+                if (event.relatedTarget) refreshFocused.current = false;
+              }}
+              onClick={() => void setup.check()}
+            >
+              Refresh
+            </Button>
+          )}
           <Button
+            ref={done}
             onClick={() =>
               state.running && !ready ? void setup.cancel() : onClose()
             }
@@ -910,17 +1005,153 @@ export function createTabs({
     working: boolean;
   }) {
     const workspace = readConfig(agent.config).workspace;
+    const input = JSON.stringify([
+      agent.key,
+      workspace,
+      conversation.sessionId,
+    ]);
+    const focus = useContext(TranscriptFocus);
+    const [history, setHistory] = useState({
+      input,
+      focus,
+      attempt: focus ? 1 : 0,
+      loading: false,
+    });
+    const again = JSON.stringify([input, history.attempt]);
+    const fullHistory = useRef<{
+      input: string;
+      loaded: boolean;
+      live?:
+        | { again: string; result: ClaudeTranscript; poll: WorkingPoll }
+        | undefined;
+    }>(undefined);
+    if (history.input !== input) {
+      setHistory({ input, focus, attempt: focus ? 1 : 0, loading: false });
+    } else if (
+      focus &&
+      history.focus !== focus &&
+      !(fullHistory.current?.input === input && fullHistory.current.loaded)
+    ) {
+      setHistory({ ...history, focus, attempt: history.attempt + 1 });
+    }
+    const loadEarlier = () =>
+      setHistory((old) =>
+        old.loading
+          ? old
+          : {
+              ...old,
+              attempt: old.attempt + 1,
+              loading: true,
+            },
+      );
+    const requireFullHistory = () => {
+      const prior = fullHistory.current;
+      fullHistory.current = {
+        input,
+        loaded: prior?.input === input && prior.loaded,
+      };
+    };
+    async function latest(
+      signal: AbortSignal,
+      held: ClaudeTranscript["turns"],
+    ) {
+      const intent = fullHistory.current;
+      const poll = { ...intent?.live?.poll };
+      let turns: ClaudeTranscript["turns"] | undefined;
+      try {
+        turns = await runtime.latestTurns(
+          conversation,
+          workspace,
+          working,
+          signal,
+          held,
+          poll,
+        );
+      } catch (error) {
+        if (!signal.aborted && intent) intent.live = undefined;
+        throw error;
+      }
+      signal.throwIfAborted();
+      if (turns && !turns.length) return turns;
+      const from = held.findIndex((turn) => turn.turnId === turns?.[0]?.turnId);
+      if (
+        !turns ||
+        from < 0 ||
+        (intent?.loaded && from + turns.length > TURN_LIMIT) ||
+        (!working && from + turns.length !== held.length) ||
+        held
+          .slice(from)
+          .some(
+            (turn, i) =>
+              turn.turnId !== turns[i]?.turnId ||
+              turn.startedAt !== turns[i]?.startedAt,
+          ) ||
+        turns.some(
+          (turn, i) =>
+            turn.startedAt <
+            ((turns[i - 1] ?? held[from - 1])?.startedAt ?? -Infinity),
+        )
+      ) {
+        if (fullHistory.current?.input !== input) requireFullHistory();
+        if (intent) intent.live = undefined;
+        return undefined;
+      }
+      if (intent?.live) {
+        const result = withLatest(intent.live.result, turns);
+        intent.live = result ? { again, result, poll } : undefined;
+      }
+      return turns;
+    }
     return (
-      <TranscriptPanel
+      <TranscriptPanel<ClaudeTranscript & { partial?: true }>
         agent={agent}
-        read={(signal) =>
-          runtime.transcript(conversation, workspace, working, signal)
-        }
-        readLatest={(signal, held) =>
-          runtime.latestTurns(conversation, workspace, working, signal, held)
-        }
+        onRefreshRequested={requireFullHistory}
+        read={async (signal) => {
+          const args = [conversation, workspace, working, signal] as const;
+          const intent = fullHistory.current;
+          const prior = intent?.live;
+          if (intent) intent.live = undefined;
+          try {
+            if (!working && prior?.again === again) {
+              const turns = await latest(signal, prior.result.turns).catch(
+                () => undefined,
+              );
+              signal.throwIfAborted();
+              if (turns?.at(-1)?.endedAt !== undefined) {
+                const result = withLatest(prior.result, turns);
+                if (result) return result;
+              }
+            }
+            if (!history.attempt && fullHistory.current?.input !== input) {
+              const preview = await runtime.transcriptPreview(...args);
+              signal.throwIfAborted();
+              if (preview) return { ...preview, partial: true };
+            }
+            const poll: WorkingPoll = {};
+            const result = await runtime.transcript(...args, poll);
+            signal.throwIfAborted();
+            if (fullHistory.current === intent) {
+              fullHistory.current = {
+                input,
+                loaded: Boolean(result),
+                live:
+                  working && result && !result.incomplete
+                    ? { again, result, poll }
+                    : undefined,
+              };
+            }
+            return result;
+          } finally {
+            if (history.loading && !signal.aborted) {
+              setHistory((current) =>
+                current === history ? { ...current, loading: false } : current,
+              );
+            }
+          }
+        }}
+        readLatest={latest}
         readKey={`${conversation.key}\u0000${workspace}`}
-        readAgain={conversation.sessionId ?? ""}
+        readAgain={again}
         working={working}
         reading="Reading the Claude session…"
         failed="Could not read the Claude session"
@@ -932,6 +1163,11 @@ export function createTabs({
         }
         notes={(transcript) => (
           <>
+            <TranscriptPreviewNotice
+              partial={!!transcript.partial}
+              loading={history.loading}
+              onLoad={loadEarlier}
+            />
             {transcript.incomplete && (
               <p role="status" className="m-0 text-body-sm">
                 Some of this conversation’s sessions may be missing. Refresh to
@@ -941,7 +1177,7 @@ export function createTabs({
                 </span>
               </p>
             )}
-            {transcript.more && (
+            {transcript.more && !transcript.partial && (
               <p className="m-0 text-body-sm text-subtle">
                 {transcript.turns.length
                   ? `Showing the latest ${transcript.turns.length === 1 ? "turn" : `${transcript.turns.length} turns`}.`
@@ -972,7 +1208,7 @@ export function createTabs({
       (listener) => runtime.subscribe(listener),
       () => runtime.sessions(agent.key),
     );
-    const conversations = runtime.conversations(agent.key);
+    const conversations = runtime.ownerConversations(agent.key);
     const busy = new Map(
       sessions.map((session) => [session.key, session.busy]),
     );
@@ -984,8 +1220,16 @@ export function createTabs({
     } = useOpenedSession(
       conversations,
       conversation,
-      (place, signal) => runtime.find(agent.key, place, workspace, signal),
+      (place, signal) =>
+        runtime.find(
+          agent.key,
+          place,
+          workspace,
+          signal,
+          readConfig(agent.config).scope === "community",
+        ),
       (channelId) => runtime.channelLabel(agent.key, channelId),
+      readConfig(agent.config).scope,
     );
     // Newest first, the opened conversation's channel above the rest.
     const recent = conversations
@@ -1126,12 +1370,39 @@ export function createTabs({
       if (saving || conflicts.length || !changed || unavailable) return;
       setSaving(true);
       setError("");
-      const config = {
+      const next = {
         ...draft,
         workspace: draft.workspace.trim() || "~/.buzz",
       };
-      submitted(config);
+      // A Custom agent's save drops a mark left from before, which a later
+      // blank synced model would otherwise turn back on.
+      const config = onRecommended(next) ? next : offRecommended(next);
       try {
+        if (
+          settingsHost?.proposedModelOrEffort &&
+          (config.model || config.effort)
+        ) {
+          const models = remote ? [] : await setup.catalog();
+          const id = config.model || providerDefaults.model || "default";
+          if (
+            !models.some(
+              (model) => model.value === id || model.resolvedModel === id,
+            )
+          )
+            throw new Error(
+              "Choose an available Claude model or clear the model and thinking overrides.",
+            );
+          if (
+            config.effort &&
+            !createEffortsFor(id, models).some(
+              (level) => level.id === config.effort,
+            )
+          )
+            throw new Error(
+              "Choose a thinking level this Claude model supports or use Default.",
+            );
+        }
+        submitted(config);
         // This draft incorporates the current props; revise that exact snapshot.
         // The host routes staged provider changes through pendingSave instead.
         await save(config, { base: agent.configBase ?? {} });
@@ -1141,6 +1412,12 @@ export function createTabs({
         setSaving(false);
       }
     };
+    // Inert in a build that recommends nothing for Claude.
+    const following =
+      onRecommended(draft) && candidatesFor("claude-code").length > 0;
+    const found = useRecommended(following);
+    // A remote target runs Recommended on its own default.
+    const resolved = remote ? null : found;
     const effortOptions = thinkingOptions(
       effortsFor(
         draft.model || (remote ? "" : providerDefaults.model),
@@ -1159,9 +1436,15 @@ export function createTabs({
         return `${model} · ${config.effort ? effortLabel(config.effort) : "Automatic"} thinking`;
       }
       if (group === "scope")
-        return config.scope === "channel"
-          ? "One session per channel"
-          : "One session per thread";
+        return config.scope === "community"
+          ? "One session per community"
+          : config.scope === "channel"
+            ? "One session per channel"
+            : "One session per thread";
+      if (group === "compactAt")
+        return config.compactAt
+          ? `${Number(config.compactAt) / 1000}K tokens`
+          : "Harness default";
       return config[group];
     };
     const conflict = (group: SettingGroup) =>
@@ -1217,9 +1500,9 @@ export function createTabs({
           models={modelChoices(setupState.models)}
           value={draft.model}
           defaultModel={
-            remote
-              ? undefined
-              : providerDefaultModel(providerDefaults.model, setupState.models)
+            !remote && providerDefaults.model
+              ? providerDefaultModel(providerDefaults.model, setupState.models)
+              : undefined
           }
           defaultLabel={
             remote
@@ -1228,8 +1511,10 @@ export function createTabs({
           }
           defaultDescription={
             remote
-              ? "Use the model configured on the target"
-              : "Following the provider's model default"
+              ? "Follows the target computer's settings"
+              : providerDefaults.model
+                ? `Currently ${providerDefaultLabel(providerDefaults.model, setupState.models)}`
+                : "Follows Claude Code settings"
           }
           loading={setupState.modelsChecking}
           onChange={(model) => {
@@ -1239,15 +1524,18 @@ export function createTabs({
               model || providerDefaults.model,
               setupState.models,
             );
-            setDraft({
-              ...draft,
-              model,
-              effort:
-                setupState.models.length === 0 ||
-                next.some((level) => level.id === draft.effort)
-                  ? draft.effort
-                  : "",
-            });
+            // A manual choice, even of the default, is never Recommended.
+            setDraft(
+              offRecommended({
+                ...draft,
+                model,
+                effort:
+                  setupState.models.length === 0 ||
+                  next.some((level) => level.id === draft.effort)
+                    ? draft.effort
+                    : "",
+              }),
+            );
           }}
         />
         <Select
@@ -1257,7 +1545,9 @@ export function createTabs({
           variant="preference"
           value={draft.effort}
           groups={[{ label: "", options: effortOptions }]}
-          onValueChange={(effort) => setDraft({ ...draft, effort })}
+          onValueChange={(effort) =>
+            setDraft(offRecommended({ ...draft, effort }))
+          }
         />
       </>
     );
@@ -1294,10 +1584,47 @@ export function createTabs({
         {settingsSection !== "runtime" && (
           <>
             <SettingsGroup>
-              {settingsHost?.typeControl?.(configChanged)}
-              {conflict("model")}
-              {modelControl}
+              {candidatesFor("claude-code").length ? (
+                <AISettings
+                  automatic={following}
+                  harnessIcon={ClaudeLogoIcon}
+                  disabled={saving}
+                  {...runsOnDetails(
+                    { title: "Claude", icon: ClaudeLogoIcon },
+                    resolved,
+                  )}
+                  onChange={(on) =>
+                    // Manual starts from the recommendation it ran on.
+                    setDraft(
+                      on
+                        ? readConfig(withRecommended(draft))
+                        : offRecommended(
+                            followRecommended(draft, draft, resolved),
+                          ),
+                    )
+                  }
+                >
+                  {settingsHost?.typeControl?.(configChanged)}
+                  {conflict("model")}
+                  {modelControl}
+                </AISettings>
+              ) : (
+                <>
+                  {settingsHost?.typeControl?.(configChanged)}
+                  {conflict("model")}
+                  {modelControl}
+                </>
+              )}
+              <CompactionField
+                value={agent.protection ? "" : draft.compactAt}
+                {...(agent.protection && {
+                  description: "Protected agents never compact automatically.",
+                })}
+                disabled={saving || !!agent.protection}
+                onChange={(value) => setDraft(withCompactAt(draft, value))}
+              />
             </SettingsGroup>
+            {conflict("compactAt")}
             <div className="grid gap-2">
               {conflict("instructions")}
               <AgentInstructions
@@ -1334,20 +1661,30 @@ export function createTabs({
             <div className="grid gap-2">
               {conflict("scope")}
               <Select
-                label="Sessions"
+                label="Session scope"
+                description="Choose how your agent uses sessions to keep context."
                 variant="preference"
                 value={draft.scope}
                 groups={SCOPES}
                 onValueChange={(value) =>
                   setDraft({
                     ...draft,
-                    scope: value === "channel" ? "channel" : "thread",
+                    scope: sessionScope(value),
                   })
                 }
               />
             </div>
           </>
         )}
+        {settingsHost?.proposedModelOrEffort &&
+          (draft.model || draft.effort) && (
+            <ClearModelOverrides
+              disabled={saving}
+              onClick={() =>
+                setDraft(offRecommended({ ...draft, model: "", effort: "" }))
+              }
+            />
+          )}
         <AgentSaveButton
           form={form}
           saving={saving}

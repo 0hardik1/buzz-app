@@ -39,10 +39,22 @@ export type FakeGoose = {
   /** Turns, in the order they began. */
   turns: FakeTurn[];
   closed: string[];
+  /** Sessions `session/load` resumed. */
+  loaded: string[];
+  /** Every `session/load` is answered with this error. */
+  loadError?: string;
+  /** Kill asks it to stop, and it never exits on its own. */
+  holdExit: boolean;
   cancelled: string[];
   deleted: string[];
   /** Each `session/set_config_option`, as `sessionId configId=value`. */
   configured: string[];
+  /** When set, the next system prompt set fails with it. */
+  promptError?: string;
+  /** Rejects the next native turn before it begins. */
+  rejectPrompt?: boolean;
+  /** When set, system prompt sets wait for it. */
+  promptGate?: Promise<void>;
   /** When set, `session/set_config_option` fails with it. */
   configError?: string;
   /** The environment it started with. */
@@ -101,6 +113,8 @@ export function fakeSpawn(
     ) => Promise<void>;
     /** Whether goose says it can reach HTTP MCP servers. */
     http?: boolean;
+    /** Whether goose says it can resume a saved session. */
+    load?: boolean;
     home?: string;
     hold?: boolean;
     /** What a turn writes before it ends. */
@@ -215,6 +229,8 @@ export function fakeSpawn(
       prompts: new Map(),
       turns: [],
       closed: [],
+      loaded: [],
+      holdExit: false,
       cancelled: [],
       deleted: [],
       configured: [],
@@ -278,13 +294,31 @@ export function fakeSpawn(
             protocolVersion: 1,
             agentCapabilities: {
               mcpCapabilities: { http: options.http ?? true, sse: false },
+              ...(options.load && { loadSession: true }),
             },
           });
         case "session/new": {
           fake.opened.push(params);
+          const meta = params._meta as Record<string, unknown> | undefined;
+          // As goose does, a session that names no provider opens on its
+          // config's default provider and model, and fails without them.
+          if (
+            defaults &&
+            !meta?.provider &&
+            !(defaults.providerId && defaults.modelId)
+          )
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: {
+                code: -32603,
+                message: `Internal error: Failed to resolve provider and model: Configuration value not found: ${defaults.providerId ? "GOOSE_MODEL" : "GOOSE_PROVIDER"}`,
+              },
+            });
           const sessionId = `session-${++sessions}`;
-          const extensions = ((params._meta as Record<string, unknown>)
-            ?.enabledExtensions ?? []) as { server?: { url?: string } }[];
+          const extensions = (meta?.enabledExtensions ?? []) as {
+            server?: { url?: string };
+          }[];
           const url = extensions.find((item) => item.server?.url)?.server?.url;
           if (url) declared.set(sessionId, url);
           return reply(id, {
@@ -292,9 +326,22 @@ export function fakeSpawn(
             configOptions: configOptions(sessionId),
           });
         }
-        case "_goose/unstable/session/system-prompt/set":
-          fake.prompts.set(sessionId, String(params.text));
-          return reply(id, {});
+        case "_goose/unstable/session/system-prompt/set": {
+          const failure = fake.promptError;
+          delete fake.promptError;
+          if (failure)
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: { code: -32603, message: failure },
+            });
+          const set = () => {
+            fake.prompts.set(sessionId, String(params.text));
+            reply(id, {});
+          };
+          if (fake.promptGate) return void fake.promptGate.then(set);
+          return set();
+        }
         case "_goose/unstable/session/live-voice/start":
           if (running.has(sessionId) || liveInteractions.has(sessionId))
             return send({
@@ -311,6 +358,14 @@ export function fakeSpawn(
           liveInteractions.delete(sessionId);
           return reply(id, {});
         case "session/prompt": {
+          if (fake.rejectPrompt) {
+            fake.rejectPrompt = false;
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: { code: -32603, message: "Native prompt rejected" },
+            });
+          }
           // Mirrors ActiveRunRegistry::start_prompt_run: the reservation
           // spans the entire interaction, including quiet delegation gaps.
           if (liveInteractions.has(sessionId))
@@ -512,6 +567,15 @@ export function fakeSpawn(
         case "session/close":
           fake.closed.push(sessionId);
           return reply(id, {});
+        case "session/load":
+          if (fake.loadError)
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: { code: -32603, message: fake.loadError },
+            });
+          fake.loaded.push(sessionId);
+          return reply(id, { configOptions: configOptions(sessionId) });
         default:
           return send({
             jsonrpc: "2.0",
@@ -536,7 +600,7 @@ export function fakeSpawn(
       end: async () => undefined,
       kill: async () => {
         fake.killed = true;
-        fake.exit(null);
+        if (!fake.holdExit) fake.exit(null);
       },
       ...(process.agentCredential && {
         actAs: async (agent: Readonly<{ pubkey: string; relay: string }>) => {

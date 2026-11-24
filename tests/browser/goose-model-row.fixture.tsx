@@ -19,6 +19,9 @@ const LONG =
   "databricks-claude-sonnet-5-5-extended-context-thinking-preview-2026-10";
 const SHORT = "databricks-claude-opus-5-5";
 const model = params.get("model") === "short" ? SHORT : LONG;
+const config: Config = params.has("pinned")
+  ? { ...DEFAULT_CONFIG, provider: "databricks", model }
+  : DEFAULT_CONFIG;
 const fake = fakeSpawn({
   providers: [
     {
@@ -58,7 +61,7 @@ createRoot(root).render(
         title="Model"
         trailing={
           <CreateModel
-            config={DEFAULT_CONFIG}
+            config={config}
             disabled={false}
             onChange={() => undefined}
           />
@@ -72,7 +75,7 @@ createRoot(root).render(
             name: "Gander",
             type: "buzz.goose/goose",
             owner: "a".repeat(64),
-            config: DEFAULT_CONFIG,
+            config,
           } as Agent<Config>
         }
         save={async () => undefined}

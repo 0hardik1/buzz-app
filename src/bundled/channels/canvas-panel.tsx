@@ -59,12 +59,15 @@ export function registerCanvas(ctx: Context) {
         scope={state.scope}
         channelId={channelContext.channelId}
         openLink={openLink}
+        codeBlocks={ctx.conversation.codeBlocks}
       />
     );
   }
   ctx.panels.register({
     id: "canvas",
     title: "Canvas",
+    // A live editor: it stays a tab until it survives a dialog closing.
+    inline: false,
     matches: () => false,
     channelMenu: { label: "View canvas", eligible },
     component: Panel,

@@ -2,6 +2,9 @@ import { Context } from "@deepseek-ai/cordis";
 import { afterEach, expect, it, vi } from "vitest";
 import { PluginRuntime } from "../../plugins/runtime";
 import { ConversationService } from "./service";
+import { ChannelMembersDialog } from "../../bundled/channels/ChannelMembersDialog";
+import { ChannelGeneralAccess } from "../../bundled/channels/ChannelGeneralAccess";
+import { DocumentEditor } from "../messages/DocumentEditor";
 import { inlineMatches } from "./InlineText";
 import type { PluginModule } from "../../plugins/api";
 import type { ChannelMessage } from "../relay/contracts";
@@ -46,6 +49,9 @@ it("registers both surfaces under the injecting plugin scope, removes and replac
     inject: ["conversation"],
     apply(ctx) {
       const conversation = ctx.conversation;
+      expect(conversation.ui.MembersDialog).toBe(ChannelMembersDialog);
+      expect(conversation.ui.GeneralAccess).toBe(ChannelGeneralAccess);
+      expect(conversation.ui.DocumentEditor).toBe(DocumentEditor);
       expect(conversation.ui.Composer).toBe(conversation.ui.Composer);
       expect(conversation.ui.Message).toBe(conversation.ui.Message);
       expect(conversation.ui.Thread).toBe(conversation.ui.Thread);
@@ -96,6 +102,36 @@ it("provides ui.Tabs only while a plugin supplies the tab workspace", async () =
   expect(h.service.ui.Tabs).toBe(h.service.ui.Tabs);
   h.runtime.reconcile([]);
   await vi.waitFor(() => expect(h.service.ui.Tabs).toBeUndefined());
+});
+it("reports the slots the active ui.Workspace provider declares", async () => {
+  const Workspace = () => null;
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      ctx.conversation.registerWorkspace(Workspace, {
+        slots: { headerActions: true },
+      });
+    },
+  });
+  expect(h.service.workspaceSlots).toBeUndefined();
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() =>
+    expect(h.service.workspaceSlots).toEqual({ headerActions: true }),
+  );
+  h.runtime.reconcile([]);
+  await vi.waitFor(() => expect(h.service.workspaceSlots).toBeUndefined());
+});
+it("reports no slots for a ui.Workspace provider that declares none", async () => {
+  const Workspace = () => null;
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      ctx.conversation.registerWorkspace(Workspace);
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() => expect(h.service.ui.Workspace).toBeDefined());
+  expect(h.service.workspaceSlots).toBeUndefined();
 });
 it("bundled Emoji really registers a picker and a renderer, including reaction metadata", async () => {
   const h = harness(emoji);
@@ -280,6 +316,93 @@ it("registers link previews and withdraws them with their plugin", async () => {
   );
 });
 
+it("registers identity marks and withdraws them with their plugin", async () => {
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      expect(() =>
+        ctx.conversation.registerIdentityMark({
+          id: "Bad id",
+          title: "Check",
+          component: Component,
+        }),
+      ).toThrow("id, title and component");
+      expect(() =>
+        ctx.conversation.registerIdentityMark({
+          id: "check",
+          title: "Check",
+        } as never),
+      ).toThrow("id, title and component");
+      ctx.conversation.registerIdentityMark({
+        id: "check",
+        title: "Check",
+        component: Component,
+      });
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() =>
+    expect(h.service.identityMarks.snapshot()).toHaveLength(1),
+  );
+  expect(h.runtime.snapshot()[h.plugin.manifest.id]?.status).toBe("active");
+  h.runtime.reconcile([]);
+  await vi.waitFor(() =>
+    expect(h.service.identityMarks.snapshot()).toHaveLength(0),
+  );
+});
+
+it("registers a send gate with only an id and hold, and withdraws it with its plugin", async () => {
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      expect(() =>
+        ctx.conversation.registerSendGate({ id: "gate" } as never),
+      ).toThrow("id and hold function");
+      ctx.conversation.registerSendGate({ id: "gate", hold: () => false });
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() =>
+    expect(h.service.sendGates.snapshot()).toHaveLength(1),
+  );
+  h.runtime.reconcile([]);
+  await vi.waitFor(() =>
+    expect(h.service.sendGates.snapshot()).toHaveLength(0),
+  );
+});
+
+it("publishes a kept message for a plugin", async () => {
+  const send = vi.fn(() => "event-id");
+  const session = { messages: { send } } as never;
+  const message = {
+    channelId: "channel",
+    text: "Later",
+    recipients: [],
+    references: [],
+    attachments: [],
+    picks: {},
+  };
+  let publish: ConversationService["publish"] | undefined;
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      publish = ctx.conversation.publish.bind(ctx.conversation);
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() => expect(publish).toBeDefined());
+  await expect(publish?.(session, message)).resolves.toBe("event-id");
+  expect(send).toHaveBeenCalledExactlyOnceWith(
+    "channel",
+    "Later",
+    [],
+    [],
+    undefined,
+    [],
+    {},
+  );
+});
+
 it("rejects an attachment renderer order that is neither a number nor a function", async () => {
   const h = harness({
     inject: ["conversation"],
@@ -374,17 +497,55 @@ it("owns completion registration through disable, replacement and failed activat
   );
   expect(broken.service.completions.snapshot()).toHaveLength(0);
 });
-it.each([emoji, mentions])(
-  "bundled plugin registers its own completion provider",
-  async (module) => {
+it("makes a supplement only through registerCompletionSupplement", async () => {
+  const provider = {
+    title: "Rows",
+    match: () => null,
+    component: Component,
+  };
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      ctx.conversation.registerCompletion({ ...provider, id: "owner" });
+      ctx.conversation.registerCompletionSupplement({
+        ...provider,
+        id: "rows",
+      });
+      expect(() =>
+        ctx.conversation.registerCompletion({
+          ...provider,
+          id: "refused",
+          supplement: true,
+        }),
+      ).toThrow("registerCompletionSupplement");
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() =>
+    expect(
+      h.service.completions
+        .snapshot()
+        .map(({ id, supplement }) => [id, supplement === true]),
+    ).toEqual([
+      ["owner", false],
+      ["rows", true],
+    ]),
+  );
+});
+it.each([
+  [emoji, ["typeahead"]],
+  [mentions, ["typeahead", "folders", "skills"]],
+])(
+  "bundled plugin registers its own completion providers",
+  async (module, ids) => {
     const h = harness(module);
     h.runtime.reconcile([h.plugin]);
     await vi.waitFor(() =>
-      expect(h.service.completions.snapshot()).toHaveLength(1),
+      expect(h.service.completions.snapshot().map(({ id }) => id)).toEqual(ids),
     );
-    expect(h.service.completions.snapshot()[0]?.pluginId).toBe(
-      h.plugin.manifest.id,
-    );
+    expect(
+      h.service.completions.snapshot().map(({ pluginId }) => pluginId),
+    ).toEqual(ids.map(() => h.plugin.manifest.id));
   },
 );
 
