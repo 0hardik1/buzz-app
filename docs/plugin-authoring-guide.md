@@ -116,7 +116,8 @@ Check `ctx.conversation.workspaceSlots?.aside === true` before passing `aside`
 to `ui.Workspace`. The host places it: a column of `asideWidth` (default 320)
 beside the reader, which narrows to leave it room, or, when the reader would
 get too narrow, an overlay over the history's end edge. Fill the box and scroll
-your content inside it; use `ui` popovers so they can escape over the history.
+your content inside it. A popover escapes over the history only from a
+portal, as `ui.Menu`'s does.
 Drive it from your own header control with `asideOpen` and
 `onAsideOpenChange`: docked, it shows by default; floating, it shows only once
 opened. The host closes it as it floats, restores the docked state when the
