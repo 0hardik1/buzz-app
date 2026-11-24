@@ -7892,7 +7892,7 @@ describe("voice seats", () => {
     f.huddleChannels.add("channel");
     await f.runtime.run(f.delivery("@Codex typed first"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    f.complete(0, "DONE");
+    await f.complete(0, "DONE");
     f.core.mockResolvedValueOnce("NEW CORE");
     const d = f.delivery("unused");
     const connection = await f.runtime.voice(
@@ -12786,7 +12786,7 @@ it("retains a deferred remote community handoff until admission finishes", async
 });
 
 it.each(["channel", "community"] as const)(
-  "interrupts active %s work before attaching voice to the same session",
+  "continues active %s work after attaching voice to the same session",
   async (scope) => {
     vi.stubGlobal("RTCPeerConnection", class {});
     const f = fixture();
@@ -12811,26 +12811,186 @@ it.each(["channel", "community"] as const)(
         }),
       );
       expect(openVoice).toHaveBeenCalledTimes(opened);
-      await f.complete(0, "");
       vi.useFakeTimers();
       await vi.advanceTimersByTimeAsync(0);
       vi.useRealTimers();
       accepted.resolve();
       await opening;
       expect(vi.mocked(openVoice).mock.calls.at(-1)?.[1]).toBe("thread-1");
-      expect(f.starts()).toHaveLength(1);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      expect(f.starts()[1]?.params).toMatchObject({ threadId: "thread-1" });
+      expect(JSON.stringify(f.starts()[1]?.params)).toContain(
+        "Continue the work interrupted",
+      );
+      await f.complete(1);
       const resumed = f.sent.filter((w) => w.method === "thread/resume").length;
       await f.runtime.run({ ...f.delivery("typed with audio"), config });
-      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
       expect(f.sent.filter((w) => w.method === "thread/resume")).toHaveLength(
         resumed,
       );
-      await f.complete(1);
+      await f.complete(2);
     } finally {
       accepted.resolve();
-      f.complete(0);
-      await (await opening)?.close();
+      for (const i of f.starts().keys()) await f.complete(i);
       f.runtime.dispose();
+      await (await opening?.catch(() => undefined))?.close();
+    }
+  },
+);
+
+it("continues community work when Huddle startup is cancelled during a pending steer", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  const first = f.delivery("Continue this work");
+  const { config } = scoped(first);
+  const steering = deferred<void>();
+  const seat = new AbortController();
+  f.held.set("turn/steer", steering.promise);
+  f.huddleChannels.add("room");
+  await f.runtime.run({ ...first, config });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  const followup = f.runtime.run({ ...f.delivery("One more detail"), config });
+  try {
+    await vi.waitFor(() =>
+      expect(f.sent.some((wire) => wire.method === "turn/steer")).toBe(true),
+    );
+    const opening = join(f, first, { config, signal: seat.signal });
+    await vi.waitFor(() =>
+      expect(f.sent.some((wire) => wire.method === "turn/interrupt")).toBe(
+        true,
+      ),
+    );
+    seat.abort(new Error("Huddle cancelled"));
+    await expect(opening).rejects.toBe(seat.signal.reason);
+    steering.resolve();
+    await followup;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(f.starts()[1]?.params).toMatchObject({ threadId: "thread-1" });
+    expect(inputText(f.starts()[1])).toContain("One more detail");
+    await f.complete(1);
+  } finally {
+    seat.abort();
+    steering.resolve();
+    f.runtime.dispose();
+    await followup;
+  }
+});
+
+it.each(["channel", "community"] as const)(
+  "honors owner Stop during %s Huddle startup",
+  async (scope) => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const f = fixture();
+    const openingMedia = deferred<void>();
+    const mediaRequested = deferred<void>();
+    vi.mocked(openVoice).mockImplementationOnce(async () => {
+      mediaRequested.resolve();
+      await openingMedia.promise;
+      return { input() {}, async close() {} };
+    });
+    const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+    const d = f.delivery("typed work");
+    const { config, agent } = scoped(d, scope);
+    const channelId = scope === "channel" ? "channel" : "room";
+    f.huddleChannels.add(channelId);
+    await f.runtime.run({ ...d, config, interruptible });
+    const outcome = f.workingUntil.mock.calls.at(-1)?.[0];
+    const stopped = vi.fn();
+    void outcome?.then(stopped);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const opening = join(f, d, { config, conversation: { channelId } });
+    try {
+      await mediaRequested.promise;
+      if (scope === "channel")
+        await f.runtime.session(agent, { channelId }, "interrupt");
+      else await interruptible.mock.calls[0]?.[0]();
+
+      await vi.waitFor(() =>
+        expect(stopped).toHaveBeenCalledWith({ ok: true, stopped: true }),
+      );
+      openingMedia.resolve();
+      await opening;
+      expect(f.starts()).toHaveLength(1);
+    } finally {
+      openingMedia.resolve();
+      for (const i of f.starts().keys()) await f.complete(i);
+      f.runtime.dispose();
+      await (await opening.catch(() => undefined))?.close();
+    }
+  },
+);
+
+it("continues typed work when its later steered wake expires during Huddle admission", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  const first = f.delivery("Continue this work");
+  const { config } = scoped(first);
+  f.soloChannels.add("channel");
+  f.huddleChannels.add("room");
+  let current = true;
+  vi.mocked(openVoice).mockImplementationOnce(async () => {
+    current = false;
+    return { input() {}, async close() {} };
+  });
+  await f.runtime.run({ ...first, config });
+  const original = f.workingUntil.mock.calls.at(-1)?.[0];
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  await f.runtime.run({
+    ...pluginWake(f),
+    config,
+    current: () => current,
+  });
+  const wake = f.workingUntil.mock.calls.at(-1)?.[0];
+  expect(f.sent.some((wire) => wire.method === "turn/steer")).toBe(true);
+  const connection = await join(f, first);
+  try {
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(inputText(f.starts()[1])).toContain("Continue this work");
+    await f.complete(1);
+    await expect(original).resolves.toEqual({ ok: true });
+    await expect(wake).resolves.toEqual({ ok: true });
+  } finally {
+    f.runtime.dispose();
+    await connection.close();
+  }
+});
+
+it.each(["close", "stop"] as const)(
+  "keeps continued work on the original thread when the owner chooses %s",
+  async (action) => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const f = fixture();
+    const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+    const d = f.delivery("typed work");
+    const { config } = scoped(d);
+    f.huddleChannels.add("room");
+    await f.runtime.run({ ...d, config, interruptible });
+    const outcome = f.workingUntil.mock.calls.at(-1)?.[0];
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const connection = await join(f, d);
+    const interrupts = () =>
+      f.sent.filter((wire) => wire.method === "turn/interrupt");
+    try {
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      expect(f.starts()[1]?.params).toMatchObject({ threadId: "thread-1" });
+      if (action === "stop") {
+        await interruptible.mock.calls[0]?.[0]();
+        expect(interrupts().at(-1)?.params).toEqual({
+          threadId: "thread-1",
+          turnId: "turn-2",
+        });
+        await expect(outcome).resolves.toEqual({ ok: true, stopped: true });
+      } else {
+        const closing = connection.close();
+        await f.complete(1, "DONE");
+        await closing;
+        expect(interrupts()).toHaveLength(1);
+        await expect(outcome).resolves.toEqual({ ok: true });
+      }
+    } finally {
+      f.runtime.dispose();
+      await connection.close();
     }
   },
 );
@@ -12986,6 +13146,10 @@ it.each(["wake", "typed-wake", "wake-typed", "published"])(
       await expect(once).resolves.toMatchObject({ ok: order === "published" });
       await opening;
       expect(vi.mocked(openVoice).mock.calls.at(-1)?.[1]).toBe("thread-1");
+      if (order === "typed-wake" || order === "wake-typed") {
+        await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+        await f.complete(2);
+      }
     } finally {
       await f.complete(0, "");
       signal.abort();
@@ -13040,11 +13204,15 @@ it("interrupts queued community text before attaching Huddle audio", async () =>
     );
     const connection = await opening;
     expect(openVoice).toHaveBeenCalledTimes(opened + 1);
+    for (const resumed of [2, 3]) {
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(resumed + 1));
+      await f.complete(resumed);
+    }
     await connection.close();
   } finally {
     cleanup.resolve();
     seat.abort();
-    if (f.starts().length === 2) await f.complete(1, "");
+    for (const i of f.starts().keys()) await f.complete(i, "");
     f.runtime.dispose();
     await opening.catch(() => {});
   }
