@@ -143,14 +143,13 @@ export function createHuddleWindow(
       return null;
     const session = relay.snapshot().session;
     const profiles = session.profiles.snapshot();
+    const error = call.error ?? call.transcriptError;
     return {
       id: call.id,
       title: Array.from(call.destination.channelName).slice(0, 1000).join(""),
       phase: call.phase as HuddleView["phase"],
       muted: call.muted,
-      error: call.error
-        ? Array.from(call.error).slice(0, 2000).join("")
-        : undefined,
+      error: error ? Array.from(error).slice(0, 2000).join("") : undefined,
       audioSettings:
         call.audioSettings && projectAudioSettings(call.audioSettings),
       routing: call.routing,

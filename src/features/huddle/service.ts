@@ -30,6 +30,7 @@ export type HuddleSnapshot = Readonly<{
   listening?: readonly string[];
   thinking?: readonly string[];
   error?: string;
+  transcriptError?: string;
 }>;
 type Attempt = {
   id: string;
@@ -484,7 +485,7 @@ export function createHuddles(
                 },
                 (error) => {
                   if (valid(attempt))
-                    update({ ...snapshot, error: message(error) });
+                    update({ ...snapshot, transcriptError: message(error) });
                 },
                 (samples) => recognize(attempt.id, samples),
               );
@@ -654,6 +655,11 @@ export function createHuddles(
     remoteVoiceError(error: string) {
       if (snapshot.phase !== "idle" && snapshot.phase !== "error") return;
       update({ ...idle, phase: "error", error });
+    },
+    dismissTranscriptError(call: string) {
+      if (snapshot.id !== call || !snapshot.transcriptError) return;
+      const { transcriptError: _previous, ...rest } = snapshot;
+      update(rest);
     },
     voiceError(call: string, error?: string) {
       if (snapshot.id !== call) return;

@@ -30,6 +30,7 @@ function harness() {
       return undefined;
     },
     voiceError() {},
+    dismissTranscriptError() {},
     remoteVoiceError() {},
     subscribeLocalMicrophone() {
       return undefined;

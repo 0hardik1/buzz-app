@@ -1303,10 +1303,25 @@ it.each([undefined, "a".repeat(64)])(
         ),
       );
       expect(h.transcribe).toHaveBeenCalledTimes(1);
+      vi.mocked(h.bridge.recognize)?.mockRejectedValueOnce(
+        new Error("Could not transcribe the microphone audio."),
+      );
+      for (let i = 0; i < 10; i++) h.send(speech);
+      for (let i = 0; i < 35; i++) h.send(silence);
+      await vi.waitFor(() =>
+        expect(h.service.snapshot()).toMatchObject({
+          phase: "connected",
+          transcriptError: "Could not transcribe the microphone audio.",
+        }),
+      );
+      expect(h.service.snapshot().error).toBeUndefined();
+      for (let i = 0; i < 10; i++) h.send(speech);
+      for (let i = 0; i < 35; i++) h.send(silence);
+      await vi.waitFor(() => expect(h.transcribe).toHaveBeenCalledTimes(2));
       h.service.mute();
       for (let i = 0; i < 10; i++) h.send(speech);
       for (let i = 0; i < 35; i++) h.send(silence);
-      expect(h.bridge.recognize).toHaveBeenCalledTimes(1);
+      expect(h.bridge.recognize).toHaveBeenCalledTimes(3);
     } finally {
       h.service.setRouting("agentCrossTalk", true);
       await h.dispose();
