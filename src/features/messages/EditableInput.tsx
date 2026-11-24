@@ -82,6 +82,7 @@ import {
   applyComposerInlineInput,
   composerInlineDelimiters,
 } from "./composer-inline-input";
+import { applyComposerEmoticon } from "./composer-emoticons";
 import {
   composerMarkdown,
   type ComposerMarkdownMode,
@@ -648,6 +649,9 @@ export function EditableInput({
     );
     let editor: EditorView;
     let separateHistory = false;
+    // Where the last typed text left the document, so sending and line breaks
+    // convert only an emoticon that was just typed, never pasted or restored.
+    let typed: { doc: EditorNode; caret: number } | undefined;
     // Mod+Shift+V (and Apple's ⌥⇧⌘V) pastes plain text verbatim. The native
     // command fires the paste event; the held chord, or the desktop menu's
     // `buzz:paste-plain` sent just before its command, marks it as raw.
@@ -1110,6 +1114,23 @@ export function EditableInput({
       editor.dispatch(
         tr.setMeta("composer-normalized", true).setMeta("addToHistory", false),
       );
+    };
+    /** Convert a just-typed chat emoticon at the caret, as its own undo step. */
+    const convertEmoticon = () => {
+      const { selection } = editor.state;
+      if (
+        current.current.markdownMode !== "chat" ||
+        !editable() ||
+        !selection.empty ||
+        typed?.doc !== editor.state.doc ||
+        typed.caret !== selection.from ||
+        composing.current ||
+        editor.composing
+      )
+        return;
+      const tr = editor.state.tr;
+      if (applyComposerEmoticon(tr, selection.from))
+        editor.dispatch(closeHistory(tr));
     };
     const insert = (
       text: string,
@@ -2453,8 +2474,9 @@ export function EditableInput({
           editor.dispatch(tr.scrollIntoView());
           // A typed delimiter converts in a second transaction: the third
           // character of a lone ``` or ~~~ line opens a code block at once, the
-          // space after a lone block marker opens that block, and a
-          // closing delimiter converts its inline span. One undo restores the
+          // space after a lone block marker opens that block, the space after a
+          // chat emoticon turns it into emoji, and a closing delimiter
+          // converts its inline span. One undo restores the
           // typed source, that character included, and the next keystroke never
           // merges into the conversion. Near maxLength the typed character
           // itself can be filtered out; then nothing converts. Completions
@@ -2477,7 +2499,17 @@ export function EditableInput({
                 current.current.markdownMode,
               );
             const conversion = block ?? editor.state.tr;
-            if (block || applyComposerInlineInput(conversion, text)) {
+            if (
+              block ||
+              applyComposerInlineInput(conversion, text) ||
+              (text === " " &&
+                current.current.markdownMode === "chat" &&
+                editor.state.selection.empty &&
+                applyComposerEmoticon(
+                  conversion,
+                  editor.state.selection.from - 1,
+                ))
+            ) {
               const unconverted = editor.state;
               editor.dispatch(closeHistory(conversion).scrollIntoView());
               // Generated delimiters or escapes in the serialized form can
@@ -2487,6 +2519,7 @@ export function EditableInput({
               if (editor.state !== unconverted) separateHistory = true;
             }
           }
+          typed = { doc: editor.state.doc, caret: editor.state.selection.from };
           return true;
         },
         handleKeyDown(_view, event) {
@@ -2986,6 +3019,7 @@ export function EditableInput({
       insertResource: { configurable: true, value: insertResource },
       insertToken: { configurable: true, value: insertToken },
       toggleFormat: { configurable: true, value: toggleFormat },
+      convertEmoticon: { configurable: true, value: convertEmoticon },
       insertLineBreak: {
         configurable: true,
         value: (kind?: "paragraph" | "hard") => {
@@ -2999,6 +3033,7 @@ export function EditableInput({
           // (1.41.0). Remove once upstream repaints it.
           if (editor.state.selection.empty && editor.hasFocus() && macWebKit())
             editor.dom.ownerDocument.getSelection()?.removeAllRanges();
+          convertEmoticon();
           let tr: Transaction | undefined;
           const parent = editor.state.selection.$from.parent;
           // Only H1 and H2 have a multiline CommonMark representation.

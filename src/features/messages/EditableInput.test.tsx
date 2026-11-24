@@ -5025,3 +5025,11 @@ describe("quoting timeline content", () => {
     expect(h.markdown()).toBe("keep");
   });
 });
+
+it("converts a typed emoticon on Space, and one undo restores it", async () => {
+  const h = mount();
+  await h.user.keyboard("nice :) ");
+  expect(h.input).toHaveValue("nice 🙂 ");
+  act(() => h.input.undo(false));
+  expect(h.input).toHaveValue("nice :) ");
+});
