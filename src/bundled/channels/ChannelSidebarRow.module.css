@@ -36,7 +36,7 @@
 .row [data-solo-shared] {
   margin-inline-end: calc(
     var(--sidebar-row-action-end) -
-    var(--channel-row-fill-end, 0px)
+    var(--channel-row-fill-end, 0%)
   );
 }
 @media (hover: hover) and (pointer: fine) {
