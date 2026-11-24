@@ -12884,38 +12884,49 @@ it("continues community work when Huddle startup is cancelled during a pending s
   }
 });
 
-it("honors owner Stop after the interrupted turn ends and before the Huddle opens", async () => {
-  vi.stubGlobal("RTCPeerConnection", class {});
-  const f = fixture();
-  const openingMedia = deferred<void>();
-  const mediaRequested = deferred<void>();
-  vi.mocked(openVoice).mockImplementationOnce(async () => {
-    mediaRequested.resolve();
-    await openingMedia.promise;
-    return { input() {}, async close() {} };
-  });
-  const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
-  const d = f.delivery("typed work");
-  const { config } = scoped(d);
-  f.huddleChannels.add("room");
-  await f.runtime.run({ ...d, config, interruptible });
-  const outcome = f.workingUntil.mock.calls.at(-1)?.[0];
-  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-  const opening = join(f, d);
-  try {
-    await mediaRequested.promise;
-    await interruptible.mock.calls[0]?.[0]();
-    openingMedia.resolve();
-    await opening;
-    expect(f.starts()).toHaveLength(1);
-    await expect(outcome).resolves.toEqual({ ok: true, stopped: true });
-  } finally {
-    openingMedia.resolve();
-    for (const i of f.starts().keys()) await f.complete(i);
-    f.runtime.dispose();
-    await (await opening.catch(() => undefined))?.close();
-  }
-});
+it.each(["channel", "community"] as const)(
+  "honors owner Stop during %s Huddle startup",
+  async (scope) => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const f = fixture();
+    const openingMedia = deferred<void>();
+    const mediaRequested = deferred<void>();
+    vi.mocked(openVoice).mockImplementationOnce(async () => {
+      mediaRequested.resolve();
+      await openingMedia.promise;
+      return { input() {}, async close() {} };
+    });
+    const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+    const d = f.delivery("typed work");
+    const { config, agent } = scoped(d, scope);
+    const channelId = scope === "channel" ? "channel" : "room";
+    f.huddleChannels.add(channelId);
+    await f.runtime.run({ ...d, config, interruptible });
+    const outcome = f.workingUntil.mock.calls.at(-1)?.[0];
+    const stopped = vi.fn();
+    void outcome?.then(stopped);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const opening = join(f, d, { config, conversation: { channelId } });
+    try {
+      await mediaRequested.promise;
+      if (scope === "channel")
+        await f.runtime.session(agent, { channelId }, "interrupt");
+      else await interruptible.mock.calls[0]?.[0]();
+
+      await vi.waitFor(() =>
+        expect(stopped).toHaveBeenCalledWith({ ok: true, stopped: true }),
+      );
+      openingMedia.resolve();
+      await opening;
+      expect(f.starts()).toHaveLength(1);
+    } finally {
+      openingMedia.resolve();
+      for (const i of f.starts().keys()) await f.complete(i);
+      f.runtime.dispose();
+      await (await opening.catch(() => undefined))?.close();
+    }
+  },
+);
 
 it("continues typed work when its later steered wake expires during Huddle admission", async () => {
   vi.stubGlobal("RTCPeerConnection", class {});

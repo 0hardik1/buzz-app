@@ -235,6 +235,7 @@ type Request = {
 type TextRequest = Request & { event: EventData; adopted?: never };
 type VoiceContinuation = {
   entry: Entry;
+  key: string;
   threadId: string;
   requests: TextRequest[];
 };
@@ -963,12 +964,15 @@ export class CodexRuntime {
     const entry = this.entry(agent.key, reads.scope);
     if (action === "interrupt") {
       if (this.controls.interrupt(control)) return;
-      if (key === scopedKey("community", ""))
-        for (const request of entry.waiting)
-          if (request.settings.scope === "community") {
-            request.current = () => false;
-            request.answered(true);
-          }
+      const community = key === scopedKey("community", "");
+      for (const request of entry.waiting)
+        if (
+          request.voiceContinuation?.key === key ||
+          (community && request.settings.scope === "community")
+        ) {
+          request.current = () => false;
+          request.answered(true);
+        }
       const active = entry.lanes.get(key)?.active;
       if (active) await this.interrupt(entry, key, active.reply);
       return;
@@ -4430,7 +4434,9 @@ export class CodexRuntime {
         // rejoin" comes after it.
         seat.end(
           new Error(
-            "The base instructions changed, so voice stopped. Wait for the reply to your typed message before you leave, since a Huddle closes when its only person leaves",
+            continuation
+              ? "The base instructions changed, so voice stopped. Check the original message for the status of the interrupted work."
+              : "The base instructions changed, so voice stopped. Wait for the reply to your typed message before you leave, since a Huddle closes when its only person leaves",
           ),
         );
         seat = undefined;
@@ -4677,7 +4683,7 @@ export class CodexRuntime {
             !!taken.event && !taken.unaddressed && taken.finalDelivery !== true,
         );
         if (active.voiceHandoff && pending.length) {
-          const handoff = { entry, threadId, requests: pending };
+          const handoff = { entry, key, threadId, requests: pending };
           active.voiceHandoff.push(handoff);
           for (const taken of pending) {
             taken.voiceContinuation = handoff;
