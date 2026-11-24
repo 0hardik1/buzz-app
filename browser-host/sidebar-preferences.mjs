@@ -18,6 +18,7 @@ import {
   WORKSPACE_COORDINATE,
   WORKSPACE_PREFERENCE_COORDINATES,
   WORKSPACE_SORT_COORDINATE,
+  WORKSPACE_FILTER_COORDINATE,
   workspaceBaseRecord,
   expandWorkspaceRecord,
   decodeLegacyWorkspaceEnvelope,
@@ -77,7 +78,8 @@ export function decodeSidebarPreferences(input, secret) {
     }
     const workspace = decoded.get(WORKSPACE_COORDINATE);
     const sort = decoded.get(WORKSPACE_SORT_COORDINATE);
-    if (workspace || sort)
+    const filter = decoded.get(WORKSPACE_FILTER_COORDINATE);
+    if (workspace || sort || filter)
       return projectWorkspacePreferences(
         workspace
           ? importWorkspaceFallback(expandWorkspaceRecord(workspace), legacy)
@@ -85,12 +87,15 @@ export function decodeSidebarPreferences(input, secret) {
         decoded.get("channel-stars"),
         decoded.get("channel-mutes"),
         sort ?? decoded.get("channel-sort"),
+        filter ?? decoded.get("channel-filter"),
       );
     return projectSidebarPreferences(
       decoded.get("channel-sections"),
       decoded.get("channel-stars"),
       decoded.get("channel-mutes"),
       decoded.get("channel-sort"),
+      undefined,
+      decoded.get("channel-filter"),
     );
   } finally {
     key.fill(0);

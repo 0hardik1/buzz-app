@@ -1,9 +1,74 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { DEFAULT_ACTIVE_WINDOW_SECONDS } from "../../features/relay/sidebar-preferences";
 import type {
   MentionActivityItem,
   ThreadActivityItem,
   UnreadCapability,
 } from "../../features/relay/unread";
+import type { sidebarSections } from "./sidebar-sections";
+
+export type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
+import type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
+export const SIDEBAR_ACTIVE_WINDOW = DEFAULT_ACTIVE_WINDOW_SECONDS * 1000;
+
+/**
+ * Filter only the existing section roster to rows active within each card's
+ * window. The current destination and conversations that need you (`keep`)
+ * always stay. A saved Unreads filter, which the sidebar no longer offers,
+ * shows everything.
+ */
+export function useSidebarFilters<
+  Section extends ReturnType<typeof sidebarSections>[number],
+>(
+  sections: readonly Section[],
+  filters: Readonly<Record<string, SidebarFilter>>,
+  current: string | undefined,
+  keep: ReadonlySet<string>,
+  windows: Readonly<Record<string, number>> = {},
+  activityReady = true,
+) {
+  const [clock, tick] = useState(0);
+  const now = Date.now();
+  let nextExpiry = Infinity;
+  // Unknown activity is not inactivity. Keep those rows during loading or a
+  // failed read; a successful read can establish that a channel has no activity.
+  const visible = sections.map((section) => {
+    const active = filters[section.key] === "active";
+    const activeWindow =
+      (windows[section.key] ?? DEFAULT_ACTIVE_WINDOW_SECONDS) * 1000;
+    const rows = section.rows.filter((channel) => {
+      if (active && channel.lastActivityAt !== undefined) {
+        const expiry = channel.lastActivityAt * 1000 + activeWindow;
+        if (expiry > now) nextExpiry = Math.min(nextExpiry, expiry);
+      }
+      return (
+        !active ||
+        channel.id === current ||
+        keep.has(channel.id) ||
+        (channel.lastActivityAt === undefined
+          ? !channel.activityKnown && !activityReady
+          : channel.lastActivityAt * 1000 + activeWindow > now)
+      );
+    });
+    return { ...section, allRows: section.rows, rows };
+  });
+  // One owned deadline keeps an idle sidebar correct when activity ages out.
+  useEffect(() => {
+    if (!Number.isFinite(nextExpiry)) return;
+    const timer = window.setTimeout(
+      () => tick(clock + 1),
+      Math.min(Math.max(0, nextExpiry - Date.now()), 2_147_483_647),
+    );
+    return () => window.clearTimeout(timer);
+  }, [nextExpiry, clock]);
+  return visible;
+}
 
 /** Whether a channel has unread messages, a manual mark or unread threads.
  * `shown` asks what its row shows instead, which opening the channel quiets. */

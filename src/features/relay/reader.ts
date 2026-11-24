@@ -1,3 +1,4 @@
+import { isSidebarPreferencesBatch } from "./sidebar-preferences";
 import { isWorkflowDefinitionBatch } from "../workflows/queries";
 import { verifyThreadWindows } from "./thread-window";
 import { yieldToHost } from "./yield";
@@ -264,7 +265,9 @@ export function createRelayReader(
     try {
       if (
         (!filters.length && !library) ||
-        (filters.length > 4 && !isWorkflowDefinitionBatch(filters))
+        (filters.length > 4 &&
+          !isWorkflowDefinitionBatch(filters) &&
+          !isSidebarPreferencesBatch(filters))
       )
         throw new Error("A read needs 1–4 filters");
       // Object property and set order do not change NIP-01 filter semantics.

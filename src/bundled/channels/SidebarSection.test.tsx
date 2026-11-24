@@ -176,6 +176,102 @@ it("sorts from the card's Sort submenu and turns unreads first off", async () =>
   expect(first).not.toBeChecked();
 });
 
+it("filters from the card's Filter submenu and applies a custom window", async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  const card = (days: number | undefined) => (
+    <SidebarSection
+      sectionKey="channels"
+      title="Channels"
+      open
+      onToggle={() => {}}
+      filter={{ days, change }}
+    >
+      <p>Rows</p>
+    </SidebarSection>
+  );
+  const { rerender } = render(card(undefined));
+  const openFilter = async () => {
+    await user.click(
+      screen.getByRole("button", { name: "More actions for Channels" }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
+    return screen.findByRole("menu", { name: "Filter Channels" });
+  };
+  let filter = await openFilter();
+  expect(
+    within(filter)
+      .getAllByRole("menuitemradio")
+      .map((item) => item.textContent),
+  ).toEqual(["All", "1 day", "3 days", "7 days", "30 days", "Custom…"]);
+  expect(
+    within(filter).getByRole("menuitemradio", { name: "All" }),
+  ).toBeChecked();
+  // The open submenu ignores pointer input until the pointer moves into it.
+  fireEvent.click(
+    within(filter).getByRole("menuitemradio", { name: "7 days" }),
+  );
+  expect(change).toHaveBeenLastCalledWith(7);
+  fireEvent.click(
+    within(filter).getByRole("menuitemradio", { name: "Custom…" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Active in the last",
+  });
+  const days = within(dialog).getByRole("spinbutton", { name: "Days" });
+  await user.clear(days);
+  await user.type(days, "14");
+  await user.click(within(dialog).getByRole("button", { name: "Apply" }));
+  expect(change).toHaveBeenLastCalledWith(14);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // A saved window that is not a preset shows as the custom choice.
+  rerender(card(14));
+  filter = await openFilter();
+  expect(
+    within(filter).getByRole("menuitemradio", { name: "Custom (14 days)" }),
+  ).toBeChecked();
+  await user.keyboard("{Escape}{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  rerender(card(30));
+  filter = await openFilter();
+  expect(
+    within(filter).getByRole("menuitemradio", { name: "30 days" }),
+  ).toBeChecked();
+  expect(
+    within(filter).getByRole("menuitemradio", { name: "Custom…" }),
+  ).not.toBeChecked();
+});
+
+it("opens Custom from the keyboard and keeps a failed save's error in the dialog", async () => {
+  const user = userEvent.setup();
+  const change = vi.fn().mockRejectedValue(new Error("Relay offline"));
+  const dismissError = vi.fn();
+  render(
+    <SidebarSection
+      sectionKey="channels"
+      title="Channels"
+      open
+      onToggle={() => {}}
+      filter={{ days: undefined, change, dismissError }}
+    >
+      <p>Rows</p>
+    </SidebarSection>,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "More actions for Channels" }),
+  );
+  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
+  const filter = await screen.findByRole("menu", { name: "Filter Channels" });
+  within(filter).getByRole("menuitemradio", { name: "Custom…" }).focus();
+  await user.keyboard("{Enter}");
+  const dialog = await screen.findByRole("dialog", {
+    name: "Active in the last",
+  });
+  await user.click(within(dialog).getByRole("button", { name: "Apply" }));
+  expect(await within(dialog).findByText("Relay offline")).toBeVisible();
+  expect(dismissError).toHaveBeenCalledOnce();
+});
+
 it("orders header actions before section rows for keyboard navigation", async () => {
   const user = userEvent.setup();
   render(<Section />);

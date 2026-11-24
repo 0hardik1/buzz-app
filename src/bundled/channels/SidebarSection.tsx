@@ -1,4 +1,9 @@
-import { SidebarViewMenuItems, type SidebarViewSort } from "./SidebarViewMenus";
+import {
+  SidebarViewMenuItems,
+  type SidebarViewFilter,
+  type SidebarViewSort,
+} from "./SidebarViewMenus";
+import { SidebarActiveDialog } from "./SidebarActiveDialog";
 import { FadingLabel } from "./FadingLabel";
 import {
   useEffect,
@@ -61,6 +66,7 @@ export function SidebarSection({
   createSection,
   newMessage,
   sort,
+  filter,
   dropRef,
   dropTarget = false,
   dropEdge,
@@ -107,6 +113,8 @@ export function SidebarSection({
     | { available: boolean; open: (trigger: HTMLButtonElement) => void }
     | undefined;
   sort?: SidebarViewSort | undefined;
+  /** Showing only conversations active within a window. */
+  filter?: SidebarViewFilter | undefined;
   dropRef?: Ref<HTMLDivElement> | undefined;
   dropTarget?: boolean;
   /** Where a dragged group would land relative to this one. */
@@ -142,6 +150,7 @@ export function SidebarSection({
   const cancelRemove = useRef<HTMLButtonElement>(null);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [customFilterOpen, setCustomFilterOpen] = useState(false);
   const [display, setDisplay] = useSidebarCardDisplay(
     iconView ? heightScope : undefined,
     sectionKey,
@@ -158,7 +167,7 @@ export function SidebarSection({
   const displayChoice =
     iconView && heightScope ? { value: display, set: setDisplay } : undefined;
   // View choices stay reachable when the card's own actions are hidden.
-  const viewChoices = !!(sort || unreadsFirstChoice || displayChoice);
+  const viewChoices = !!(sort || unreadsFirstChoice || filter || displayChoice);
   const showMenu = !hideMoreActions || viewChoices;
   if (!showMenu && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -218,6 +227,11 @@ export function SidebarSection({
                       title={title}
                       sort={sort}
                       unreadsFirst={unreadsFirstChoice}
+                      filter={filter}
+                      customFilter={() => {
+                        setMenuOpen(false);
+                        setCustomFilterOpen(true);
+                      }}
                       display={displayChoice}
                     />
                     {viewChoices &&
@@ -301,6 +315,28 @@ export function SidebarSection({
                   title="New message"
                   onClick={newMessage}
                   icon={<PlusIcon strokeWidth={2.5} size={15} />}
+                />
+              )}
+              {customFilterOpen && filter && (
+                <SidebarActiveDialog
+                  seconds={
+                    filter.days === undefined ? undefined : filter.days * 86400
+                  }
+                  apply={async (seconds) => {
+                    try {
+                      await filter.change(seconds / 86400);
+                    } catch (cause) {
+                      // The dialog shows the failure; drop the card notice
+                      // behind it so the error isn't shown twice.
+                      filter.dismissError?.();
+                      throw cause;
+                    }
+                  }}
+                  close={() => {
+                    filter.dismissError?.();
+                    setCustomFilterOpen(false);
+                  }}
+                  finalFocus={actionsTrigger}
                 />
               )}
               {canRemove && (

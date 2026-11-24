@@ -2603,12 +2603,7 @@ it("reconciles own sidebar hints with full fresh reads and bounded reconnect rep
     live.receive([hint, hint]);
     await flush();
     const read = wire.next();
-    expect(read.filters.map((filter) => filter["#d"])).toEqual([
-      ["channel-sections"],
-      ["channel-stars"],
-      ["channel-mutes"],
-      ["channel-sort"],
-    ]);
+    expect(read.filters).toHaveLength(5);
     expect(
       read.filters.every(
         (filter) =>

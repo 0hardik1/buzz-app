@@ -2377,6 +2377,23 @@ export function createRelaySession(
       : undefined,
     renameSection: workspaceWrite(transport?.renameSidebarSection),
     writeOrder: workspaceWrite(transport?.writeSidebarSectionOrder),
+    writeFilter: (() => {
+      const write = transport?.writeSidebarFilter;
+      return write
+        ? (group, mode, sectionIds, signal, activeWindowSeconds) =>
+            write(
+              group,
+              mode,
+              sectionIds,
+              AbortSignal.any([
+                lifetime.signal,
+                AbortSignal.timeout(20_000),
+                signal,
+              ]),
+              activeWindowSeconds,
+            )
+        : undefined;
+    })(),
   });
   type SetupNotice = Readonly<{ id: string; name: string; error: string }>;
   let setupNotices: readonly SetupNotice[] = [];
@@ -4390,7 +4407,8 @@ export function createRelaySession(
     const preferences = sidebarPreferences.queries.snapshot().data;
     if (
       !activityDemand &&
-      !Object.values(preferences?.sort ?? {}).some(sidebarSortNeedsActivity)
+      !Object.values(preferences?.sort ?? {}).some(sidebarSortNeedsActivity) &&
+      !Object.values(preferences?.filters ?? {}).includes("active")
     ) {
       channelActivity.cancel();
       activityRosterKey = undefined;

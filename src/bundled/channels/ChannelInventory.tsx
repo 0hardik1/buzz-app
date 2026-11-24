@@ -49,8 +49,10 @@ import {
 } from "../../features/solo/draft-projects";
 import { SpringLoadedNavigationItem } from "../../features/channel-navigation/SpringLoadedNavigationItem";
 import {
+  DEFAULT_ACTIVE_WINDOW_SECONDS,
   SIDEBAR_PAGES_SECTION,
   workspaceSectionOrder,
+  type SidebarFilterMode,
 } from "../../features/relay/sidebar-preferences";
 import type { RelayData } from "../../features/relay/service";
 import type { Agents } from "../../features/agents/service";
@@ -126,6 +128,7 @@ import { useHiddenDms } from "./useHiddenDms";
 import { resurfaceHiddenDms } from "../../features/relay/dm-resurfacing";
 import { useSidebarPreferences } from "./useSidebarPreferences";
 import { useSidebarView } from "./useSidebarView";
+import { useSidebarFilters } from "./useSidebarFilters";
 import {
   sidebarSections,
   contributedSidebarSectionKey,
@@ -187,6 +190,18 @@ const emptyRowContributions: readonly RegisteredSidebarRows[] = [];
 const noSidebarRows = () => emptyRowContributions;
 const noPendingPlugins = () => true;
 const noSections: ReturnType<typeof sidebarSections> = [];
+/** A card's key in saved sort and filter choices. */
+const preferenceGroup = (key: string) =>
+  key.startsWith("group:") ? `section:${key.slice(6)}` : key;
+/** Saved per-card choices, keyed like the cards. */
+function sectionPreferences<T>(saved: Readonly<Record<string, T>> | undefined) {
+  return Object.fromEntries(
+    Object.entries(saved ?? {}).map(([key, value]) => [
+      key.startsWith("section:") ? `group:${key.slice(8)}` : key,
+      value,
+    ]),
+  );
+}
 const emptySidebarSections: SidebarSections = {
   version: 1,
   snapshot: noSidebarSections,
@@ -493,7 +508,11 @@ export function ChannelInventory({
     preferences.status === "unsupported";
   const needsActivity =
     preferencesSettled &&
-    cards.some(({ key }) => sidebarSortNeedsActivity(sectionSort(key)));
+    cards.some(
+      ({ key }) =>
+        sidebarSortNeedsActivity(sectionSort(key)) ||
+        preferences.data?.filters?.[preferenceGroup(key)] === "active",
+    );
   useEffect(() => {
     if (needsActivity) return queries.channels.demandActivity?.();
   }, [needsActivity, queries.channels]);
@@ -960,13 +979,22 @@ export function ChannelInventory({
       }),
     [sortedSections, showsUnreadsFirst, waitingChannels],
   );
-  const shownSections = orderedSections
-    .filter(({ key }) => !workspaceFrames.has(key))
-    .map((section) =>
-      composedChatSections.has(section.key)
-        ? { ...section, rows: [] }
-        : section,
-    );
+  // Filtering keeps the open conversation and any that need you; the card's
+  // size then cuts off what the filter leaves.
+  const shownSections = useSidebarFilters(
+    orderedSections
+      .filter(({ key }) => !workspaceFrames.has(key))
+      .map((section) =>
+        composedChatSections.has(section.key)
+          ? { ...section, rows: [] }
+          : section,
+      ),
+    sectionPreferences(preferences.data?.filters),
+    current?.id,
+    waitingChannels,
+    sectionPreferences(preferences.data?.activeWindowSeconds),
+    list.activityStatus === "ready",
+  );
   const channelSectionKey = useCallback(
     (channelId: string) => {
       const data = queries.sidebarPreferences.snapshot().data;
@@ -1099,6 +1127,18 @@ export function ChannelInventory({
       down: next ? () => moveGroup(key, groupIds.indexOf(next)) : undefined,
     };
   };
+  const setSectionFilter = (
+    key: string,
+    mode: SidebarFilterMode,
+    activeWindowSeconds?: number | null,
+  ) =>
+    preferences.setFilter(
+      preferenceGroup(key),
+      mode,
+      preferences.data?.sections.map((section) => section.id) ?? [],
+      undefined,
+      activeWindowSeconds,
+    );
   const setSectionSort = (key: string, mode: SidebarSortMode) => {
     void preferences
       .setSort(
@@ -1944,7 +1984,7 @@ export function ChannelInventory({
                               : open,
                           )
                         }
-                        channelCount={section.rows.length}
+                        channelCount={section.allRows.length}
                         onRemove={
                           preferences.removeSectionWritable &&
                           section.key.startsWith("group:")
@@ -2054,6 +2094,36 @@ export function ChannelInventory({
                                     },
                                   });
                               }
+                            : undefined
+                        }
+                        filter={
+                          preferences.data
+                            ? (() => {
+                                const group = preferenceGroup(section.key);
+                                return {
+                                  // A saved Unreads filter is no longer offered
+                                  // and shows everything.
+                                  days:
+                                    preferences.data.filters?.[group] ===
+                                    "active"
+                                      ? (preferences.data.activeWindowSeconds?.[
+                                          group
+                                        ] ?? DEFAULT_ACTIVE_WINDOW_SECONDS) /
+                                        86400
+                                      : undefined,
+                                  disabled: !preferences.filterWritable,
+                                  change: (days: number | undefined) =>
+                                    days === undefined
+                                      ? setSectionFilter(section.key, "all")
+                                      : setSectionFilter(
+                                          section.key,
+                                          "active",
+                                          days * 86400,
+                                        ),
+                                  dismissError: () =>
+                                    preferences.dismissFilterError(group),
+                                };
+                              })()
                             : undefined
                         }
                         sort={
@@ -2317,6 +2387,39 @@ export function ChannelInventory({
             </button>
           </div>
         ))}
+        {preferences.filterErrors?.map(
+          ({ group, mode, activeWindowSeconds, error }) => (
+            <div key={group} className={styles.preferenceNotice} role="alert">
+              <p>
+                Couldn’t save the filter for{" "}
+                {sections.find(
+                  ({ key }) =>
+                    key ===
+                    (group.startsWith("section:")
+                      ? `group:${group.slice(8)}`
+                      : group),
+                )?.title ?? "this section"}
+                . {error}
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  void setSectionFilter(group, mode, activeWindowSeconds).catch(
+                    () => {},
+                  )
+                }
+              >
+                Retry filter
+              </button>
+              <button
+                type="button"
+                onClick={() => preferences.dismissFilterError(group)}
+              >
+                Dismiss
+              </button>
+            </div>
+          ),
+        )}
         {preferences.orderError && (
           <div className={styles.preferenceNotice} role="alert">
             <p>

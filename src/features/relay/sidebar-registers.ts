@@ -11,7 +11,7 @@ export const MAX_WORKSPACE_ASSIGNMENTS = 2000;
 /** Section and section-choice registers. No persistence or publication owner. */
 export type SidebarRegister = [number, string, unknown];
 type Tree = { [key: string]: Tree | SidebarRegister };
-type Coordinate = "channel-sections" | "channel-sort";
+type Coordinate = "channel-sections" | "channel-sort" | "channel-filter";
 const legacyDevice = "0".repeat(16);
 let device: string | undefined;
 const object = (value: unknown): Record<string, unknown> => {
@@ -86,7 +86,14 @@ function metadata(
   if (coordinate !== "channel-sections")
     return {
       g: map(data.g === undefined ? {} : data.g, 264, (v) =>
-        register(v, (v) => v === null || v === "alpha" || v === "recent"),
+        register(
+          v,
+          (v) =>
+            v === null ||
+            (coordinate === "channel-filter"
+              ? v === "unreads" || v === "active"
+              : v === "alpha" || v === "recent"),
+        ),
       ),
     };
   return {
@@ -178,7 +185,11 @@ function importLegacy(
     return {
       g: Object.fromEntries(
         Object.entries(object(value.groups))
-          .filter(([, v]) => v === "alpha" || v === "recent")
+          .filter(([, v]) =>
+            coordinate === "channel-filter"
+              ? v === "unreads" || v === "active"
+              : v === "alpha" || v === "recent",
+          )
           .map(([key, v]) => [key, stamp(v)]),
       ),
     };
