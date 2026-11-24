@@ -917,6 +917,63 @@ it.each(["removed", "disabled", "replaced"] as const)(
   },
 );
 
+it("preserves a saved-folder check when a queued Git installation is replaced", async () => {
+  const f = fixture();
+  const state = f.get();
+  if (state.status !== "ready") throw new Error("Expected catalog");
+  const queued = {
+    ...f.plugin,
+    manifest: { ...f.plugin.manifest, id: "example.queued" },
+    updateSource: {
+      ...gitUpdateSource(f.plugin),
+      repository: "https://example.com/queued.git",
+    },
+  };
+  f.set({
+    ...state,
+    catalog: { ...state.catalog, plugins: [f.plugin, queued] },
+  });
+  let finishGit!: (preview: ImportPreview) => void;
+  f.checkGit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishGit = resolve;
+      }),
+  );
+  let finishFolder!: (release: { revision: string }) => void;
+  Object.assign(f.imports, {
+    checkFolder: () =>
+      new Promise((resolve) => {
+        finishFolder = resolve;
+      }),
+  });
+  const updates = createPluginUpdates(f.manager, f.authorize);
+  const pending = updates.check();
+  try {
+    await vi.waitFor(() => expect(finishGit).toBeTypeOf("function"));
+    const replacement = {
+      ...queued,
+      updateSource: { root: "/plugins", path: "." },
+    };
+    f.set({
+      ...state,
+      catalog: { ...state.catalog, plugins: [f.plugin, replacement] },
+    });
+    const checks = sharedPluginUpdateChecks(f.manager.imports);
+    const manual = checks.check(replacement);
+    finishGit(f.preview);
+    await pending;
+    finishFolder({ revision: "folder-release" });
+    await manual;
+    expect(pluginUpdateAvailable(checks.snapshot(), replacement)).toBe(true);
+  } finally {
+    finishGit?.(f.preview);
+    finishFolder?.({ revision: "folder-release" });
+    await pending;
+    updates.dispose();
+  }
+});
+
 it.each(["review", "details"])(
   "retains the latest candidate after a newer %s result without installing",
   async (entry) => {

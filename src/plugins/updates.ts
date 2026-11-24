@@ -676,12 +676,20 @@ export function createPluginUpdates(
         let result = repositories.get(key);
         if (!result) {
           const observers = new Map(
-            batch
-              .filter((item) => updateSourceKey(item.source) === key)
-              .map((item) => [
-                item.plugin.manifest.id,
-                checks.observe(item.plugin, item.source),
-              ]),
+            batch.flatMap(({ plugin, source: queuedSource }) => {
+              if (updateSourceKey(queuedSource) !== key) return [];
+              const id = plugin.manifest.id;
+              const live = installed(id);
+              const liveSource = pluginUpdateSource(plugins, id);
+              if (
+                !live ||
+                !samePluginRelease(live, plugin) ||
+                !liveSource ||
+                updateSourceKey(liveSource) !== key
+              )
+                return [];
+              return [[id, checks.observe(live, liveSource)] as const];
+            }),
           );
           const preview = (async () => {
             const eligible = () => {
