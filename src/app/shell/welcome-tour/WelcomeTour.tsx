@@ -1,6 +1,17 @@
 import { useContext, useLayoutEffect, useMemo, useState } from "react";
 import { BestieNavigationContext } from "../bestie-context";
-import { Bell, Row, Scene, Search, Sketch, Switch } from "./Drawing";
+import {
+  Bell,
+  Faces,
+  Hash,
+  Lock,
+  Message,
+  Row,
+  Scene,
+  Search,
+  Sketch,
+  Switch,
+} from "./Drawing";
 import { TourCard, type TourPage } from "./TourCard";
 import styles from "./WelcomeTour.module.css";
 
@@ -12,6 +23,14 @@ type Placement = {
 };
 
 const navigation = () => document.getElementById("shell-navigation");
+/** A sidebar section by its key: solo, channels, dms. */
+const section = (key: string) => () =>
+  navigation()?.querySelector(`[data-sidebar-section="${key}"]`);
+/** A row in the sidebar by its name, such as Activity, which may trail a count. */
+const row = (name: string) => () =>
+  Array.from(navigation()?.querySelectorAll("button, a") ?? []).find(
+    (element) => element.textContent?.trim().replace(/\s*\d+.*$/, "") === name,
+  );
 const shown = (element: Element | null | undefined) => {
   if (!element) return undefined;
   const box = element.getBoundingClientRect();
@@ -40,12 +59,19 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
       title: "Solo chats",
       description:
         "Your private space to work with your agents. Only you can see them, unless you invite someone.",
+      target: section("solo"),
       visual: (
-        <Scene>
-          <Sketch>
-            <Row lead="person" />
-            <Row lead="agent" enter={1} />
-            <Row lead="agent" enter={2} />
+        <Scene wide>
+          <Sketch
+            header={
+              <>
+                <Faces of={["agent"]} />
+                <Lock />
+              </>
+            }
+          >
+            <Message own enter={1} />
+            <Message from="agent" enter={2} reply={3} />
           </Sketch>
         </Scene>
       ),
@@ -55,13 +81,21 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
       title: "Channels",
       description:
         "Shared rooms where your community talks and works together. Everyone in a channel sees what’s said there.",
+      target: section("channels"),
       visual: (
-        <Scene>
-          <Sketch>
-            <Row lead="person" />
-            <Row lead="person" enter={1} />
-            <Row lead="agent" enter={2} />
-            <Row lead="person" enter={3} />
+        <Scene wide>
+          <Sketch
+            header={
+              <>
+                <Hash />
+                <Faces of={["person", "person", "agent"]} at="end" />
+              </>
+            }
+          >
+            <Message enter={1} />
+            <Message length="short" enter={2} />
+            <Message from="agent" enter={3} />
+            <Message own length="short" enter={4} />
           </Sketch>
         </Scene>
       ),
@@ -70,11 +104,13 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
       id: "dms",
       title: "Direct messages",
       description: "Private conversations with one person or a small group.",
+      target: section("dms"),
       visual: (
-        <Scene>
-          <Sketch>
-            <Row lead="person" />
-            <Row lead="person" enter={1} />
+        <Scene wide>
+          <Sketch header={<Faces of={["person"]} />}>
+            <Message enter={1} />
+            <Message own length="short" enter={2} />
+            <Message length="short" enter={3} />
           </Sketch>
         </Scene>
       ),
@@ -84,6 +120,7 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
       title: "Activity",
       description:
         "Mentions, replies and anything else that needs you shows up here.",
+      target: row("Activity"),
       visual: (
         <Scene>
           {/* Newest on top: the later arrival is the first row. */}
@@ -137,10 +174,11 @@ function pages(bestie: string | undefined): (TourPage & Placement)[] {
 }
 
 /**
- * The first-run welcome: a few cards beside the sidebar, each with a small
- * drawing, ending at search. Cards about things that are hard to find move
- * beside them, outlined. It explains only; nothing needs to be clicked. Close
- * or Escape ends it early, and it never takes focus on its own.
+ * The first-run welcome: a few cards, each with a small drawing, ending at
+ * search. After the first, each card moves beside the part of Buzz it is
+ * about and outlines it; when that part isn't there, the card rests by the
+ * sidebar. It explains only; nothing needs to be clicked. Close or Escape ends
+ * it early, and it never takes focus on its own.
  */
 export function WelcomeTour({
   open,
@@ -175,6 +213,8 @@ export function WelcomeTour({
       setBox(undefined);
       return;
     }
+    // A section below the fold scrolls into the sidebar's view first.
+    element.scrollIntoView?.({ block: "nearest" });
     // The ring follows the target's own corners, a pill or a card.
     const measure = () =>
       setBox({

@@ -59,24 +59,32 @@ const ringAround = (page, target) =>
     })
     .toBe(true);
 
-test("someone new to Buzz gets the welcome tour once, which moves to where plugins show up and search", async ({
+test("someone new to Buzz gets the welcome tour once, which outlines each part it's about", async ({
   page,
   app,
 }) => {
   await arriveNew(page, app);
   const card = page.getByRole("dialog", { name: "Welcome to Buzz" });
+  const sidebar = page.locator("#shell-navigation");
+  // What each card after the welcome moves beside and outlines.
+  const outlined = [
+    sidebar.locator('[data-sidebar-section="solo"]'),
+    sidebar.locator('[data-sidebar-section="channels"]'),
+    sidebar.locator('[data-sidebar-section="dms"]'),
+    sidebar.getByRole("button", { name: /^Activity/ }),
+    pluginsHome(page),
+    searchButton(page),
+  ];
   await expect(card).toBeVisible();
   for (const [step, title] of titles.entries()) {
     await expect(card.getByRole("heading")).toHaveText(title);
     await expect(card).toContainText(`Step ${step + 1} of ${titles.length}`);
-    // Only the cards about hard-to-find places move and outline them.
-    if (title === "Plugins") await ringAround(page, pluginsHome(page));
-    else if (step < titles.length - 1)
+    if (step === 0)
       await expect(page.getByTestId("welcome-tour-spotlight")).toHaveCount(0);
+    else await ringAround(page, outlined[step - 1]);
     if (step < titles.length - 1)
       await card.getByRole("button", { name: "Next" }).click();
   }
-  await ringAround(page, searchButton(page));
   await card.getByRole("button", { name: "Back" }).click();
   await expect(card.getByRole("heading")).toHaveText("Plugins");
   await card.getByRole("button", { name: "Close" }).click();

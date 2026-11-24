@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
-import { BellIcon } from "../../../shared/design-system/icons";
+import {
+  BellIcon,
+  HashIcon,
+  LockIcon,
+} from "../../../shared/design-system/icons";
 import styles from "./WelcomeTour.module.css";
 
 /*
@@ -12,15 +16,19 @@ import styles from "./WelcomeTour.module.css";
 export function Scene({
   children,
   still = false,
+  wide = false,
 }: {
   children: ReactNode;
   /** Hold one frame instead of looping, for a drawing that only sets context. */
   still?: boolean;
+  /** Use more of the frame, for a conversation's messages. */
+  wide?: boolean;
 }) {
   return (
     <div
       className={styles.scene}
       data-still={still ? "" : undefined}
+      data-wide={wide ? "" : undefined}
       aria-hidden="true"
     >
       <div className={styles.stage}>{children}</div>
@@ -70,6 +78,76 @@ export function Row({
       {trail != null && <span className={styles.trail}>{trail}</span>}
     </span>
   );
+}
+
+/**
+ * A message in a conversation. Someone else's has their mark beside it; your
+ * own sits at the end, as in Buzz. With reply, it shows typing dots first and
+ * becomes the message at that later step.
+ */
+export function Message({
+  from = "person",
+  own = false,
+  length = "long",
+  enter,
+  reply,
+}: {
+  /** Who sent it: a person (circle) or an agent (squircle). */
+  from?: "person" | "agent";
+  own?: boolean;
+  length?: "short" | "long";
+  enter?: 1 | 2 | 3 | 4;
+  reply?: 2 | 3 | 4;
+}) {
+  return (
+    <span
+      className={styles.message}
+      data-own={own ? "" : undefined}
+      data-length={length}
+      data-enter={enter}
+    >
+      {!own && <span className={styles.lead} data-lead={from} />}
+      <span className={styles.bubble} data-reply={reply}>
+        {reply && (
+          <span className={styles.typing}>
+            <span className={styles.pip} />
+            <span className={styles.pip} />
+            <span className={styles.pip} />
+          </span>
+        )}
+        <span className={styles.bar} />
+      </span>
+    </span>
+  );
+}
+
+/** Who is in a conversation, overlapping as avatar stacks do. */
+export function Faces({
+  of,
+  at = "start",
+}: {
+  of: readonly ("person" | "agent")[];
+  /** Before the title, or at the header's end. */
+  at?: "start" | "end";
+}) {
+  return (
+    <span className={styles.faces} data-at={at}>
+      {of.map((lead, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed drawing
+        <span key={index} className={styles.lead} data-lead={lead} />
+      ))}
+    </span>
+  );
+}
+
+/** A channel's # before its title. */
+export function Hash() {
+  return <HashIcon className={styles.glyph} />;
+}
+
+/** A lock at the header's end, for something private. */
+export function Lock() {
+  return <LockIcon className={`${styles.glyph} ${styles.end}`} />;
 }
 
 /** The bell before a title, ringing once as the first item arrives. */
