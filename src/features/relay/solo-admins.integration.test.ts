@@ -5,7 +5,7 @@ import { matchesEvent } from "./projection";
 import { SOLO_LABEL } from "../solo/labels";
 import { soloAdminKey } from "./solo-admins";
 import { validateMemberAdministrationTemplate } from "../channel-members/administration-protocol";
-import { PublishRejected, type OutgoingEvent } from "./outbox";
+import type { OutgoingEvent } from "./outbox";
 import { eventDto, type ReadFilter, type RelayEvent } from "./events";
 import type { EventTemplate } from "nostr-tools";
 
@@ -29,7 +29,13 @@ function setup() {
   const profileOverrides = new Map<string, RelayEvent>();
   let omitProfiles = false;
   let failProfiles = false;
+  let failGrantReads = false;
+  let finished = false;
   let journal: readonly OutgoingEvent[] = [];
+  const unfinished = (items: readonly OutgoingEvent[]) =>
+    finished
+      ? items.filter((item) => item.recovery?.key !== soloAdminKey(channel))
+      : items;
   const events = new Map<string, RelayEvent>();
   const roles = new Map<string, string>();
   const genericPublish = vi.fn(async (event: RelayEvent) => {
@@ -58,6 +64,11 @@ function setup() {
     query: async (filters: readonly ReadFilter[]) => {
       if (failProfiles && filters.some((filter) => filter.kinds?.includes(0)))
         throw new Error("Profile read unavailable");
+      if (
+        failGrantReads &&
+        filters.some((filter) => filter.kinds?.includes(9000) && filter.ids)
+      )
+        throw new Error("Grant read unavailable");
       const roster = signed(relay, {
         kind: 39002,
         content: "",
@@ -108,7 +119,7 @@ function setup() {
         },
         load: () => structuredClone(journal),
         save: (next) => {
-          journal = structuredClone(next);
+          journal = structuredClone(unfinished(next));
         },
       },
     });
@@ -170,6 +181,13 @@ function setup() {
     },
     failProfiles: () => {
       failProfiles = true;
+    },
+    failGrantReads: () => {
+      failGrantReads = true;
+    },
+    finishElsewhere: () => {
+      finished = true;
+      journal = unfinished(journal);
     },
     beforeLock: (run: () => Promise<void>) => {
       beforeLock = run;
@@ -292,114 +310,95 @@ it("resumes a partial setup from the durable outbox after restart without restor
   ).toHaveLength(1);
 });
 
-it("abandons expired setup while signing is held without granting or releasing its message", async () => {
-  const h = setup();
-  const sign = h.transport.memberAdministration.sign;
-  let release = () => {};
-  let started = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const signing = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  h.transport.memberAdministration.sign = async (template) => {
-    started();
-    await held;
-    return sign(template);
-  };
-  const owner = await h.open();
-  const clock = vi.spyOn(Date, "now");
-  try {
-    const { message } = h.start(owner);
-    await signing;
-    const outbox = owner.session.outbox;
-    assert.exists(outbox);
-    const receipt = outbox
-      .snapshot()
-      .find((item) => item.recovery?.key === soloAdminKey(h.channel));
-    assert.exists(receipt);
-    const active = owner.session.channelWrites.prepareOpening(h.channel);
-    assert.exists(active);
-    const outcome = active.then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    clock.mockReturnValue(Date.now() + 16 * 60 * 1000);
-    await outbox.dismiss(receipt.event.id, receipt.recovery);
-    release();
-    const error = await outcome;
-    expect(h.adminPublish).not.toHaveBeenCalled();
-    expect(error).toBeInstanceOf(Error);
-    expect(h.agents.map((key) => h.roles.get(key))).toEqual([
-      "member",
-      "member",
-    ]);
-    expect(h.events.has(message)).toBe(false);
+it.each(["grants are readable", "grants are unreadable", "it cannot grant"])(
+  "finishes an expired setup on its own so the chat's next message sends with current roles when %s",
+  async (connection) => {
+    const h = setup();
+    const first = await h.open();
+    h.adminPublish.mockRejectedValue(new Error("offline"));
+    const { message } = h.start(first);
     await vi.waitFor(() =>
       expect(
-        outbox.snapshot().find((item) => item.event.id === message)?.delivery,
+        first.session.outbox
+          ?.snapshot()
+          .find((item) => item.event.id === message)?.delivery,
       ).toBe("failed"),
     );
-    const oldMessage = outbox
-      .snapshot()
-      .find((item) => item.event.id === message);
-    assert.exists(oldMessage);
-    assert.exists(oldMessage.event.created_at);
-    expect(oldMessage.event.created_at).toBeLessThan(
-      Date.now() / 1000 - 15 * 60,
-    );
-    // Model the relay's timestamp rejection: Retry preserves the old event.
-    h.genericPublish.mockRejectedValueOnce(
-      new PublishRejected("Event too old"),
-    );
-    outbox.retry(message);
-    await vi.waitFor(() =>
+    first.dispose();
+    if (connection === "grants are unreadable") h.failGrantReads();
+    if (connection === "it cannot grant")
+      Reflect.deleteProperty(h.transport, "memberAdministration");
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + 16 * 60 * 1000);
+    try {
+      const resumed = await h.open();
+      const next = resumed.session.messages.send(
+        h.channel,
+        "Continue with current roles",
+        h.agents,
+      );
+      await vi.waitFor(() => expect(h.events.has(next)).toBe(true));
+      expect(h.adminPublish).toHaveBeenCalledOnce();
+      expect(h.agents.map((key) => h.roles.get(key))).toEqual([
+        "member",
+        "member",
+      ]);
       expect(
-        outbox.snapshot().find((item) => item.event.id === message),
-      ).toMatchObject({
-        delivery: "failed",
-        error: "Event too old",
-      }),
-    );
-    expect(h.genericPublish.mock.lastCall?.[0]).toEqual(oldMessage.signed);
-    const fresh = owner.session.messages.send(
-      h.channel,
-      "Continue with current roles",
-      h.agents,
-    );
-    await vi.waitFor(() => expect(h.events.has(fresh)).toBe(true));
-    expect(h.events.has(message)).toBe(false);
-    expect(
-      outbox.snapshot().find((item) => item.event.id === message)?.event,
-    ).toEqual(oldMessage.event);
-    expect(h.adminPublish).not.toHaveBeenCalled();
-  } finally {
-    release();
-    clock.mockRestore();
-  }
+        resumed.session.outbox
+          ?.snapshot()
+          .some((item) => item.recovery?.key === soloAdminKey(h.channel)),
+      ).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  },
+);
+
+it("skips an opening grant whose relay profile was transferred and still sends the message", async () => {
+  const h = setup();
+  const owner = await h.open();
+  await owner.session.profiles.ensure(h.agents);
+  const cached = owner.session.profiles.event?.(h.agents[0]);
+  assert.exists(cached);
+  await h.transferAgent(owner, 0, false);
+  expect(owner.session.profiles.event?.(h.agents[0])).toBe(cached);
+  const { message } = h.start(owner);
+  await vi.waitFor(() => expect(h.events.has(message)).toBe(true));
+  expect(h.roles.get(h.agents[0])).toBe("member");
+  expect(
+    h.adminPublish.mock.calls.some(
+      ([event]) => event.tags[1]?.[1] === h.agents[0],
+    ),
+  ).toBe(false);
+  expect(
+    owner.session.outbox
+      ?.snapshot()
+      .some((item) => item.recovery?.key === soloAdminKey(h.channel)),
+  ).toBe(false);
 });
 
-it.each(["transferred", "missing", "unavailable"] as const)(
-  "refreshes cached ownership before opening grants when the relay profile is %s",
-  async (change) => {
+it.each([
+  ["fails", "Profile read unavailable"],
+  ["returns no profile", "profile is unavailable"],
+])(
+  "keeps setup when a profile read %s, so a retry can still grant",
+  async (read, error) => {
     const h = setup();
     const owner = await h.open();
-    await owner.session.profiles.ensure(h.agents);
-    const cached = owner.session.profiles.event?.(h.agents[0]);
-    assert.exists(cached);
-    if (change === "transferred") await h.transferAgent(owner, 0, false);
-    else if (change === "missing") h.omitProfiles();
-    else h.failProfiles();
-    expect(owner.session.profiles.event?.(h.agents[0])).toBe(cached);
+    if (read === "fails") h.failProfiles();
+    else h.omitProfiles();
     const { creation, message } = h.start(owner);
     await creation.ready;
     await expect(
       owner.session.channelWrites.prepareOpening(h.channel),
-    ).rejects.toThrow(
-      change === "unavailable"
-        ? "Profile read unavailable"
-        : "not verified as owned",
+    ).rejects.toThrow(error);
+    await vi.waitFor(() =>
+      expect(
+        owner.session.outbox
+          ?.snapshot()
+          .find((item) => item.event.id === message)?.delivery,
+      ).toBe("failed"),
     );
     expect(h.adminPublish).not.toHaveBeenCalled();
     expect(h.events.has(message)).toBe(false);
@@ -411,35 +410,67 @@ it.each(["transferred", "missing", "unavailable"] as const)(
   },
 );
 
-it("checks the current profile inside the shared publication lock after signing", async () => {
+it("sends from a window whose setup another window already finished", async () => {
+  const h = setup();
+  const first = await h.open();
+  h.adminPublish.mockRejectedValue(new Error("offline"));
+  const { message } = h.start(first);
+  await vi.waitFor(() =>
+    expect(
+      first.session.outbox?.snapshot().find((item) => item.event.id === message)
+        ?.delivery,
+    ).toBe("failed"),
+  );
+  const second = await h.open();
+  first.dispose();
+  h.finishElsewhere();
+  const next = second.session.messages.send(
+    h.channel,
+    "From the other window",
+    h.agents,
+  );
+  await vi.waitFor(() => expect(h.events.has(next)).toBe(true));
+  expect(h.adminPublish).toHaveBeenCalledOnce();
+});
+
+it("sends the message when another window finishes setup while this one grants", async () => {
   const h = setup();
   const owner = await h.open();
   const sign = h.transport.memberAdministration.sign;
   h.transport.memberAdministration.sign = async (template) => {
+    h.beforeLock(async () => {
+      h.beforeLock(async () => {});
+      h.finishElsewhere();
+    });
+    return sign(template);
+  };
+  const { message } = h.start(owner);
+  await vi.waitFor(() => expect(h.events.has(message)).toBe(true));
+  expect(h.adminPublish).not.toHaveBeenCalled();
+});
+
+it("checks the current profile inside the shared publication lock after signing", async () => {
+  const h = setup();
+  const owner = await h.open();
+  const sign = h.transport.memberAdministration.sign;
+  let transferred = false;
+  h.transport.memberAdministration.sign = async (template) => {
     const event = await sign(template);
+    if (transferred) return event;
+    transferred = true;
     h.beforeLock(async () => {
       h.beforeLock(async () => {});
       await h.transferAgent(owner, 0);
     });
     return event;
   };
-  const { creation, message } = h.start(owner);
-  await creation.ready;
-  await expect(
-    owner.session.channelWrites.prepareOpening(h.channel),
-  ).rejects.toThrow("not verified as owned");
-  expect(h.adminPublish).not.toHaveBeenCalled();
+  const { message } = h.start(owner);
+  await vi.waitFor(() => expect(h.events.has(message)).toBe(true));
   expect(h.roles.get(h.agents[0])).toBe("member");
-  expect(h.events.has(message)).toBe(false);
-  await vi.waitFor(() =>
-    expect(
-      owner.session.outbox?.snapshot().find((item) => item.event.id === message)
-        ?.delivery,
-    ).toBe("failed"),
-  );
+  expect(h.roles.get(h.agents[1])).toBe("admin");
   expect(
-    owner.session.outbox
-      ?.snapshot()
-      .some((item) => item.recovery?.key === soloAdminKey(h.channel)),
-  ).toBe(true);
+    h.adminPublish.mock.calls.some(
+      ([event]) => event.tags[1]?.[1] === h.agents[0],
+    ),
+  ).toBe(false);
 });
