@@ -125,12 +125,16 @@ export function createHuddleVoices(
           room,
           (event) => {
             if (abort.signal.aborted) return;
-            if (event.type === "ended") return fail(event.error);
+            if (event.type === "ended") {
+              if (event.error) fail(event.error);
+              else void stop();
+              return;
+            }
             if (
               (event.type === "participants" || event.type === "connected") &&
               !event.participants.includes(agent.owner)
             )
-              return fail("The owner left the Huddle");
+              return void stop();
             // Defense in depth; privacy tests count at the native decode site.
             if (
               event.type === "audio" &&
