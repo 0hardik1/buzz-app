@@ -24,6 +24,7 @@ import {
   roster,
   scriptedTransport,
   signed,
+  summary,
 } from "./testing";
 
 vi.mock("./fold", { spy: true });
@@ -395,7 +396,11 @@ it.each([false, true])(
       bounds(relay, "a", "head", { has_more: false, next_cursor: null }),
     ]);
     await flush();
-    h.traffic.receive([card, transcript]);
+    h.traffic.receive([
+      card,
+      transcript,
+      summary(relay, "a", card.id, { reply_count: 1 }),
+    ]);
     expect(h.session.channels.window("a").rows.map((row) => row.id)).toEqual(
       nested ? [root.id] : [root.id, card.id],
     );
@@ -404,6 +409,7 @@ it.each([false, true])(
     expect(nested ? replies[0] : anchor).toMatchObject({
       id: card.id,
       huddle: { room, threaded: true },
+      replyCount: 1,
     });
     expect(replies.at(-1)).toMatchObject({
       id: transcript.id,

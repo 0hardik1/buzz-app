@@ -673,6 +673,11 @@ it("reads unchanged participants again after an access purge", async () => {
 it("releases discussion subscriptions when reopening the companion fails", async () => {
   const h = harness();
   const stopWindow = vi.fn();
+  h.connection.session.channels.resolve = async () => {};
+  h.connection.session.channels.get = (id) =>
+    id === "room"
+      ? { id, name: "Huddle", huddle: true, parentChannelId: "channel" }
+      : undefined;
   vi.spyOn(h.connection.session.channels, "subscribeWindow").mockReturnValue(
     stopWindow,
   );
@@ -681,9 +686,10 @@ it("releases discussion subscriptions when reopening the companion fails", async
     h.set({ ...h.call.snapshot(), room: "room" });
     await h.companion.open();
     h.action(h.call.snapshot().id ?? "", "thread");
-    expect(h.connection.session.channels.subscribeWindow).toHaveBeenCalledWith(
-      "room",
-      expect.any(Function),
+    await vi.waitFor(() =>
+      expect(
+        h.connection.session.channels.subscribeWindow,
+      ).toHaveBeenCalledWith("room", expect.any(Function)),
     );
     vi.mocked(h.bridge.open).mockRejectedValueOnce(new Error("Focus failed"));
     await expect(h.companion.open()).rejects.toThrow("Focus failed");
@@ -694,8 +700,10 @@ it("releases discussion subscriptions when reopening the companion fails", async
     });
     await h.companion.open();
     h.action(h.call.snapshot().id ?? "", "thread");
-    expect(h.connection.session.channels.subscribeWindow).toHaveBeenCalledTimes(
-      2,
+    await vi.waitFor(() =>
+      expect(
+        h.connection.session.channels.subscribeWindow,
+      ).toHaveBeenCalledTimes(2),
     );
   } finally {
     await h.dispose();

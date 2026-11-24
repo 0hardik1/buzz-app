@@ -340,43 +340,42 @@ export function createHuddleWindow(
             publish(true);
             try {
               const call = huddles.snapshot();
-              if (call.transcriptDestination) {
-                const { channelId, root } = call.transcriptDestination;
-                openLink?.(
-                  root
-                    ? `buzz://message?channel=${channelId}&id=${root}&thread=${root}`
-                    : `buzz://channel/${channelId}`,
-                );
-              } else if (discussion) closeDiscussion();
+              if (discussion) closeDiscussion();
               else if (
                 call.room &&
                 call.destination &&
                 call.phase === "connected"
               ) {
+                const { room, destination } = call;
                 const session = relay.snapshot().session;
+                const current = () =>
+                  !disposed &&
+                  opened === id &&
+                  relay.snapshot().session === session &&
+                  huddles.snapshot().id === id;
                 const roomDiscussion = createHuddleDiscussion(
                   session,
-                  call.room,
-                  call.destination.channelId,
+                  room,
+                  destination.channelId,
                   () => {
+                    if (!current() || discussion !== roomDiscussion) return;
+                    if (!composer && roomDiscussion.available()) {
+                      composer = createHuddleComposerOwner(
+                        session,
+                        room,
+                        destination.channelId,
+                        extensions,
+                        current,
+                        roomDiscussion.writable,
+                        agents,
+                        roomDiscussion.snapshot().conversation,
+                      );
+                    }
                     composer?.refresh();
                     sync();
                   },
                 );
                 discussion = roomDiscussion;
-                composer = createHuddleComposerOwner(
-                  session,
-                  call.room,
-                  call.destination.channelId,
-                  extensions,
-                  () =>
-                    !disposed &&
-                    opened === id &&
-                    relay.snapshot().session === session &&
-                    huddles.snapshot().id === id,
-                  roomDiscussion.available,
-                  agents,
-                );
               }
             } catch (error) {
               closeDiscussion();

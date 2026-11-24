@@ -35,14 +35,12 @@ const duration = (seconds: number) =>
 export function HuddleCard({
   message,
   open,
-  openThread,
   relay,
   huddles,
   showWindow,
 }: {
   message: ChannelMessage;
   open?: ((target: string) => boolean) | undefined;
-  openThread?: (() => boolean) | undefined;
   relay: RelayData;
   huddles: Huddles;
   showWindow(): Promise<void>;
@@ -181,11 +179,6 @@ export function HuddleCard({
             }}
           >
             {current ? "Open" : "Join"}
-          </Button>
-        )}
-        {openThread && (
-          <Button size="sm" variant="subtle" onClick={openThread}>
-            Open thread
           </Button>
         )}
         {finished && open && !message.huddle?.threaded && (
