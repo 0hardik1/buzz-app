@@ -35,18 +35,21 @@ const changed = (
 };
 let draftStorage: ReturnType<typeof createDraftStorage> | undefined;
 let draftsLoaded = false;
+let initialDrafts: Promise<void> | undefined;
 
 export function initializeDraftStorage() {
   if (typeof indexedDB === "undefined") return;
   draftStorage ??= createDraftStorage(changed);
-  return draftStorage.ready.then(
-    () => {
+  initialDrafts ??= draftStorage.ready.then(
+    async () => {
       draftsLoaded = true;
+      await restoreDraftHandoffs();
     },
     () => {
       /* Composer reports unavailable storage without writing a second copy. */
     },
   );
+  return initialDrafts;
 }
 
 export function refreshDraftView(scope: string, key: string) {
@@ -87,7 +90,7 @@ async function changeDraft(
   expected: string | null | undefined,
   revision: string | null,
   purge: string | null | undefined,
-  retire?: { cursor: number | undefined },
+  mutation?: { type: "retire" | "replay"; cursor: number | undefined },
 ): Promise<DraftSaveResult> {
   if (expected === undefined || purge === undefined) return "failed";
   try {
@@ -100,9 +103,19 @@ async function changeDraft(
           const same = record.revision === revision;
           const matches = record.revision === expected;
           const result = same || matches ? "saved" : "changed";
-          if (retire && expected !== null && expected !== revision) {
-            const history = record.history ?? [0];
-            if (wasRetired(history, expected, retire.cursor))
+          const history = record.history ?? [0];
+          if (
+            mutation?.type === "replay" &&
+            revision !== null &&
+            wasRetired(history, revision, mutation.cursor)
+          )
+            return { result: same ? "saved" : "changed" };
+          if (
+            mutation?.type === "retire" &&
+            expected !== null &&
+            expected !== revision
+          ) {
+            if (wasRetired(history, expected, mutation.cursor))
               return { result: same ? "saved" : "changed" };
             return {
               result,
@@ -156,7 +169,10 @@ export function retireDraftRevision(
   purge = viewScopePurgeToken(scope),
 ) {
   return draftStorage && isStoredDraft(key)
-    ? changeDraft(scope, key, expected, replacement, purge, { cursor })
+    ? changeDraft(scope, key, expected, replacement, purge, {
+        type: "retire",
+        cursor,
+      })
     : retireViewDraft(scope, key, expected, replacement, cursor);
 }
 
@@ -461,6 +477,104 @@ export function viewScopePurgeToken(scope: string) {
 
 export function conflictDraftKey(scope: string, key: string) {
   return `${conflictDraftPrefix}${JSON.stringify([scope, key])}`;
+}
+
+const draftHandoffSuffix = ".pending";
+
+export function stageDraftHandoff(
+  scope: string,
+  key: string,
+  expected: string | null | undefined,
+  revision: string,
+  purge: string | null | undefined,
+  cursor: number | undefined,
+) {
+  if (
+    !draftStorage ||
+    !isStoredDraft(key) ||
+    expected === undefined ||
+    purge === undefined
+  )
+    return;
+  const backupKey = conflictDraftKey(scope, key) + draftHandoffSuffix;
+  const value = JSON.stringify([purge, cursor, expected, revision]);
+  try {
+    sessionStorage.setItem(backupKey, value);
+    return () => {
+      try {
+        if (sessionStorage.getItem(backupKey) === value)
+          sessionStorage.removeItem(backupKey);
+      } catch {
+        /* The saved revision is authoritative. */
+      }
+    };
+  } catch {
+    /* A normal draft flush can still commit in IndexedDB. */
+  }
+}
+
+// IndexedDB may abort when the document unloads before the debounce commits.
+// Reopen the same tab with its last edit, using the original revision fence.
+async function restoreDraftHandoffs() {
+  try {
+    const pending = Object.keys(sessionStorage).filter(
+      (key) =>
+        key.startsWith(conflictDraftPrefix) && key.endsWith(draftHandoffSuffix),
+    );
+    for (const backupKey of pending) {
+      const conflictKey = backupKey.slice(0, -draftHandoffSuffix.length);
+      const raw = sessionStorage.getItem(backupKey);
+      if (raw === null) continue;
+      let scope: string,
+        key: string,
+        revision: string,
+        cursor: number | undefined;
+      let purge: string | null, expected: string | null;
+      try {
+        [scope, key] = JSON.parse(
+          conflictKey.slice(conflictDraftPrefix.length),
+        );
+        [purge, cursor, expected, revision] = JSON.parse(raw);
+      } catch {
+        sessionStorage.removeItem(backupKey);
+        continue;
+      }
+      if (
+        typeof scope === "string" &&
+        typeof key === "string" &&
+        isStoredDraft(key) &&
+        typeof revision === "string" &&
+        (expected === null || typeof expected === "string") &&
+        viewScopePurgeToken(scope) === purge &&
+        !draftWasRetired(scope, key, revision, cursor ?? undefined)
+      ) {
+        const result = await changeDraft(
+          scope,
+          key,
+          expected,
+          revision,
+          purge,
+          {
+            type: "replay",
+            cursor: cursor ?? undefined,
+          },
+        );
+        if (
+          result !== "saved" &&
+          viewScopePurgeToken(scope) === purge &&
+          !draftWasRetired(scope, key, revision, cursor ?? undefined)
+        )
+          sessionStorage.setItem(
+            conflictKey,
+            `${JSON.stringify([purge, cursor])}
+${revision}`,
+          );
+      }
+      sessionStorage.removeItem(backupKey);
+    }
+  } catch {
+    /* Keep the handoff if session storage can't rewrite it. */
+  }
 }
 
 function retirementHistory(scope: string, key: string): RetirementHistory {

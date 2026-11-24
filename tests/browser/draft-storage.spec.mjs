@@ -37,7 +37,12 @@ test("a composer draft survives reload when localStorage is full", async ({
   });
   expect(quotaError).toBe("QuotaExceededError");
   await composer.fill("A draft saved with a full local store");
-  await composer.blur();
+  // Reload before the debounce can persist the latest keystroke.
+  await open(page, app);
+  await expect(composer).toHaveJSProperty(
+    "value",
+    "A draft saved with a full local store",
+  );
   await expect(alphaComposer(peer)).toHaveJSProperty(
     "value",
     "A draft saved with a full local store",
@@ -108,6 +113,21 @@ storageTest(
     });
     await expect.poll(() => read(page)).toBe(winner);
     await expect.poll(() => read(peer)).toBe(winner);
+
+    await peer.evaluate(async (revision) => {
+      const { draftRetirementCursor, stageDraftHandoff, viewScopePurgeToken } =
+        await import("/src/shared/view-state.ts");
+      const scope = "example:viewer";
+      const key = "draft:room";
+      stageDraftHandoff(
+        scope,
+        key,
+        null,
+        revision,
+        viewScopePurgeToken(scope),
+        draftRetirementCursor(scope, key),
+      );
+    }, winner);
 
     await page.evaluate(async () => {
       const { clearView, initializeDraftStorage } = await import(

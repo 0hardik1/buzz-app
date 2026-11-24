@@ -146,6 +146,7 @@ import {
   viewScopePurgeToken,
   refreshDraftView,
   saveDraftRevision,
+  stageDraftHandoff,
   retireDraftRevision,
   writeDraftView,
   subscribeView,
@@ -1323,12 +1324,36 @@ function Composer({
   useLayoutEffect(() => {
     if (!presented) flushDraft();
   }, [presented, flushDraft]);
+  const flushBeforeUnload = useEffectEvent(() => {
+    const draft = valueRef.current;
+    const retireHandoff =
+      !submission &&
+      !accepted &&
+      !editing.target &&
+      !conflictDraft.current &&
+      dirty.current &&
+      (pendingDraftSave.current || draftSaveInFlight.current)
+        ? stageDraftHandoff(
+            scope,
+            draftKey,
+            revision.current,
+            JSON.stringify(draft),
+            purgeToken,
+            savedCursor.current,
+          )
+        : undefined;
+    const saved = flushDraft();
+    if (saved instanceof Promise && retireHandoff)
+      void saved.then((result) => {
+        if (result === "saved") retireHandoff();
+      });
+  });
   useLayoutEffect(() => {
     const unregister = registerDraftSave(recoveryKey, flushDraft);
     const hide = () => {
       if (document.visibilityState === "hidden") flushDraft();
     };
-    const unload = () => flushDraft();
+    const unload = () => flushBeforeUnload();
     document.addEventListener("visibilitychange", hide);
     window.addEventListener("pagehide", unload);
     return () => {
