@@ -11,6 +11,10 @@ import { Header, InlineHeader } from "../shared/design-system/ui/Header";
 import { ToastNotice } from "../shared/design-system/ui/Toast";
 import { PreferenceRow } from "../shared/design-system/ui/PreferenceRow";
 import { AppearancePreview } from "./AppearancePreview";
+import {
+  setSidelinePreference,
+  useSidelinePreference,
+} from "../features/messages/sideline-preference";
 import { Button } from "../shared/design-system/ui/Button";
 import {
   useCallback,
@@ -83,6 +87,7 @@ export function AppearanceSettings({
   const followUp = useFollowUpBehaviorPreference();
   const autocorrect = useMessageAutocorrectPreference();
   const unreadFirst = useUnreadFirstPreference();
+  const sideline = useSidelinePreference();
   const messageSort = useMessageSortPreference();
   const clock = useClockPreference();
   const names = useNamePreference();
@@ -497,6 +502,12 @@ export function AppearanceSettings({
               description="With nothing typed, search leads with unread channels and DMs and selects the newest."
               checked={unreadFirst.enabled}
               onCheckedChange={setUnreadFirstPreference}
+            />
+            <SwitchPreferenceRow
+              label="Show the sideline (experimental)"
+              description="A compressed timeline of media, GitHub links and pins in a wide conversation’s right margin, while the right-hand panel is closed."
+              checked={sideline}
+              onCheckedChange={setSidelinePreference}
             />
             <PreferenceRow
               title="Sort messages by"

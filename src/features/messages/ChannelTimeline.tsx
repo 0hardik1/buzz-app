@@ -79,6 +79,8 @@ import {
 } from "./history-prefetch";
 import { useMessageSelection } from "./use-message-selection";
 import { useMessageVisit } from "./MessageManagement";
+import { Sideline } from "./Sideline";
+import { useSidelinePreference } from "./sideline-preference";
 
 // Native upward scrolling can start on a focused message link or button.
 // Inner scrollports own the key while they can move. At their top boundary,
@@ -2288,6 +2290,65 @@ function Timeline({
     if (scroller.current && scroller.current.scrollTop <= 0)
       loadNearTop(scroller.current);
   };
+  // The experimental sideline moves history as the reader's own scroll would.
+  const sidelineEnabled = useSidelinePreference() && !transient;
+  const sidelineMove = (
+    upward: boolean,
+    move: (element: HTMLElement) => void,
+  ) => {
+    const element = scroller.current;
+    if (!element) return;
+    gesture(upward);
+    follow.current = false;
+    move(element);
+  };
+  const sideline = sidelineEnabled && (
+    <Sideline
+      rows={rows}
+      channelId={channelId}
+      session={queries}
+      scroller={scroller}
+      handle={handle}
+      onJump={(id) => {
+        const index = rows.findIndex((row) => row.id === id);
+        if (index < 0) return;
+        sidelineMove(true, (element) => {
+          handle.current?.scrollToIndex(index, { align: "center" });
+          // Mark the row once the jump has mounted it.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const target = element.querySelector<HTMLElement>(
+                `[data-message-id="${CSS.escape(id)}"]`,
+              );
+              if (
+                !target ||
+                matchMedia("(prefers-reduced-motion: reduce)").matches
+              )
+                return;
+              target.animate(
+                [
+                  { background: "var(--affordance-message-highlight)" },
+                  { background: "transparent" },
+                ],
+                { duration: 1600, easing: "ease-out" },
+              );
+            }),
+          );
+        });
+      }}
+      onSeek={(offset) =>
+        sidelineMove(true, (element) => {
+          element.scrollTop = offset - element.clientHeight / 2;
+        })
+      }
+      onWheel={(deltaY) => {
+        const element = scroller.current;
+        if (!element) return;
+        gesture(deltaY < 0);
+        element.scrollBy({ top: deltaY });
+      }}
+    />
+  );
   // A detached window always leads to the latest rows.
   const jumpVisible = showJumpToLatest || !!window.hasNewer;
   const feed = (
@@ -2397,6 +2458,7 @@ function Timeline({
       <div
         ref={edge}
         className={styles.edge}
+        data-timeline-edge=""
         data-history-space={reserveHistorySpace || undefined}
         data-intro={!!shownIntro || undefined}
       >
@@ -2684,5 +2746,10 @@ function Timeline({
       </div>
     </section>
   );
-  return <MessageContextMenus>{feed}</MessageContextMenus>;
+  return (
+    <>
+      <MessageContextMenus>{feed}</MessageContextMenus>
+      {sideline}
+    </>
+  );
 }

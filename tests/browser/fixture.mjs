@@ -528,6 +528,8 @@ export const test = base.extend({
     // Tall histories leave room above the older-page prefetch threshold, even
     // with the compact message type and an extra upward resize-test gesture.
     const histories = new Map();
+    // Relay-signed pin lists by channel, newest pin first.
+    const pinLists = new Map();
     const historyStarted = performance.now();
     // One row in eight stays inert prose. The others end with common chat
     // content: colon or multi-paragraph prose, links, a bound mention, a list,
@@ -1230,6 +1232,25 @@ export const test = base.extend({
             )?.event.content ?? "online",
           ),
         );
+      if (filter.kinds?.length === 1 && filter.kinds[0] === 30623)
+        return (filter["#h"] ?? []).flatMap((channel) => {
+          const ids = pinLists.get(channel);
+          return ids
+            ? [
+                sign(
+                  30623,
+                  [
+                    ["d", channel],
+                    ["h", channel],
+                    ...ids.map((id) => ["e", id]),
+                  ],
+                  "",
+                  relayKey,
+                  1700000001,
+                ),
+              ]
+            : [];
+        });
       if (filter.kinds?.includes(30622))
         return channelLifecycle
           ? [
@@ -2688,6 +2709,13 @@ export const test = base.extend({
                     : {
                         authority: async () => ({
                           relayAuthor: getPublicKey(relayKey),
+                          // Seeded pins need the relay's own signer, as NIP-PM.
+                          ...(pinLists.size
+                            ? {
+                                pins: true,
+                                archiveAuthority: getPublicKey(relayKey),
+                              }
+                            : {}),
                           ...(ownSoloChannels.length
                             ? { channelIdentity: true }
                             : {}),
@@ -2895,6 +2923,10 @@ export const test = base.extend({
         pending,
         served,
         histories,
+        /** Pins `ids` in `channel` for lists read after this. */
+        pin(channel, ids) {
+          pinLists.set(channel, [...ids]);
+        },
         // Signed device-cache input for the startup scale journey; same modeled
         // wire responses as a real roster/head read, without visiting every row.
         startupCache() {
