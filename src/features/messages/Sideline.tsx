@@ -284,7 +284,7 @@ function Card({
                   ? marker.excerpt
                   : link.repository
                 : media
-                  ? kind
+                  ? marker.excerpt && kind
                   : "Pinned",
               formatItemTimestamp(marker.createdAt),
             ]

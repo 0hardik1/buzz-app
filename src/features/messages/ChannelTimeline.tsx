@@ -2746,10 +2746,14 @@ function Timeline({
       </div>
     </section>
   );
-  return (
+  const timeline = <MessageContextMenus>{feed}</MessageContextMenus>;
+  // Prototype: the sideline is a sibling of the feed, only while it is on.
+  return sideline ? (
     <>
-      <MessageContextMenus>{feed}</MessageContextMenus>
+      {timeline}
       {sideline}
     </>
+  ) : (
+    timeline
   );
 }
