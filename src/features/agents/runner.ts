@@ -1,3 +1,4 @@
+import { threadReplyTags } from "../relay/thread-reference";
 import { MESSAGE_SOURCE_TAG } from "../relay/contracts";
 import { interestPaused } from "./attention";
 import {
@@ -1205,9 +1206,7 @@ export class AgentRunners {
             tags: [
               ["h", destination?.channelId ?? seat.conversation.channelId],
               [MESSAGE_SOURCE_TAG, "huddle-transcript"],
-              ...(destination?.root
-                ? [["e", destination.root, "", "reply"]]
-                : []),
+              ...threadReplyTags(destination?.root, destination?.parentId),
             ],
           },
           () => seat.signal.throwIfAborted(),

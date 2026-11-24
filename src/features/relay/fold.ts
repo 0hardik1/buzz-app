@@ -8,7 +8,11 @@ import { relayedFromClaim, relayNotice } from "./relayed-from";
 import { pluginRequestId } from "./plugin-request";
 import { emojiTags } from "./emoji";
 import { objectBody } from "./body";
-import { huddleLifecycleBody, huddleRoom } from "../huddle/lifecycle";
+import {
+  huddleCardRoom,
+  huddleLifecycleBody,
+  huddleRoom,
+} from "../huddle/lifecycle";
 import { newer } from "./events";
 import type { EventData } from "./events";
 import {
@@ -338,8 +342,11 @@ export function foldMessages(
       continue;
     const aux = overlays.get(event.id) ?? [];
     if (deleted(event)) continue;
-    if (event.kind === 48100 || event.kind === 48103) {
-      const room = huddleRoom(event);
+    const cardRoom = huddleCardRoom(event);
+    if (cardRoom || event.kind === 48100 || event.kind === 48103) {
+      const room = cardRoom ?? huddleRoom(event);
+      const lifecycle = huddleLifecycleBody(event);
+      if (!cardRoom && typeof lifecycle?.card_id === "string") continue;
       if (!room || room === channelId) continue;
       // End authority is checked with matching starts when cards are collapsed.
       rows.push(
@@ -348,14 +355,17 @@ export function foldMessages(
           channelId,
           authorId: event.pubkey,
           createdAt: event.created_at,
-          content: event.kind === 48100 ? "Huddle started" : "Huddle ended",
+          content: event.kind === 48103 ? "Huddle ended" : "Huddle started",
+          threadRootId: threadReference(event)?.rootId,
+          replyParentId: threadReference(event)?.parentId,
           huddle: {
             room,
-            ...(huddleLifecycleBody(event)?.transcripts_in_origin === true && {
+            ...(cardRoom && { threaded: true as const }),
+            ...((cardRoom || lifecycle?.transcripts_in_origin === true) && {
               inlineTranscripts: true as const,
             }),
             state:
-              event.kind === 48100 ? ("started" as const) : ("ended" as const),
+              event.kind === 48103 ? ("ended" as const) : ("started" as const),
           },
           mentions: [],
           attachments: [],

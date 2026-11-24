@@ -1116,7 +1116,11 @@ export type AgentVoicePipe = Omit<
   "config" | "revisions" | "synced" | "team" | "transcript" | "transcriptDelta"
 > & {
   /** Publish only this agent's speech to the host-selected conversation. */
-  transcriptDestination?: Readonly<{ channelId: string; root?: string }>;
+  transcriptDestination?: Readonly<{
+    channelId: string;
+    root?: string;
+    parentId?: string;
+  }>;
   streamTranscript?(): boolean;
 };
 type HostedAgentType = Omit<AgentType, "voice"> & {

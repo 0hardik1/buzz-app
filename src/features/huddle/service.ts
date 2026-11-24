@@ -267,11 +267,10 @@ export function createHuddles(
       !!channel.members?.includes(destination.viewer);
     // Admission through a parent must never become room-only admission merely
     // because the audio join subsequently adds the viewer to the temporary room.
-    const parentAdmission = member(
-      connection.session.channels
-        .list()
-        .channels.find((channel) => channel.id === destination.channelId),
-    );
+    const parentChannel = connection.session.channels
+      .list()
+      .channels.find((channel) => channel.id === destination.channelId);
+    const parentAdmission = member(parentChannel);
     const accessible = () => {
       const channels = connection.session.channels.list().channels;
       const parent = channels.find((c) => c.id === destination.channelId);
@@ -469,9 +468,11 @@ export function createHuddles(
               ...snapshot,
               destination: {
                 ...place,
-                ...(transcriptDestination.root && {
-                  root: transcriptDestination.root,
-                }),
+                ...(transcriptDestination.root !==
+                  transcriptDestination.parentId &&
+                  transcriptDestination.root && {
+                    root: transcriptDestination.root,
+                  }),
               },
               transcriptDestination,
             });
@@ -485,6 +486,9 @@ export function createHuddles(
                       transcriptDestination.channelId,
                       transcriptDestination.root,
                       text,
+                      ...(transcriptDestination.parentId
+                        ? ([transcriptDestination.parentId] as const)
+                        : []),
                     );
                 },
                 (error) => {
@@ -551,7 +555,17 @@ export function createHuddles(
         attempt.stopAudioSettings = settings.subscribe(syncSettings);
         syncSettings();
       }
-      attempt.opening = bridge.open(attempt.id, destination, room, receive);
+      const threadTranscripts =
+        parentChannel?.channelType === "stream" ||
+        parentChannel?.channelType === "forum";
+      attempt.opening = bridge.open(
+        attempt.id,
+        threadTranscripts && !room
+          ? { ...destination, threadTranscripts }
+          : destination,
+        room,
+        receive,
+      );
       await attempt.opening;
       if (valid(attempt))
         attempt.heartbeat = setInterval(() => {

@@ -20,7 +20,11 @@ import {
   type ChannelMessage,
 } from "./contracts";
 import { messageAuthor } from "./fold";
-import { isThreadContent, threadReference } from "./thread-reference";
+import {
+  isThreadContent,
+  threadReference,
+  threadReplyTags,
+} from "./thread-reference";
 import { reactionTarget as reactionTargetId } from "./reaction-target";
 import { safeMessageUrl } from "./message-content";
 import type { EventData } from "./events";
@@ -512,8 +516,16 @@ export function createMessages(
       );
     },
     /** Speech is already delivered as audio, so it carries no wake recipients. */
-    transcribe(channelId: string, root: string | undefined, content: string) {
-      if (root && !/^[0-9a-f]{64}$/.test(root))
+    transcribe(
+      channelId: string,
+      root: string | undefined,
+      content: string,
+      parentId?: string,
+    ) {
+      if (
+        (root && !/^[0-9a-f]{64}$/.test(root)) ||
+        (parentId && (!root || !/^[0-9a-f]{64}$/.test(parentId)))
+      )
         throw new Error("A valid thread root is required");
       return writer(9, channelId).send({
         kind: 9,
@@ -521,7 +533,7 @@ export function createMessages(
         tags: [
           ["h", channelId],
           [MESSAGE_SOURCE_TAG, "huddle-transcript"],
-          ...(root ? [["e", root, "", "reply"]] : []),
+          ...threadReplyTags(root, parentId),
         ],
       });
     },

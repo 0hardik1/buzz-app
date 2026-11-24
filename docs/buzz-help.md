@@ -178,8 +178,9 @@ if that desktop app is up and running.
 
 Huddles need the desktop app. Use the headphone button in a channel or DM,
 **Start a huddle** in the Solo chat menu, or **Start huddle in thread** on a
-message. Speech appears in the originating conversation under each speaker's
-name. On macOS, Buzz uses on-device speech recognition to transcribe your
+message. In a channel, speech appears in replies to the Huddle card. If you start
+inside a thread, those replies appear inline in that thread. In Solo chats and
+DMs, speech appears in the main timeline. On macOS, Buzz uses on-device speech recognition to transcribe your
 microphone. People can keep reading and typing in the same conversation
 during the Huddle. The Huddle card provides a way to join the call.
 

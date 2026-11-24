@@ -561,6 +561,7 @@ export function createChannelStore(
         old.huddleTranscript?.channelId ===
           channel.huddleTranscript?.channelId &&
         old.huddleTranscript?.root === channel.huddleTranscript?.root &&
+        old.huddleTranscript?.parentId === channel.huddleTranscript?.parentId &&
         old.huddle === channel.huddle &&
         old.updatedAt === channel.updatedAt &&
         old.archived === channel.archived &&

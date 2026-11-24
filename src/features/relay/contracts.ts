@@ -56,7 +56,9 @@ export type ChannelSummary = Readonly<{
   autoJoin?: true;
   /** Presentation-only parent from signed channel metadata; never grants access. */
   parentChannelId?: string | undefined;
-  huddleTranscript?: Readonly<{ channelId: string; root?: string }> | undefined;
+  huddleTranscript?:
+    | Readonly<{ channelId: string; root?: string; parentId?: string }>
+    | undefined;
   /** Marked Huddle room; presented through its parent conversation, not the sidebar. */
   huddle?: true;
   /** Metadata update time used for stable work-history ordering. */
@@ -181,6 +183,7 @@ export type ChannelMessage = Readonly<{
     room: string;
     state: "started" | "ended";
     inlineTranscripts?: true;
+    threaded?: true;
     endedAt?: number;
   }>;
   /** Current body came from a replacement edit; original recipients do not bind its prose. */

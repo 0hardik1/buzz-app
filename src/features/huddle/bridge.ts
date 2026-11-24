@@ -8,6 +8,7 @@ export type HuddleDestination = Readonly<{
   channelId: string;
   channelName: string;
   root?: string;
+  threadTranscripts?: boolean;
 }>;
 export type HuddleUpdate =
   | { type: "connected"; room: string; participants: string[] }
@@ -40,7 +41,12 @@ export const nativeHuddles: HuddleBridge = {
         viewer: destination.viewer,
         parent: destination.channelId,
         room: room ?? null,
-        origin: room ? null : { root: destination.root ?? null },
+        origin: room
+          ? null
+          : {
+              root: destination.root ?? null,
+              card: destination.threadTranscripts ?? false,
+            },
         agent: agent ?? null,
       },
       updates,

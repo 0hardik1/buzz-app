@@ -92,6 +92,19 @@ export const apply: PluginModule["apply"] = (ctx) => {
     component: (props) => (
       <HuddleCard
         {...props}
+        openThread={
+          props.message.huddle?.threaded && !props.message.threadRootId
+            ? () => {
+                const { channelId, id } = props.message;
+                const query = new URLSearchParams({
+                  channel: channelId,
+                  id,
+                  thread: id,
+                });
+                return props.open(`buzz://message?${query}`);
+              }
+            : undefined
+        }
         open={
           props.canOpen(
             huddleTarget(

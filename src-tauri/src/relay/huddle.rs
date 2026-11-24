@@ -72,6 +72,8 @@ pub(crate) struct Call {
 #[serde(deny_unknown_fields)]
 struct TranscriptOrigin {
     root: Option<String>,
+    #[serde(default)]
+    card: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -156,9 +158,19 @@ fn lifecycle(kind: u16, parent: &str, room: &str) -> EventTemplate {
         json!({"ephemeral_channel_id": room}).to_string(),
     )
 }
-fn create(room: &str, parent: &str, origin: Option<&TranscriptOrigin>) -> EventTemplate {
+fn create(
+    room: &str,
+    parent: &str,
+    origin: Option<&TranscriptOrigin>,
+    card_id: Option<&str>,
+) -> EventTemplate {
     let mut about = format!("Buzz Huddle (buzz.huddles/v1)\nparent:{parent}");
-    if let Some(origin) = origin {
+    if let Some(card_id) = card_id {
+        let root = origin
+            .and_then(|origin| origin.root.as_deref())
+            .unwrap_or(card_id);
+        about.push_str(&format!("\ntranscripts:card:{root}:{card_id}"));
+    } else if let Some(origin) = origin {
         match &origin.root {
             Some(root) => about.push_str(&format!("\ntranscripts:thread:{root}")),
             None => about.push_str("\ntranscripts:channel"),
@@ -202,6 +214,17 @@ async fn publish(
         _ => "update the Huddle",
     };
     let signed = host.sign(event).await?;
+    publish_signed(host, fi, community, signed, viewer, operation).await
+}
+
+async fn publish_signed(
+    host: &IdentityHost,
+    fi: &FederatedIdentity,
+    community: &str,
+    signed: Value,
+    viewer: &str,
+    operation: &str,
+) -> Result<()> {
     if signed["pubkey"] != viewer {
         return Err("Your identity changed. Reopen Huddles.".into());
     }
@@ -508,10 +531,28 @@ async fn run(
     let mut advertised = false;
     let result = async {
         if creating {
+            let card = if let Some(origin) = call.origin.as_ref().filter(|origin| origin.card) {
+                let mut tags = vec![
+                    vec!["h".into(), call.parent.clone()],
+                    vec!["buzz:huddle-card".into(), room.clone()],
+                ];
+                if let Some(root) = &origin.root {
+                    tags.push(vec!["e".into(), root.clone(), String::new(), "reply".into()]);
+                }
+                Some(host.sign(template(9, tags, "Huddle started".into())).await?)
+            } else {
+                None
+            };
+            let card_id = card.as_ref().and_then(|card| card["id"].as_str()).map(str::to_owned);
+            check_cancelled(&stop, &touched)?;
             attempted_create = true;
             // Do not cancel an in-flight publication: its outcome may be uncertain.
-            publish(host, fi, &call.community, create(&room, &call.parent, call.origin.as_ref()), &call.viewer).await?;
+            publish(host, fi, &call.community, create(&room, &call.parent, call.origin.as_ref(), card_id.as_deref()), &call.viewer).await?;
             check_cancelled(&stop, &touched)?;
+            if let Some(card) = card {
+                publish_signed(host, fi, &call.community, card, &call.viewer, "post the Huddle card").await?;
+                check_cancelled(&stop, &touched)?;
+            }
             // Once the advisory might be visible, another person can join. Never
             // archive that shared room on our own failed/cancelled connection.
             advertised = true;
@@ -523,6 +564,7 @@ async fn run(
                     "ephemeral_channel_id": room,
                     "transcripts_in_origin": true,
                     "thread_root": origin.root,
+                    "card_id": card_id,
                 }).to_string();
             }
             publish(host, fi, &call.community, start, &call.viewer).await?;
@@ -894,7 +936,7 @@ mod tests {
     fn huddle_templates_match_existing_protocol() {
         let room = uuid::Uuid::new_v4().to_string();
         let parent = uuid::Uuid::new_v4().to_string();
-        let e = create(&room, &parent, None);
+        let e = create(&room, &parent, None, None);
         assert_eq!(e.kind, 9007);
         assert!(super::super::channel_writes::creation(&e));
         assert_eq!(e.tags[5], ["ttl", "3600"]);

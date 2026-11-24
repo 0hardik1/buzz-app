@@ -1249,13 +1249,19 @@ describe("explicit last-human hangup", () => {
   });
 });
 
-it.each([undefined, "a".repeat(64)])(
-  "rejoins the verified transcript destination %s and posts one local utterance",
-  async (root) => {
+it.each([
+  [undefined, undefined],
+  ["a".repeat(64), undefined],
+  ["a".repeat(64), "b".repeat(64)],
+  ["b".repeat(64), "b".repeat(64)],
+])(
+  "rejoins transcript thread %s with reply parent %s and posts one local utterance",
+  async (root, parentId) => {
     const room = "00000000-0000-4000-8000-000000000002";
     const transcript = {
       channelId: destination.channelId,
       ...(root && { root }),
+      ...(parentId && { parentId }),
     };
     const h = harness([
       {
@@ -1300,6 +1306,7 @@ it.each([undefined, "a".repeat(64)])(
           destination.channelId,
           root,
           "spoken words",
+          ...(parentId ? [parentId] : []),
         ),
       );
       expect(h.transcribe).toHaveBeenCalledTimes(1);

@@ -165,7 +165,16 @@ export function createHuddleVoices(
             void profiles.ensure(missing, "background").catch(() => {});
         };
         loadNames();
-        const conversation = transcriptDestination ?? { channelId: room };
+        const conversation = transcriptDestination
+          ? {
+              channelId: transcriptDestination.channelId,
+              ...(transcriptDestination.root !==
+                transcriptDestination.parentId &&
+                transcriptDestination.root && {
+                  root: transcriptDestination.root,
+                }),
+            }
+          : { channelId: room };
         const opened = await voice({
           agent,
           conversation,
@@ -179,7 +188,9 @@ export function createHuddleVoices(
                   event.kind !== 9 ||
                   event.pubkey === agent.pubkey ||
                   tag(event, "h") !== conversation.channelId ||
-                  threadReference(event)?.rootId !== conversation.root ||
+                  (threadReference(event)?.rootId !== conversation.root &&
+                    threadReference(event)?.rootId !==
+                      transcriptDestination?.root) ||
                   tag(event, MESSAGE_SOURCE_TAG) !== "typed" ||
                   !event.content.trim() ||
                   seen.has(event.id)

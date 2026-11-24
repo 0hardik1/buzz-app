@@ -113,6 +113,7 @@ export async function endLastHumanHuddle(
       content: JSON.stringify({
         ephemeral_channel_id: room,
         ...(inline && { transcripts_in_origin: true }),
+        ...(inline?.parentId && { card_id: inline.parentId }),
       }),
     },
     undefined,

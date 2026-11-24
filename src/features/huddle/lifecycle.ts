@@ -12,6 +12,16 @@ export function huddleRoomMetadata(description: string | undefined) {
   if (origin === undefined) return { parent };
   if (origin === "transcripts:channel")
     return { parent, transcriptDestination: { channelId: parent } };
+  const card = /^transcripts:card:([0-9a-f]{64}):([0-9a-f]{64})$/.exec(origin);
+  if (card?.[1] && card[2])
+    return {
+      parent,
+      transcriptDestination: {
+        channelId: parent,
+        root: card[1],
+        parentId: card[2],
+      },
+    };
   const root = /^transcripts:thread:([0-9a-f]{64})$/.exec(origin)?.[1];
   if (root)
     return { parent, transcriptDestination: { channelId: parent, root } };
@@ -26,10 +36,16 @@ export function huddleLifecycleBody(event: Pick<EventData, "content">) {
       ephemeral_channel_id?: unknown;
       transcripts_in_origin?: unknown;
       thread_root?: unknown;
+      card_id?: unknown;
     } | null;
   } catch {
     return undefined;
   }
+}
+export function huddleCardRoom(event: Pick<EventData, "kind" | "tags">) {
+  if (event.kind !== 9) return;
+  const room = event.tags.find(([key]) => key === "buzz:huddle-card")?.[1];
+  return room && uuid.test(room) ? room : undefined;
 }
 export function huddleRoom(event: Pick<EventData, "content">) {
   const id = huddleLifecycleBody(event)?.ephemeral_channel_id;

@@ -7,7 +7,11 @@ it("updates one transcript during speech and gives the final edit a newer relay 
   try {
     const events: (AgentEventTemplate & { created_at: number })[] = [];
     const transcript = streamVoiceTranscript(
-      { channelId: "conversation" },
+      {
+        channelId: "conversation",
+        root: "a".repeat(64),
+        parentId: "b".repeat(64),
+      },
       new AbortController().signal,
       () => true,
       async (event) => {
@@ -33,6 +37,8 @@ it("updates one transcript during speech and gives the final edit a newer relay 
         tags: [
           ["h", "conversation"],
           ["buzz:message-source", "huddle-transcript"],
+          ["e", "a".repeat(64), "", "root"],
+          ["e", "b".repeat(64), "", "reply"],
         ],
         content: "One",
         created_at: 1,

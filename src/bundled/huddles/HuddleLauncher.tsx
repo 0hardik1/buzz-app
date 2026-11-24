@@ -132,8 +132,7 @@ export function HuddleLauncher(props: Props) {
     call.destination?.scope === context.scope &&
     call.destination.viewer === context.viewer &&
     call.destination.channelId === context.channelId &&
-    (call.transcriptDestination?.root ?? call.destination.root) ===
-      context.root;
+    call.destination.root === context.root;
   // Load archive evidence so an archived agent is never offered or invited.
   useAgentChoices(connection.session, false, true);
   const voiceAgent =

@@ -1,3 +1,4 @@
+import { threadReplyTags } from "../relay/thread-reference";
 import { MESSAGE_SOURCE_TAG } from "../relay/contracts";
 import { unconfirmedAgentEvent, type AgentEventTemplate } from "./native";
 
@@ -13,7 +14,11 @@ type Draft = {
 
 /** A spoken line keeps the same original message through its final revision. */
 export function streamVoiceTranscript(
-  destination: Readonly<{ channelId: string; root?: string }>,
+  destination: Readonly<{
+    channelId: string;
+    root?: string;
+    parentId?: string;
+  }>,
   signal: AbortSignal,
   enabled: () => boolean,
   publish: (
@@ -28,7 +33,7 @@ export function streamVoiceTranscript(
       tags: [
         channelTag,
         [MESSAGE_SOURCE_TAG, "huddle-transcript"],
-        ...(destination.root ? [["e", destination.root, "", "reply"]] : []),
+        ...threadReplyTags(destination.root, destination.parentId),
       ],
     });
   let draft: Draft | undefined;
