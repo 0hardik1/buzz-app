@@ -653,15 +653,13 @@ export function collapseHuddleCards(
     const start = starts.get(key(row));
     return start?.authorId === row.authorId && start.createdAt <= row.createdAt;
   });
-  if (!starts.size)
-    return authorized.filter((row) => !row.huddle?.inlineTranscripts);
+  if (!starts.size) return authorized;
   const ends = new Map<string, number>();
   for (const row of authorized) {
     if (row.huddle?.state === "ended")
       ends.set(key(row), Math.max(ends.get(key(row)) ?? 0, row.createdAt));
   }
   return authorized.flatMap((row) => {
-    if (row.huddle?.inlineTranscripts) return [];
     if (row.huddle?.state === "ended" && starts.has(key(row))) return [];
     if (row.huddle?.state === "started" && starts.get(key(row)) !== row)
       return [];

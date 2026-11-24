@@ -2526,18 +2526,15 @@ it.each([
         });
         if (kind === 48100) startId = event.id;
         receive([event]);
-        expect(channels.window("parent").rows).toEqual(
-          inline
-            ? []
-            : [
-                expect.objectContaining({
-                  id: startId ?? event.id,
-                  huddle: expect.objectContaining({
-                    state: startId ? "started" : "ended",
-                  }),
-                }),
-              ],
-        );
+        expect(channels.window("parent").rows).toEqual([
+          expect.objectContaining({
+            id: startId ?? event.id,
+            huddle: expect.objectContaining({
+              state: startId ? "started" : "ended",
+              ...(inline && { inlineTranscripts: true }),
+            }),
+          }),
+        ]);
       }
     } finally {
       owner.dispose();
