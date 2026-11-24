@@ -74,6 +74,12 @@ function Fixture() {
             authorId: owner.session.viewer,
             content: "Second thread title",
             threadTitle: true,
+            reactions: [
+              {
+                content: "🎉",
+                events: [{ id: "3".repeat(64), authorId: agent }],
+              },
+            ],
           },
         ]
       : relayed !== null

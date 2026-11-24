@@ -40,6 +40,29 @@ test("a thread title reads as one line that opens its thread", async ({
     await expect(
       history.getByRole("button", { name: "View thread: 4 replies" }),
     ).toBeVisible();
+    // A title's reactions sit inside its fill, which grows to hold them.
+    const second = history.getByRole("button", {
+      name: /^Thread by .*: Second thread title/,
+    });
+    await expect
+      .poll(() =>
+        second.evaluate((button) => {
+          const entry = button.parentElement.parentElement;
+          const reactions = entry
+            .querySelector("[data-message-reactions]")
+            ?.getBoundingClientRect();
+          const fill = entry.getBoundingClientRect();
+          return (
+            !!reactions &&
+            getComputedStyle(entry).backgroundColor !== "rgba(0, 0, 0, 0)" &&
+            getComputedStyle(button.parentElement).backgroundColor ===
+              "rgba(0, 0, 0, 0)" &&
+            reactions.top > button.getBoundingClientRect().bottom - 1 &&
+            reactions.bottom <= fill.bottom
+          );
+        }),
+      )
+      .toBe(true);
     // Hovering the line shows its Reply toolbar, as a full message's does.
     await line.hover();
     await expect(

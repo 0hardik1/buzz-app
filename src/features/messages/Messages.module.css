@@ -4476,9 +4476,24 @@ html[data-keyboard-navigation]
   inline-size: var(--space-4);
   block-size: var(--space-4);
 }
-/* Reactions and the work the title started sit under its text. */
+/* Reactions and the work the title started sit under its text, inside the
+   line's fill: the entry takes the fill from its header and grows to hold
+   them. A jump highlight still shows through. */
 .threadTitleBelow {
   padding: 0 var(--space-2) var(--space-1) var(--relayed-text-start);
+}
+.relayedRow[data-thread-title]
+  > .relayedEntry:has(> .threadTitleBelow)
+  > .relayedHeader {
+  background: none;
+}
+.relayedRow[data-thread-title]
+  > .relayedEntry:has(> .threadTitleBelow):not(.messageHighlight) {
+  background: var(--affordance-subtle);
+}
+.relayedRow[data-thread-title]
+  > .relayedEntry:has(> .threadTitleBelow):has(> .relayedHeader:hover) {
+  background: var(--affordance-subtle-hover);
 }
 /* The line is one row tall, so its hover toolbar sits above it, as a
    continuation message's does. */
