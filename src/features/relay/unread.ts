@@ -21,6 +21,7 @@ import { markMessage } from "./read-state-retention";
 import { LIVE_RESUME_LAG } from "./live";
 import type { Priority, RelayReader } from "./reader";
 import { foldMessages, deletionApplies, messageAuthor } from "./fold";
+import { attachmentSummary } from "./attachment-summary";
 import { eventMs } from "./message-order";
 import { threadReference } from "./thread-reference";
 import {
@@ -332,20 +333,10 @@ const eventBytes = (event: RelayEvent) =>
 const noMentions = Object.freeze({ content: "", mentions: Object.freeze([]) });
 /** A row's preview text: its body, or a plain description of its attachments
  * when attachment presentation left no text, so the row is never blank. */
-const previewText = (message: ChannelMessage) => {
-  if (message.content.trim() || !message.attachments.length)
-    return message.content;
-  const count = message.attachments.length;
-  const [first] = message.attachments;
-  const kind = message.attachments.every((item) => item.kind === first?.kind)
-    ? first?.kind
-    : undefined;
-  const noun =
-    kind === "image" ? "image" : kind === "video" ? "video" : "attachment";
-  return count === 1
-    ? `${noun[0]?.toUpperCase()}${noun.slice(1)}`
-    : `${count} ${noun}s`;
-};
+const previewText = (message: ChannelMessage) =>
+  message.content.trim()
+    ? message.content
+    : attachmentSummary(message.attachments) || message.content;
 
 /** Rendered message order: effective ms, then event id. */
 const order = (a: RelayEvent, b: RelayEvent) =>
