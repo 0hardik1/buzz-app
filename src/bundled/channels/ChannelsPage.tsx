@@ -47,7 +47,13 @@ import {
   setReplyTarget,
   threadDraftKey,
 } from "../../features/messages/reply-target";
-import { composesIn, type InlineHost, placeIn } from "./placement";
+import {
+  composesIn,
+  type InlineHost,
+  openedFromSide,
+  openFromTab,
+  placeIn,
+} from "./placement";
 import type { Seen } from "../../features/seen/service";
 import {
   type ConversationTab,
@@ -1598,7 +1604,7 @@ function ChannelWorkspace({
     continuingVisit,
     navigationSignal: navigation?.signal,
     isLive: () => !destination.current.navigation?.signal.aborted,
-    openLink: (url) => openLink(url, { fromThread: true }),
+    openLink: (url, pane) => openLink(url, { fromThread: true, pane }),
     // A Solo conversation has no channel menu; its history takes focus instead.
     fallbackFocus: solo ? historyContainer : settingsTrigger,
     openMembers: () => setMembersOpen(true),
@@ -1739,11 +1745,13 @@ function ChannelWorkspace({
     if (draft || composingMessage) open(undefined);
     // A thread opened by its address, as from a link to it or the sidebar,
     // reads inline over this conversation as one opened from its row does,
-    // unless a tab already shows it; Open in channel does too. The visit
-    // becomes that conversation with the thread inline; the message it named,
-    // if a reply, is not singled out in the thread. Only a known root goes inline: the
-    // timeline's, or the address's hint. A bare link to a message outside
-    // the timeline still opens its tab, which reads it or says it's gone.
+    // unless a tab already shows it or the visit began in a side-pane tab,
+    // which opens the thread's tab; Open in channel reads it inline too. The
+    // visit becomes that conversation with the thread inline; the message it
+    // named, if a reply, is not singled out in the thread. Only a known root
+    // goes inline: the timeline's, or the address's hint. A bare link to a
+    // message outside the timeline still opens its tab, which reads it or
+    // says it's gone.
     const routedTarget = navigation.target;
     if (
       routedThread &&
@@ -1756,7 +1764,10 @@ function ChannelWorkspace({
       placeIn(
         { kind: "thread" },
         inlineHost.current,
-        { channelId: routedThread.channelId },
+        {
+          channelId: routedThread.channelId,
+          fromSide: openedFromSide(navigator, navigation.entryId),
+        },
         routingTabs.current.some(
           (tab) =>
             tab.kind === "thread" &&
@@ -1909,6 +1920,7 @@ function ChannelWorkspace({
     composingMessage,
     requestedMessage,
     navigation,
+    navigator,
     requestedChannel,
     open,
     handoff?.activityThread,
@@ -2313,11 +2325,14 @@ function ChannelWorkspace({
       url: string,
       {
         fromThread = false,
+        pane,
         returnFocus,
         rootId,
         view,
       }: {
         fromThread?: boolean;
+        /** The pane of the tab the link was chosen in, when it was in one. */
+        pane?: "main" | "side" | undefined;
         returnFocus?: HTMLElement | undefined;
         rootId?: string;
         /** The view of the message the link is in, when it is in one. */
@@ -2407,7 +2422,7 @@ function ChannelWorkspace({
                 : null;
           }
           if (!opensAnotherChannel) open(undefined);
-          void navigator.open(target);
+          openFromTab(navigator, target, pane);
           return true;
         }
       }
