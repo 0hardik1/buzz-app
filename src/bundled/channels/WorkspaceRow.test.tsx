@@ -8,6 +8,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { useContext, useState } from "react";
+import { createPortal } from "react-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ReadingCovers } from "../../features/messages/use-reading";
 import { asideLayout, WorkspaceRow } from "./WorkspaceRow";
@@ -54,31 +55,56 @@ function Covers() {
 function Page({
   onOpenChange,
   onFloatingChange,
+  arrives = false,
 }: {
   onOpenChange?: (open: boolean) => void;
   onFloatingChange?: (floating: boolean) => void;
+  /** The aside arrives after the row first measures. */
+  arrives?: boolean;
 }) {
   const [open, setOpen] = useState(true);
+  const [present, setPresent] = useState(!arrives);
   return (
     <>
       <button type="button" onClick={() => setOpen(!open)}>
         Plan
       </button>
+      <button type="button" onClick={() => setPresent(true)}>
+        Add plan
+      </button>
       <WorkspaceRow
         aside={
-          <aside aria-label="Plan">
-            <button type="button">Step</button>
-          </aside>
+          present ? (
+            <aside aria-label="Plan">
+              <button type="button">Step</button>
+              <input
+                aria-label="Step name"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") event.preventDefault();
+                }}
+              />
+              {createPortal(
+                <button type="button">Portaled</button>,
+                document.body,
+              )}
+            </aside>
+          ) : undefined
         }
         width={undefined}
         open={open}
-        onOpenChange={(next) => {
-          onOpenChange?.(next);
-          setOpen(next);
-        }}
+        // As a plugin passes it, with its aside.
+        onOpenChange={
+          present
+            ? (next) => {
+                onOpenChange?.(next);
+                setOpen(next);
+              }
+            : undefined
+        }
         onFloatingChange={onFloatingChange}
       >
         <div data-message-scroller>History</div>
+        <button type="button">Composer</button>
         <Covers />
       </WorkspaceRow>
     </>
@@ -192,4 +218,43 @@ it("a floating aside takes focus, covers reading, and closes alone on Escape or 
   fireEvent.pointerDown(screen.getByText("History"));
   expect(plan()).not.toBeVisible();
   expect(changes).toEqual([false, false, false]);
+});
+
+it("narrowing under an open aside closes it without taking focus", () => {
+  render(<Page />);
+  const composer = screen.getByRole("button", { name: "Composer" });
+  composer.focus();
+  resize(800);
+  expect(plan()).not.toBeVisible();
+  expect(composer).toHaveFocus();
+});
+
+it("an aside that arrives in a narrow row starts closed", () => {
+  width = 800;
+  const changes: boolean[] = [];
+  render(<Page arrives onOpenChange={(open) => changes.push(open)} />);
+  const composer = screen.getByRole("button", { name: "Composer" });
+  composer.focus();
+  fireEvent.click(screen.getByRole("button", { name: "Add plan" }));
+  expect(changes).toEqual([false]);
+  expect(plan()).not.toBeVisible();
+});
+
+it("the aside's own controls and popovers take Escape first", () => {
+  width = 800;
+  render(<Page />);
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  expect(plan()).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Step name" }), {
+    key: "Escape",
+  });
+  expect(plan()).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Portaled" }), {
+    key: "Escape",
+  });
+  expect(plan()).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Step" }), {
+    key: "Escape",
+  });
+  expect(plan()).not.toBeVisible();
 });

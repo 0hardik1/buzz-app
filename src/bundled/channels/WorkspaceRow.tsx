@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import type { WorkspaceAsideWidth } from "../../features/conversation/contracts";
@@ -84,7 +85,9 @@ export function WorkspaceRow({
   }, []);
 
   // Narrowing to a floating aside closes it; widening again restores the
-  // docked state. An aside that first measures narrow narrows from docked.
+  // docked state. An aside that first measures narrow, or arrives in a narrow
+  // row, narrows from docked.
+  const placedDocked = aside == null || docked;
   const dockedOpen = useRef(open);
   const transition = useEffectEvent((docked: boolean) => {
     if (!docked) {
@@ -94,10 +97,19 @@ export function WorkspaceRow({
   });
   const wasDocked = useRef(true);
   useLayoutEffect(() => {
-    if (wasDocked.current === docked) return;
-    wasDocked.current = docked;
-    transition(docked);
-  }, [docked]);
+    if (wasDocked.current === placedDocked) return;
+    wasDocked.current = placedDocked;
+    transition(placedDocked);
+  }, [placedDocked]);
+
+  // Only a page opening the floating aside moves focus into it, not a row
+  // narrowing under an open aside it is about to close.
+  const wasOpen = useRef(open);
+  const opened = useRef(false);
+  useLayoutEffect(() => {
+    opened.current = open && !wasOpen.current;
+    wasOpen.current = open;
+  });
 
   const measured = layout !== undefined;
   const reportFloating = useEffectEvent((floating: boolean) =>
@@ -153,34 +165,42 @@ export function WorkspaceRow({
   }, [shown, floating]);
 
   // A nested surface: Escape and a press elsewhere in the row close only it.
+  const previous = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const element = box.current;
     const container = row.current;
     if (!floating || !element || !container) return;
-    const previous =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    element.focus({ preventScroll: true });
-    const keydown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      event.stopPropagation();
-      change(false);
-      previous?.focus({ preventScroll: true });
-    };
+    previous.current = null;
+    if (opened.current) {
+      previous.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      element.focus({ preventScroll: true });
+    }
     const pointerdown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (container.contains(target) && !element.contains(target))
         change(false);
     };
-    element.addEventListener("keydown", keydown);
     document.addEventListener("pointerdown", pointerdown, true);
-    return () => {
-      element.removeEventListener("keydown", keydown);
-      document.removeEventListener("pointerdown", pointerdown, true);
-    };
+    return () => document.removeEventListener("pointerdown", pointerdown, true);
   }, [floating]);
+  // After the aside's own controls, which may take Escape first; a portaled
+  // popover's Escape is its own.
+  const keydown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key !== "Escape" ||
+      event.defaultPrevented ||
+      !event.currentTarget.contains(event.target as Node)
+    )
+      return;
+    event.preventDefault();
+    event.nativeEvent.stopPropagation();
+    setInner(false);
+    onOpenChange?.(false);
+    previous.current?.focus({ preventScroll: true });
+  };
 
   // Stable, so opening the overlay doesn't rerender the readers.
   const covers = useCallback(() => {
@@ -207,12 +227,14 @@ export function WorkspaceRow({
         <ReadingCovers value={covers}>{children}</ReadingCovers>
       </div>
       {aside != null && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: hears Escape from the aside's controls; the box takes no input of its own.
         <div
           ref={box}
           className={styles.workspaceAside}
           data-workspace-aside={docked ? "docked" : "floating"}
           hidden={!open}
           tabIndex={docked ? undefined : -1}
+          onKeyDown={floating ? keydown : undefined}
           style={{ ...geometry, inlineSize: asideWidth }}
         >
           {aside}
