@@ -14,6 +14,9 @@ import {
 import { ResizeHandle } from "./ResizeHandle";
 import styles from "./Panels.module.css";
 
+const DEFAULT_ROOT_FONT_SIZE = 16;
+type PrimarySizing = { defaultWidth: number; maxRatio: number };
+
 // The revision records which saved value an in-memory width replaced or
 // became, so a failed save survives notifications about other keys.
 function loadSplit(scope: string | undefined, key: string) {
@@ -44,9 +47,10 @@ export function usePanelSplit(
   name: string,
   defaultWidth?: number,
   min = 316,
-  primary?: { defaultWidth: number; maxRatio: number },
+  primary?: PrimarySizing,
+  mainMinRem?: number,
 ) {
-  const split = useSplit(scope, name, defaultWidth, min, primary);
+  const split = useSplit(scope, name, defaultWidth, min, primary, mainMinRem);
   const { ref } = split;
   useLayoutEffect(() => {
     ref.current?.toggleAttribute("data-panel-cards", true);
@@ -59,7 +63,8 @@ function useSplit(
   name: string,
   defaultWidth?: number,
   min = 316,
-  primary?: { defaultWidth: number; maxRatio: number },
+  primary?: PrimarySizing,
+  mainMinRem?: number,
 ) {
   const ref = useRef<HTMLDivElement>(null);
   const key = `panel-split:${name}`;
@@ -108,6 +113,7 @@ function useSplit(
         defaultWidth={defaultWidth}
         min={min}
         primary={primary}
+        mainMinRem={mainMinRem}
       />
     ),
   };
@@ -121,26 +127,62 @@ function PanelSplitHandle({
   defaultWidth,
   min,
   primary,
+  mainMinRem,
 }: {
   target: RefObject<HTMLDivElement | null>;
   preferred: number | undefined;
   setPreferred(width: number | undefined): void;
   defaultWidth: number | undefined;
   min: number;
-  primary: { defaultWidth: number; maxRatio: number } | undefined;
+  primary: PrimarySizing | undefined;
+  mainMinRem: number | undefined;
 }) {
   const [available, setAvailable] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [rootFontSize, setRootFontSize] = useState(DEFAULT_ROOT_FONT_SIZE);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const measure = () => setAvailable(element.clientWidth);
+    const root = element.ownerDocument.documentElement;
+    const measure = () => {
+      setAvailable(element.clientWidth);
+      if (mainMinRem === undefined) return;
+      // The borderless board fills the query container that supplies 100cqw.
+      setContentWidth(element.getBoundingClientRect().width);
+      const fontSize = getComputedStyle(root).fontSize;
+      const pixels = fontSize.endsWith("px")
+        ? Number.parseFloat(fontSize)
+        : NaN;
+      setRootFontSize(
+        Number.isFinite(pixels) && pixels > 0 ? pixels : DEFAULT_ROOT_FONT_SIZE,
+      );
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
-    return () => observer.disconnect();
-  }, [ref]);
-  const minimum = Math.max(min, available * (1 - (primary?.maxRatio ?? 1)));
-  const max = Math.max(minimum, available - 320);
+    const appearanceObserver =
+      mainMinRem === undefined ? undefined : new MutationObserver(measure);
+    appearanceObserver?.observe(root, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
+    return () => {
+      observer.disconnect();
+      appearanceObserver?.disconnect();
+    };
+  }, [ref, mainMinRem]);
+  const floor = Math.max(min, available * (1 - (primary?.maxRatio ?? 1)));
+  const reserve = mainMinRem === undefined ? 320 : mainMinRem * rootFontSize;
+  const reachable =
+    (mainMinRem === undefined ? available : contentWidth) - reserve;
+  const constrained =
+    mainMinRem !== undefined && available > 0 && reachable < floor;
+  const minimum = constrained ? Math.max(0, Math.round(reachable)) : floor;
+  const max = constrained
+    ? minimum
+    : mainMinRem !== undefined && available > 0
+      ? Math.floor(reachable)
+      : Math.max(minimum, reachable);
   const clamp = (width: number) => Math.min(max, Math.max(minimum, width));
   const width = clamp(
     preferred ??
@@ -178,8 +220,12 @@ export type PanelSplit = ReturnType<typeof usePanelSplit>;
  * keep their own region styling: they opt into floating cards by marking the
  * container `data-panel-cards` themselves.
  */
-export const usePluginPanelSplit: typeof usePanelSplit = (
-  scope,
-  name,
-  ...options
-) => useSplit(scope, `plugin:${name}`, ...options);
+export function usePluginPanelSplit(
+  scope: string | undefined,
+  name: string,
+  defaultWidth?: number,
+  min?: number,
+  primary?: PrimarySizing,
+) {
+  return useSplit(scope, `plugin:${name}`, defaultWidth, min, primary);
+}
