@@ -2473,11 +2473,13 @@ it("does not commit a roster read that lands after the list stopped being ready"
 });
 
 it.each([
-  [48100, 48103],
-  [48103, 48100],
+  [48100, 48103, false],
+  [48103, 48100, false],
+  [48100, 48103, true],
+  [48103, 48100, true],
 ])(
-  "keeps one Huddle card when live events arrive as %s then %s",
-  async (first, second) => {
+  "folds Huddle notices %s then %s with inline transcription %s",
+  async (first, second, inline) => {
     let receive!: (events: readonly import("./events").RelayEvent[]) => void;
     const owner = createRelaySession({
       ...scriptedTransport(viewer.pubkey, relay.pubkey).transport,
@@ -2516,18 +2518,26 @@ it.each([
           tags: [["h", "parent"]],
           content: JSON.stringify({
             ephemeral_channel_id: "00000000-0000-4000-8000-000000000002",
+            ...(inline && {
+              transcripts_in_origin: true,
+              thread_root: "b".repeat(64),
+            }),
           }),
         });
         if (kind === 48100) startId = event.id;
         receive([event]);
-        expect(channels.window("parent").rows).toEqual([
-          expect.objectContaining({
-            id: startId ?? event.id,
-            huddle: expect.objectContaining({
-              state: startId ? "started" : "ended",
-            }),
-          }),
-        ]);
+        expect(channels.window("parent").rows).toEqual(
+          inline
+            ? []
+            : [
+                expect.objectContaining({
+                  id: startId ?? event.id,
+                  huddle: expect.objectContaining({
+                    state: startId ? "started" : "ended",
+                  }),
+                }),
+              ],
+        );
       }
     } finally {
       owner.dispose();
