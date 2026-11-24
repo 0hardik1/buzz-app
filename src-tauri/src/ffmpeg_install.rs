@@ -102,21 +102,19 @@ async fn install_with_path(path: &OsStr, require_version8: bool, os: &str) -> Re
         ),
         _ => return Err("Automatic installation is unavailable on this device.".into()),
     };
-    let status = tokio::time::timeout(
-        Duration::from_secs(900),
-        command(crate::host_command::resolve_program(manager, path), path)
-            .args(args)
-            .status(),
-    )
-    .await
-    .map_err(|_| "Installation timed out. Try again.")?
-    .map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            missing
-        } else {
-            "Buzz could not start the package manager."
-        }
-    })?;
+    let mut installer = command(crate::host_command::resolve_program(manager, path), path);
+    #[cfg(test)]
+    installer.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    let status = tokio::time::timeout(Duration::from_secs(900), installer.args(args).status())
+        .await
+        .map_err(|_| "Installation timed out. Try again.")?
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                missing
+            } else {
+                "Buzz could not start the package manager."
+            }
+        })?;
     let installed = version(path).await;
     if installed.is_some_and(|v| v >= minimum) {
         return Ok(());

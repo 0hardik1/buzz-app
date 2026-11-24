@@ -179,10 +179,17 @@ jobs:
       - name: All Rust tests and doctests
         run: ./bin/cargo test --workspace --locked
       - name: Exercise FFmpeg recovery on the Linux host
+        id: ffmpeg_linux
         if: github.event_name == 'workflow_dispatch' && inputs.ffmpeg_acceptance
         run: |
           sudo apt-get install --no-install-recommends -y packagekit-tools
           ./bin/cargo test -p Buzz --lib --locked ffmpeg_install::tests::host_installation -- --ignored --nocapture
+      - name: Diagnose Linux FFmpeg recovery
+        if: failure() && steps.ffmpeg_linux.outcome == 'failure'
+        run: |
+          apt-cache policy ffmpeg
+          command -v ffmpeg && ffmpeg -version | head -1
+          sudo journalctl --unit=packagekit.service --boot --no-pager --lines=50
       - name: Bundled buzz CLI
         run: ./bin/node scripts/test-buzz-cli.mjs --prebuilt
       - name: FI Builderlab build and grant tests
