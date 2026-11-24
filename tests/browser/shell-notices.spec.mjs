@@ -104,9 +104,7 @@ async function returnedFocus(page) {
 }
 
 const visibleInSettings = {
-  // The stack starts below the header's controls, now the Settings close
-  // button's row, so it no longer covers that button.
-  closeUnderToast: false,
+  closeUnderToast: true,
   inSettings: true,
   ring: "solid 2px 2px",
   toastsOverRing: 0,
@@ -119,6 +117,9 @@ async function reachOverSettings(page, app) {
   const ask = question(page);
   await expect(ask).toBeVisible();
   await openSettings(page);
+  // The profile menu opens under the notice stack; park the pointer on
+  // Settings so hover doesn't fan the stack out.
+  await settingsDialog(page).hover({ position: { x: 16, y: 16 } });
   const close = settingsDialog(page).getByRole("button", {
     name: "Close Settings",
     exact: true,
@@ -133,10 +134,10 @@ async function reachOverSettings(page, app) {
   expect(noticeBox.x + noticeBox.width).toBeGreaterThan(
     closeBox.x + closeBox.width,
   );
-  // The notice stacks over Settings itself, clear of the close button's row.
-  const settingsBox = await settingsDialog(page).boundingBox();
-  expect(noticeBox.y).toBeGreaterThanOrEqual(settingsBox.y);
-  expect(noticeBox.y).toBeGreaterThanOrEqual(closeBox.y + closeBox.height);
+  expect(noticeBox.y).toBeLessThan(closeBox.y);
+  expect(noticeBox.y + noticeBox.height).toBeGreaterThan(
+    closeBox.y + closeBox.height,
+  );
   await page.keyboard.press("F6");
   await expect(card).toBeFocused();
   await expect(card).toHaveCSS("outline-style", "solid");

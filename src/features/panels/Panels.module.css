@@ -168,7 +168,7 @@ html[data-keyboard-input] .motion {
    rule lives beside `.resize` because an unlayered module rule outranks any
    rule in the design system's components layer. */
 [data-panel-cards] > * > .resize[data-panel-resize] {
-  inset-inline-start: calc(-1 * var(--space-1) / 2 - 1px);
+  inset-inline-start: calc(-1 * var(--space-1) / 2);
   translate: 0;
 }
 

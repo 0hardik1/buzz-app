@@ -164,8 +164,10 @@ test.describe("workspace heading resize", () => {
         await handle.press(width);
         const label = heading.getByText(title, { exact: true });
         // The Plugins card above can push this workspace below the fold, and
-        // hovering would scroll it into view; measure it where it will stay.
-        await heading.scrollIntoViewIfNeeded();
+        // hovering scrolls it into view (each engine to its own spot). Hover
+        // once to settle the scroll, then measure at rest from there.
+        await heading.hover();
+        await page.mouse.move(0, 0);
         const resting = await label.boundingBox();
         await heading.hover();
         await expect(arrow).toBeVisible();

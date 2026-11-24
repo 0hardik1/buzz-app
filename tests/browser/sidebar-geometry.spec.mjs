@@ -314,7 +314,7 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
             '[aria-label="Subscribed channels"] [data-sidebar-section]:not([data-sidebar-section="pages"])',
           );
           if (!firstSection) return undefined;
-          // Page rows live in the Plugins card; cards sit one panel gap (0.5rem) apart.
+          // Page rows live in the Plugins card; cards sit one card gap (0.25rem) apart.
           const card = row.closest("[data-sidebar-card]");
           if (!card) return undefined;
           const gap =
@@ -326,7 +326,7 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
           return Math.round((gap / rem) * 64) / 64;
         }),
       )
-      .toBe(0.5);
+      .toBe(0.25);
     await create.focus();
     await expect
       .poll(() => create.evaluate(controlsAgainstHeading))
